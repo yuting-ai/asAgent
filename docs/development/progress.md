@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 0 已启动，Python/uv 工程骨架与质量工具闭环已完成
-- 代码状态：已创建最小 `src/ragent` 包和 Core ID 类型，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型和不可变的用户可见 Message 模型，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-07-31
-- 当前目标：Core ID 类型已完成；下一独立任务是为用户可见 Message 明确验收样例和最小模型
+- 当前目标：用户可见 Message 模型已完成；下一独立任务是定义 `RunStatus` 状态枚举
 
 ## 2. 已完成
 
@@ -32,11 +32,12 @@
 - [x] 将项目物理目录从 `AsAgent` 重命名为 `Ragent`。
 - [x] 创建 Python 3.13 与 uv 最小项目骨架。
 - [x] 配置 pytest、pytest-asyncio、Ruff、strict mypy 和 `pydantic.mypy`，建立最小质量检查闭环。
-- [x] 创建 Core ID 类型：UserId、ConversationId、RunId、ToolCallId、EventId。
+- [x] 创建 Core ID 类型：UserId、ConversationId、RunId、ToolCallId、EventId、MessageId。
+- [x] 创建不可变的用户可见 `UserMessage` 和 `AssistantMessage` 模型。
 
 ## 3. 尚未开始
 
-- [ ] 实现 Message、RunEvent 和状态对象。
+- [ ] 实现 RunEvent 和状态对象。
 - [ ] 定义 Model、Repository、Tool 和 Event Protocol。
 - [ ] 实现 Fake Model。
 
@@ -67,8 +68,9 @@
 - [x] 配置测试、Lint、格式化和类型检查，并建立同步/异步测试约定。
 - [x] 创建 `src/ragent/core/`。
 - [ ] 创建顶层 `src/ragent/paths.py`，定义可显式构造的 `AppPaths`。
-- [x] 创建 ID 类型：UserId、ConversationId、RunId、ToolCallId、EventId。
-- [ ] 创建 Message、Run、RunStatus、RunEvent、ToolCall 数据对象；RunEvent 包含 `event_id` 和 `sequence`，RunStatus 包含明确的 `LIMIT_REACHED` 终态。
+- [x] 创建 ID 类型：UserId、ConversationId、RunId、ToolCallId、EventId、MessageId。
+- [x] 创建不可变的用户可见 `UserMessage` 和 `AssistantMessage` 数据对象。
+- [ ] 创建 Run、RunStatus、RunEvent、ToolCall 数据对象；RunEvent 包含 `event_id` 和 `sequence`，RunStatus 包含明确的 `LIMIT_REACHED` 终态。
 - [ ] 定义 `ModelProvider` Protocol。
 - [ ] 定义 Repository Protocol。
 - [ ] 定义 `Tool` 和 `EventPublisher` Protocol。
@@ -154,7 +156,9 @@
 - 创建 `.python-version`、`pyproject.toml`、`uv.lock` 和 `src/ragent`，完成 Python 3.13 与 uv 最小工程骨架。
 - 声明 Pydantic 运行时依赖和 pytest、pytest-asyncio、Ruff、mypy 开发依赖，配置统一测试、Lint、格式化和 strict 类型检查规则。
 - 创建 `tests/unit/test_package.py`，验证 `src` 包导入和 pytest-asyncio 函数级事件循环。
-- 创建 `core/ids.py` 和 ID 类型测试，使用 `NewType` 将五类字符串身份在静态检查中分离。
+- 创建 `core/ids.py` 和 ID 类型测试，使用 `NewType` 将六类字符串身份在静态检查中分离。
+- 新增 `MessageId`，并通过 DEC-024 明确它只提供 Message 稳定身份，不承担 Conversation 内排序。
+- 创建不可变的 `UserMessage` 和 `AssistantMessage` 数据对象及其单元测试；消息角色由类型表达，Message 不在此阶段关联 Run。
 
 ### 验证
 
@@ -168,10 +172,12 @@
 - 结果：通过；2 个测试通过，Ruff 与 strict mypy 无问题，锁文件和 diff 检查通过。
 - 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
 - 结果：通过；3 个测试通过，五种 ID 的运行时字符串语义和静态类型断言均已验证。
+- 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
+- 结果：通过；5 个测试通过，用户可见 Message 的字段保留与不可变性均已验证，Ruff、strict mypy、锁文件和 diff 检查无问题。
 
 ### 决策变化
 
-- 新增 DEC-022、DEC-023。
+- 新增 DEC-022、DEC-023、DEC-024。
 
 ### 风险或问题
 
@@ -179,4 +185,4 @@
 
 ### 下一步
 
-- 在下一个独立任务中先为 UserMessage 与 AssistantMessage 明确测试样例，再实现最小用户可见消息模型；本次不开始该任务。
+- 在下一个独立任务中为 `RunStatus` 定义状态集合和终态验收样例；本次不开始该任务。

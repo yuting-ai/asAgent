@@ -80,6 +80,7 @@ Ragent/
 ```text
 User
 └── Conversation
+    ├── Message
     └── Run
         └── ToolCall
 ```
@@ -88,6 +89,7 @@ User
 | --- | --- |
 | `user_id` | 用户身份，第一版固定为 `local-user` |
 | `conversation_id` | 对话历史和上下文边界 |
+| `message_id` | 一条用户可见 Message 的稳定身份，不承担排序职责 |
 | `run_id` | 单次 Agent 执行、取消和事件关联键 |
 | `tool_call_id` | 一次工具调用和结果配对键 |
 | `event_id` | 运行事件的唯一标识和去重键 |

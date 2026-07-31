@@ -163,6 +163,16 @@
 - 影响：产品、架构、路线、桌面和进度文档统一更新；未来代码目录使用 `src/ragent`，CLI 使用 `ragent`，macOS 用户数据目录使用 `~/Library/Application Support/Ragent/`。仓库物理目录已于 2026-07-31 重命名为 `/Users/yuting/Desktop/BityDev/Ragent`。
 - 替代方案：继续使用 AsAgent；当前不采用。
 
+### DEC-024：Message 使用独立的 MessageId
+
+- 日期：2026-07-31
+- 状态：已确认
+- 背景：Message 是需要长期持久化和通过历史接口返回的用户可见领域对象；现有核心 ID 模型未包含其稳定身份。
+- 决策：增加 `MessageId = NewType("MessageId", str)`；`UserMessage` 与 `AssistantMessage` 共用该 ID，并同时持有 `conversation_id`。MessageId 只标识“哪一条消息”，不负责 Conversation 内排序。
+- 原因：避免让 Core 依赖 SQLite 自增主键，也不依赖无法严格唯一或稳定排序的 `(conversation_id, created_at)`、列表位置或 `run_id`。两类 Message 属于同一实体集合，共用 MessageId 可保持 Repository、API 和数据库边界一致。
+- 影响：Core ID 模块、Message 数据对象、后续 SQLite `messages` 表和历史 API 均使用 `message_id`；Conversation 内排序将在阶段 3 Schema 设计中通过独立字段和约束确认。
+- 替代方案：SQLite 自增主键、`(conversation_id, created_at)` 复合身份、列表位置或复用 `run_id`；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：
