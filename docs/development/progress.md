@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 0 已启动，Python/uv 最小工程骨架已完成
-- 代码状态：已创建最小 `src/ragent` 包，尚未配置测试、Lint 和类型检查
+- 项目阶段：阶段 0 已启动，Python/uv 工程骨架与质量工具闭环已完成
+- 代码状态：已创建最小 `src/ragent` 包，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-07-31
-- 当前目标：Python 工程骨架已完成；下一独立任务是配置阶段 0 测试与代码质量工具
+- 当前目标：阶段 0 工具链已完成；下一独立任务是为核心领域 ID 明确验收样例并实现最小类型
 
 ## 2. 已完成
 
@@ -31,10 +31,10 @@
 - [x] 更新文档中的产品名、Python 包名、命令名和桌面资源名。
 - [x] 将项目物理目录从 `AsAgent` 重命名为 `Ragent`。
 - [x] 创建 Python 3.13 与 uv 最小项目骨架。
+- [x] 配置 pytest、pytest-asyncio、Ruff、strict mypy 和 `pydantic.mypy`，建立最小质量检查闭环。
 
 ## 3. 尚未开始
 
-- [ ] 配置测试、Lint 和类型检查。
 - [ ] 实现领域 ID、Message、RunEvent 和状态对象。
 - [ ] 定义 Model、Repository、Tool 和 Event Protocol。
 - [ ] 实现 Fake Model。
@@ -63,6 +63,7 @@
 - [x] 确认 pytest + pytest-asyncio + Ruff。
 - [x] 确认 strict mypy + `pydantic.mypy`。
 - [x] 创建 `pyproject.toml`。
+- [x] 配置测试、Lint、格式化和类型检查，并建立同步/异步测试约定。
 - [ ] 创建 `src/ragent/core/`。
 - [ ] 创建顶层 `src/ragent/paths.py`，定义可显式构造的 `AppPaths`。
 - [ ] 创建 ID 类型：UserId、ConversationId、RunId、ToolCallId、EventId。
@@ -150,6 +151,8 @@
 - 将项目名称由 AsAgent 更新为 Ragent，并同步未来包名、命令名和桌面资源名。
 - 将项目物理目录从 `AsAgent` 重命名为 `Ragent`，并同步决策与进度文档中的路径状态。
 - 创建 `.python-version`、`pyproject.toml`、`uv.lock` 和 `src/ragent`，完成 Python 3.13 与 uv 最小工程骨架。
+- 声明 Pydantic 运行时依赖和 pytest、pytest-asyncio、Ruff、mypy 开发依赖，配置统一测试、Lint、格式化和 strict 类型检查规则。
+- 创建 `tests/unit/test_package.py`，验证 `src` 包导入和 pytest-asyncio 函数级事件循环。
 
 ### 验证
 
@@ -159,6 +162,8 @@
 - 结果：通过；最新基线提交为 `cb99b48 chore: establish initial project baseline`。
 - 检查：运行 `uv lock --check`，验证锁文件与项目元数据一致。
 - 结果：通过；使用 CPython 3.13.14。
+- 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
+- 结果：通过；2 个测试通过，Ruff 与 strict mypy 无问题，锁文件和 diff 检查通过。
 
 ### 决策变化
 
@@ -170,4 +175,4 @@
 
 ### 下一步
 
-- 在下一个独立任务中配置阶段 0 测试与代码质量工具；本次不开始该任务。
+- 在下一个独立任务中先为 UserId、ConversationId、RunId、ToolCallId 和 EventId 明确测试样例，再实现最小领域类型；本次不开始该任务。
