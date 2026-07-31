@@ -4,9 +4,9 @@
 
 - 项目阶段：架构基线与一致性修正完成，等待阶段 0 正式启动
 - 代码状态：尚未初始化代码骨架
-- 项目路径：`/Users/yuting/Desktop/BityDev/AsAgent`
+- 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-07-31
-- 当前目标：Git 已初始化；先完成 Ragent 命名迁移，再创建 Python 工程
+- 当前目标：Ragent 命名和物理目录迁移已完成；下一独立任务是创建 Python 工程
 
 ## 2. 已完成
 
@@ -29,10 +29,10 @@
 - [x] 确认阶段 3 使用 SQLAlchemy 2.0 Core + aiosqlite + Alembic，不使用 ORM。
 - [x] 初始化 Git 仓库。
 - [x] 更新文档中的产品名、Python 包名、命令名和桌面资源名。
+- [x] 将项目物理目录从 `AsAgent` 重命名为 `Ragent`。
 
 ## 3. 尚未开始
 
-- [ ] 将项目物理目录从 `AsAgent` 重命名为 `Ragent`。
 - [ ] 创建 Python 项目和 `src/ragent` 目录。
 - [ ] 配置测试、Lint 和类型检查。
 - [ ] 实现领域 ID、Message、RunEvent 和状态对象。
@@ -132,7 +132,6 @@
 
 - 第一目标操作系统尚未正式确认。
 - 第一家真实模型服务尚未选择，但不会阻塞 Fake Model 阶段。
-- 项目物理目录仍名为 `AsAgent`；应在创建 Python 包和首次提交前改为 `Ragent`。
 
 ## 8. 重要提醒
 
@@ -149,11 +148,14 @@
 - 解决 SQLite 访问方式和迁移方案开放项。
 - 同步架构决策、开发路线和当前进度。
 - 将项目名称由 AsAgent 更新为 Ragent，并同步未来包名、命令名和桌面资源名。
+- 将项目物理目录从 `AsAgent` 重命名为 `Ragent`，并同步决策与进度文档中的路径状态。
 
 ### 验证
 
 - 检查：全文搜索旧的 Python 3.12、mypy/pyright 和 SQLite 待选表述。
 - 结果：通过；旧表述只保留在 DEC-022 的“替代方案”历史说明中。
+- 检查：确认当前工作目录为 `/Users/yuting/Desktop/BityDev/Ragent`，Git 分支为 `main`，且目录重命名前工作区为 clean。
+- 结果：通过；最新基线提交为 `cb99b48 chore: establish initial project baseline`。
 
 ### 决策变化
 
@@ -165,4 +167,4 @@
 
 ### 下一步
 
-- 将项目物理目录改为 `Ragent`，再创建 Python 3.13 与 uv 项目骨架。
+- 在下一个独立任务中创建 Python 3.13 与 uv 项目骨架；本次不开始该任务。

@@ -160,7 +160,7 @@
 - 背景：阶段 0 代码骨架和首次提交尚未创建，当前是统一产品名称、Python 包名、命令名和桌面资源名的最低迁移成本时点。
 - 决策：项目名称和桌面显示名使用 `Ragent`；Python 包名使用 `ragent`；后端命令和 Sidecar 名称使用 `ragent-backend`。DEC-005 中的旧名称 `AsAgent` 不再作为当前命名决策。
 - 原因：用户确认在正式创建代码结构前采用新名称，避免后续同时迁移 import、入口点、构建产物和用户数据目录。
-- 影响：产品、架构、路线、桌面和进度文档统一更新；未来代码目录使用 `src/ragent`，CLI 使用 `ragent`，macOS 用户数据目录使用 `~/Library/Application Support/Ragent/`。当前仓库物理目录仍为 `/Users/yuting/Desktop/BityDev/AsAgent`，目录重命名作为独立任务处理。
+- 影响：产品、架构、路线、桌面和进度文档统一更新；未来代码目录使用 `src/ragent`，CLI 使用 `ragent`，macOS 用户数据目录使用 `~/Library/Application Support/Ragent/`。仓库物理目录已于 2026-07-31 重命名为 `/Users/yuting/Desktop/BityDev/Ragent`。
 - 替代方案：继续使用 AsAgent；当前不采用。
 
 ## 2. 技术选型
@@ -238,9 +238,9 @@
 ### OPEN-005：源码项目与 CowAgent 的物理关系
 
 - 状态：已解决，不再是开放架构问题。
-- 当前决定：Ragent 当前仍位于独立目录 `/Users/yuting/Desktop/BityDev/AsAgent`，物理目录将在独立任务中重命名。
+- 当前决定：Ragent 位于独立目录 `/Users/yuting/Desktop/BityDev/Ragent`，物理目录已于 2026-07-31 完成重命名。
 - 已确认关系：CowAgent 仅按 DEC-017 作为经用户确认的只读参考，不建立代码依赖。
-- 后续动作：初始化独立 Git 仓库；该动作在 `progress.md` 跟踪。
+- 完成状态：独立 Git 仓库初始化和物理目录重命名均已完成；后续阶段 0 任务在 `progress.md` 跟踪。
 
 ### OPEN-006：SQLite 访问方式
 
