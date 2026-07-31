@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：架构基线与一致性修正完成，等待阶段 0 正式启动
-- 代码状态：尚未初始化代码骨架
+- 项目阶段：阶段 0 已启动，Python/uv 最小工程骨架已完成
+- 代码状态：已创建最小 `src/ragent` 包，尚未配置测试、Lint 和类型检查
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-07-31
-- 当前目标：Ragent 命名和物理目录迁移已完成；下一独立任务是创建 Python 工程
+- 当前目标：Python 工程骨架已完成；下一独立任务是配置阶段 0 测试与代码质量工具
 
 ## 2. 已完成
 
@@ -30,10 +30,10 @@
 - [x] 初始化 Git 仓库。
 - [x] 更新文档中的产品名、Python 包名、命令名和桌面资源名。
 - [x] 将项目物理目录从 `AsAgent` 重命名为 `Ragent`。
+- [x] 创建 Python 3.13 与 uv 最小项目骨架。
 
 ## 3. 尚未开始
 
-- [ ] 创建 Python 项目和 `src/ragent` 目录。
 - [ ] 配置测试、Lint 和类型检查。
 - [ ] 实现领域 ID、Message、RunEvent 和状态对象。
 - [ ] 定义 Model、Repository、Tool 和 Event Protocol。
@@ -62,7 +62,7 @@
 - [x] 确认 Pydantic 2 主要用于系统边界。
 - [x] 确认 pytest + pytest-asyncio + Ruff。
 - [x] 确认 strict mypy + `pydantic.mypy`。
-- [ ] 创建 `pyproject.toml`。
+- [x] 创建 `pyproject.toml`。
 - [ ] 创建 `src/ragent/core/`。
 - [ ] 创建顶层 `src/ragent/paths.py`，定义可显式构造的 `AppPaths`。
 - [ ] 创建 ID 类型：UserId、ConversationId、RunId、ToolCallId、EventId。
@@ -149,6 +149,7 @@
 - 同步架构决策、开发路线和当前进度。
 - 将项目名称由 AsAgent 更新为 Ragent，并同步未来包名、命令名和桌面资源名。
 - 将项目物理目录从 `AsAgent` 重命名为 `Ragent`，并同步决策与进度文档中的路径状态。
+- 创建 `.python-version`、`pyproject.toml`、`uv.lock` 和 `src/ragent`，完成 Python 3.13 与 uv 最小工程骨架。
 
 ### 验证
 
@@ -156,6 +157,8 @@
 - 结果：通过；旧表述只保留在 DEC-022 的“替代方案”历史说明中。
 - 检查：确认当前工作目录为 `/Users/yuting/Desktop/BityDev/Ragent`，Git 分支为 `main`，且目录重命名前工作区为 clean。
 - 结果：通过；最新基线提交为 `cb99b48 chore: establish initial project baseline`。
+- 检查：运行 `uv lock --check`，验证锁文件与项目元数据一致。
+- 结果：通过；使用 CPython 3.13.14。
 
 ### 决策变化
 
@@ -167,4 +170,4 @@
 
 ### 下一步
 
-- 在下一个独立任务中创建 Python 3.13 与 uv 项目骨架；本次不开始该任务。
+- 在下一个独立任务中配置阶段 0 测试与代码质量工具；本次不开始该任务。
