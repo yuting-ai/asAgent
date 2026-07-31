@@ -1,0 +1,395 @@
+# Ragent 桌面端、打包与 Docker 决策
+
+## 1. 总结
+
+此前架构讨论形成了双交付路线，Ragent 在此基础上进一步明确安全和一致性细节：
+
+```text
+同一套 Python Agent Core
+├── local-dev：本机 Python + 本机 Electron
+├── desktop-release：Electron + PyInstaller onedir Sidecar
+├── docker-test：干净环境测试和 CI
+└── docker-server：后期可选的无桌面部署
+```
+
+Docker 不是桌面客户端依赖。最终用户安装 Electron 应用后，不需要安装 Python 或 Docker。
+
+## 2. 已形成的 CowAgent 对比结论（历史记录）
+
+本节是此前讨论后写入 Ragent 的冻结结论，不代表后续任务可以自动读取 CowAgent。需要重新查看或验证 CowAgent 源码时，仍必须遵守 `AGENTS.md` 的确认规则。
+
+### 应借鉴
+
+- Electron Main 管理 Python 子进程生命周期。
+- Renderer 通过 HTTP + fetch-based SSE 使用 Python API。
+- 后端提供 Health Check，准备完成后再开放 UI。
+- 开发环境运行 Python 源码，发布环境运行打包后的可执行文件。
+- PyInstaller 使用 onedir，便于携带 Skills、模板和动态依赖。
+- electron-builder 通过 `extraResources` 携带 Sidecar。
+- 可执行资源与用户可写数据分离。
+- macOS、Windows 在各自平台 CI 构建。
+- 桌面依赖集与完整服务器依赖集分开。
+
+### 不直接照搬
+
+- 不使用固定端口并终止占用端口的未知进程。
+- 开发和发布不使用完全不同的数据路径规则。
+- Docker 默认不使用 `seccomp:unconfined`。
+- 第一版 Docker 镜像不安装所有语音、浏览器和渠道依赖。
+- 不让 Renderer 直接知道长期 Secret/API Key 或任意访问本地文件；短期 Backend Token 只保存在内存。
+
+## 3. Electron 三层边界
+
+### Main Process
+
+负责：
+
+- 单实例锁和窗口生命周期。
+- 启动、停止、重启 Python Backend。
+- 让 Backend 绑定动态端口，并解析 Backend 返回的结构化启动握手。
+- 生成一次启动周期的随机本地 Token，通过受控 Bootstrap 通道交给 Backend。
+- 轮询 Health Check。
+- 捕获 Backend stdout/stderr 并写入脱敏日志。
+- 原生文件/目录选择器。
+- 系统托盘、菜单和后续自动更新。
+- 应用退出时清理子进程。
+
+Main 不负责 Agent 业务。
+
+### Preload
+
+只暴露最小、类型明确的 IPC：
+
+```typescript
+interface DesktopBridge {
+  getBackendInfo(): Promise<BackendInfo>
+  restartBackend(): Promise<void>
+  selectFile(options?: FileDialogOptions): Promise<string | null>
+  selectDirectory(): Promise<string | null>
+  getAppVersion(): Promise<string>
+}
+```
+
+不提供通用 Shell、通用文件读写和无限制 IPC Relay。
+
+### Renderer
+
+负责：
+
+- Conversation 列表和聊天界面。
+- SSE 事件显示。
+- Tool 状态、错误、取消按钮。
+- 设置和 Memory/Skill/MCP 管理界面。
+
+安全默认值：
+
+```text
+contextIsolation = true
+nodeIntegration = false
+sandbox = true
+```
+
+Renderer 不启动 Python、不读取 API Key、不直接操作文件系统。
+
+额外安全要求：
+
+- 生产环境不加载远程代码，优先通过注册为 secure/standard 的自定义协议加载本地 Renderer 资源，而不是直接依赖 `file://`。
+- 配置严格 Content Security Policy；开发和发布分别维护允许的连接来源。
+- 禁止或限制页面导航、新窗口和不受信任的 `shell.openExternal`。
+- Main 对每个 IPC 调用校验 sender 和参数，不把通用 `ipcRenderer` 暴露给 Renderer。
+
+## 4. Python Backend 边界
+
+Backend 独立支持：
+
+```bash
+ragent serve \
+  --host 127.0.0.1 \
+  --port 0 \
+  --app-home '<path>' \
+  --workspace-dir '<path>'
+```
+
+`--app-home` 是 Electron 或 CLI 入口已经解析好的应用数据根目录；Backend 通过 `AppPaths.from_root(app_home)` 得到 config、data、log、cache、默认 workspace 和 temp。`--workspace-dir` 只在用户显式选择独立 Workspace 时覆盖默认值。
+
+Token 不作为命令行参数。首选由 Main 通过仅连接到该子进程的管道传递；如果第一版先使用环境变量，则使用专用变量名并确保它不会进入日志或崩溃报告。
+
+开发环境命令可为：
+
+```bash
+uv run ragent serve ...
+```
+
+发布环境命令为：
+
+```text
+resources/backend/ragent-backend/ragent-backend
+```
+
+Electron 只依赖 `BackendLauncher` 契约，不关心具体命令。
+
+## 5. 本地通信
+
+### HTTP
+
+用于：
+
+- Conversation CRUD。
+- 创建 Run。
+- 查询 Run。
+- 取消 Run。
+- 配置和状态。
+
+API 使用版本前缀：
+
+```text
+/api/v1/health
+/api/v1/conversations
+/api/v1/runs
+/api/v1/runs/{run_id}
+/api/v1/runs/{run_id}/cancel
+```
+
+### SSE
+
+用于单向流式事件。Renderer 使用 `fetch` 携带 Bearer Header 并解析 `text/event-stream`，不使用无法设置自定义 Authorization Header 的原生 EventSource：
+
+```text
+GET /api/v1/runs/{run_id}/events
+```
+
+事件统一包含：
+
+```json
+{
+  "event_id": "evt_...",
+  "sequence": 17,
+  "event_type": "tool.completed",
+  "conversation_id": "conv_...",
+  "run_id": "run_...",
+  "created_at": "...",
+  "data": {}
+}
+```
+
+后端在 SSE 帧中写入 `id: <sequence>`。Renderer 记录最后确认的 `sequence`，断线后通过 `Last-Event-ID` 或 `after_sequence` 重连；后端先从持久化事件补发，再继续发送实时事件。`event_id` 用于去重，`sequence` 用于排序和续传。
+
+### 动态端口
+
+```text
+Electron Main 使用 --port 0 启动 Backend
+→ Backend 自己绑定 127.0.0.1 的可用端口
+→ Backend 在 stdout 输出一次带固定前缀的 JSON ready 记录
+→ Main 从自己持有的子进程流读取并校验 PID、端口和协议版本
+→ Main 使用实际端口轮询 Health
+→ Preload 将 BackendInfo 传给 Renderer
+```
+
+Main 不采用“先探测空闲端口、释放后再让 Backend 绑定”的流程，避免检查与使用之间的竞争窗口；也不扫描和终止其他进程。
+
+### 本地认证
+
+每次 Electron 启动生成随机 Token。业务 API 要求：
+
+```text
+Authorization: Bearer <token>
+```
+
+Token 只保存在 Main、Backend 和当前 Renderer 的内存中，不进入命令行、URL、localStorage 或日志。Local API 校验 Origin Allowlist；生产 Renderer 与开发服务器分别配置明确 Origin。FastAPI 只为这些来源开放 CORS，并处理携带 Authorization Header 所需的 OPTIONS 预检，不使用 `*` 来源。
+
+Health Endpoint 只返回最少状态，可以免认证或使用单独 Bootstrap 机制。Backend 只监听 `127.0.0.1`。
+
+## 6. Backend 生命周期
+
+状态：
+
+```text
+stopped → starting → ready
+             └────→ error
+ready → stopping → stopped
+```
+
+启动：
+
+1. 确定 AppPaths。
+2. 生成 Token 并建立 Bootstrap 传递通道。
+3. 使用 `--port 0` Spawn Backend。
+4. 捕获日志，并等待带超时的结构化 ready 记录。
+5. 校验 ready 记录中的 PID、端口和协议版本。
+6. 在限定时间内轮询 Health。
+7. 成功后通知 Renderer。
+8. 失败则只终止自己持有的子进程，并展示明确错误和日志位置。
+
+停止：
+
+1. 优先调用受保护的 Shutdown Endpoint，并关闭 Bootstrap/控制管道。
+2. 等待数据库提交和事件清理。
+3. 超时后按平台对自己持有的子进程执行温和终止，再在第二个超时后强制终止；不假设 Windows 与 POSIX 的 SIGTERM 行为相同。
+4. 绝不根据端口终止不属于当前 Electron 的进程。
+
+需要保存 Spawn 后返回的 PID 和进程句柄。
+
+## 7. AppPaths
+
+业务代码不硬编码系统目录。统一对象：
+
+```python
+class AppPaths:
+    data_dir: Path
+    config_dir: Path
+    log_dir: Path
+    cache_dir: Path
+    workspace_dir: Path
+    temp_dir: Path
+```
+
+macOS 发布环境建议基于 Electron `app.getPath('userData')`：
+
+```text
+~/Library/Application Support/Ragent/
+├── config/
+│   └── mcp.json                 # 仅非敏感 MCP 配置
+├── data/
+├── logs/
+├── cache/
+├── workspace/
+└── temp/
+```
+
+MCP Token、密码和带凭据的环境变量进入系统 Keychain/Secret Store，不写入 `mcp.json`。SQLite 可以缓存 MCP Server 状态，但配置文件和数据库不能形成两个可独立修改的配置主来源。
+
+开发环境使用仓库内 `.local-data/`，但仍通过完全相同的 AppPaths 参数传入。测试使用临时目录。
+
+程序资源位于只读安装目录：
+
+```text
+Ragent.app/Contents/Resources/
+├── backend/
+└── app-assets/
+```
+
+升级程序不能覆盖用户数据。
+
+## 8. PyInstaller 决策
+
+### 使用 onedir
+
+原因：
+
+- Agent 需要携带模板、Skills 和可能的静态资源。
+- 动态 Import 容易检查和补充。
+- 启动无需每次解压巨大 onefile。
+- 崩溃时更容易定位缺失依赖。
+
+输出：
+
+```text
+desktop/build/dist/ragent-backend/
+├── ragent-backend
+└── _internal/
+```
+
+### 提前验证
+
+在 Local API 和 Electron 最小集成完成后，作为路线图阶段 7 的验收任务立即做第一次 PyInstaller Smoke Test，不等 MCP、Memory 和全部 UI 完成。阶段 12 再处理签名、公证、安装器、自动更新和正式发布。
+
+重点验证：
+
+- 动态模块是否被收集。
+- 模板和数据文件路径。
+- SQLite 和证书文件。
+- 子进程和信号处理。
+- 安装目录只读。
+- 运行时数据写入 AppPaths。
+
+### 平台构建
+
+- macOS ARM64 在 macOS ARM Runner 构建。
+- macOS x64 在相应 Runner 或经过验证的交叉流程构建。
+- Windows x64 在 Windows Runner 构建。
+- 不假设一个 PyInstaller 产物跨平台运行。
+
+## 9. Electron Builder
+
+通过 `extraResources` 包含 PyInstaller onedir：
+
+```json
+{
+  "from": "build/dist/ragent-backend",
+  "to": "backend/ragent-backend"
+}
+```
+
+正式阶段处理：
+
+- macOS DMG/ZIP。
+- Hardened Runtime、Entitlements、签名和公证。
+- Windows NSIS 和代码签名。
+- 自动更新。
+- 数据库迁移和回滚策略。
+
+第一目标平台尚待最终确认，当前开发优先保证 macOS 可用并保持跨平台路径抽象。
+
+## 10. Docker 定位
+
+### docker-test
+
+从阶段 0 开始维护，用于：
+
+- Python 干净环境安装。
+- pytest、lint 和类型检查。
+- SQLite 迁移测试。
+- MCP stdio 测试 Server。
+- CI。
+
+### docker-server
+
+后期可选，用于无 Electron 的后台运行：
+
+```text
+Browser/Web Client
+→ Docker Python Backend
+→ Volume Workspace/Data
+```
+
+它不是第一版产品主路径。
+
+### 不在 Docker 中开发 Electron
+
+Electron GUI、文件选择器、本地浏览器、用户 PATH、系统通知、签名和 Python Sidecar 都需要宿主机验证。Docker 不能替代桌面集成测试。
+
+## 11. 推荐开发命令形态
+
+具体命令在阶段 0 创建项目后确定，目标体验：
+
+```bash
+# Python 快速测试
+uv run pytest
+
+# 本地 Backend
+uv run ragent serve
+
+# Electron 开发
+cd desktop && npm run dev
+
+# Docker 干净环境测试
+docker compose -f docker/compose.test.yml run --rm tests
+
+# 构建 Sidecar
+./scripts/build-backend.sh
+
+# 打包桌面应用
+cd desktop && npm run dist:mac
+```
+
+## 12. 发布前桌面验收
+
+- 干净机器不安装 Python 也能启动。
+- 不安装 Docker 也能使用全部桌面核心功能。
+- 重复启动只保留一个应用实例。
+- Backend 崩溃有清晰恢复入口。
+- 退出后无僵尸进程。
+- 端口冲突不会终止其他应用。
+- 安装目录只读不影响运行。
+- 升级后配置、数据库、Workspace 和 Memory 保留。
+- 日志不包含 Secret。
