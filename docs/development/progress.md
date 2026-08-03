@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 0 已启动，Python/uv 工程骨架与质量工具闭环已完成
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的用户可见 Message 模型和 `RunStatus` 状态枚举，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的用户可见 Message 模型、`RunStatus` 状态枚举和最小 `Run` 数据对象，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
-- 当前日期：2026-07-31
-- 当前目标：`RunStatus` 状态枚举已完成；下一独立任务是定义最小 `Run` 数据对象
+- 当前日期：2026-08-03
+- 当前目标：最小 `Run` 数据对象已完成；下一独立任务是定义可显式构造的 `AppPaths`
 
 ## 2. 已完成
 
@@ -35,10 +35,11 @@
 - [x] 创建 Core ID 类型：UserId、ConversationId、RunId、ToolCallId、EventId、MessageId。
 - [x] 创建不可变的用户可见 `UserMessage` 和 `AssistantMessage` 模型。
 - [x] 创建 `RunStatus` 状态枚举，并明确 `LIMIT_REACHED` 为终态。
+- [x] 创建不可变的最小 `Run` 数据对象。
 
 ## 3. 尚未开始
 
-- [ ] 实现 Run、RunEvent 和 ToolCall 数据对象。
+- [ ] 实现 RunEvent 和 ToolCall 数据对象。
 - [ ] 定义 Model、Repository、Tool 和 Event Protocol。
 - [ ] 实现 Fake Model。
 
@@ -72,7 +73,8 @@
 - [x] 创建 ID 类型：UserId、ConversationId、RunId、ToolCallId、EventId、MessageId。
 - [x] 创建不可变的用户可见 `UserMessage` 和 `AssistantMessage` 数据对象。
 - [x] 创建 `RunStatus` 状态枚举；`LIMIT_REACHED` 是明确终态，不视为成功完成。
-- [ ] 创建 Run、RunEvent、ToolCall 数据对象；RunEvent 包含 `event_id` 和 `sequence`。
+- [x] 创建不可变的最小 `Run` 数据对象。
+- [ ] 创建 RunEvent、ToolCall 数据对象；RunEvent 包含 `event_id` 和 `sequence`。
 - [ ] 定义 `ModelProvider` Protocol。
 - [ ] 定义 Repository Protocol。
 - [ ] 定义 `Tool` 和 `EventPublisher` Protocol。
@@ -162,6 +164,7 @@
 - 新增 `MessageId`，并通过 DEC-024 明确它只提供 Message 稳定身份，不承担 Conversation 内排序。
 - 创建不可变的 `UserMessage` 和 `AssistantMessage` 数据对象及其单元测试；消息角色由类型表达，Message 不在此阶段关联 Run。
 - 创建 `RunStatus` 的字符串枚举和 `is_terminal` 查询；状态集合与 Agent Loop 状态机一致，`COMPLETED`、`CANCELLED`、`FAILED` 与 `LIMIT_REACHED` 为终态。
+- 创建不可变的最小 `Run` 数据对象，包含运行身份、所属 Conversation、状态和创建/更新时间；暂不关联具体 Message，也不实现状态迁移。
 
 ### 验证
 
@@ -179,6 +182,8 @@
 - 结果：通过；5 个测试通过，用户可见 Message 的字段保留与不可变性均已验证，Ruff、strict mypy、锁文件和 diff 检查无问题。
 - 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
 - 结果：通过；8 个测试通过，RunStatus 的稳定字符串值和终态判断均已验证，Ruff、strict mypy、锁文件和 diff 检查无问题。
+- 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
+- 结果：通过；10 个测试通过，Run 的字段保留与不可变性均已验证，Ruff、strict mypy、锁文件和 diff 检查无问题。
 
 ### 决策变化
 
@@ -190,4 +195,4 @@
 
 ### 下一步
 
-- 在下一个独立任务中为最小 `Run` 数据对象定义验收样例；本次不开始该任务。
+- 在下一个独立任务中为 `AppPaths` 的显式构造方式定义验收样例；本次不开始该任务。
