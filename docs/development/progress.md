@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 0 已启动，Python/uv 工程骨架与质量工具闭环已完成
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的用户可见 Message 模型、`RunStatus` 状态枚举、最小 `Run` 与 `RunEvent` 数据对象及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的用户可见 Message、Run、RunEvent 和 ToolCall 数据对象、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-03
-- 当前目标：最小 `RunEvent` 数据对象已完成；下一独立任务是定义最小 `ToolCall` 数据对象
+- 当前目标：最小 `ToolCall` 数据对象已完成；下一独立任务是定义 `ModelProvider` Protocol
 
 ## 2. 已完成
 
@@ -38,10 +38,10 @@
 - [x] 创建不可变的最小 `Run` 数据对象。
 - [x] 创建可显式构造的 `AppPaths` 路径契约。
 - [x] 创建不可变的最小 `RunEvent` 数据对象。
+- [x] 创建不可变的最小 `ToolCall` 数据对象。
 
 ## 3. 尚未开始
 
-- [ ] 实现 ToolCall 数据对象。
 - [ ] 定义 Model、Repository、Tool 和 Event Protocol。
 - [ ] 实现 Fake Model。
 
@@ -77,7 +77,7 @@
 - [x] 创建 `RunStatus` 状态枚举；`LIMIT_REACHED` 是明确终态，不视为成功完成。
 - [x] 创建不可变的最小 `Run` 数据对象。
 - [x] 创建不可变的最小 RunEvent 数据对象；包含 `event_id`、从 1 开始的 `sequence` 和只读顶层 `data` 快照。
-- [ ] 创建 ToolCall 数据对象。
+- [x] 创建不可变的最小 ToolCall 数据对象；包含调用参数快照，以及互斥的结果或错误。
 - [ ] 定义 `ModelProvider` Protocol。
 - [ ] 定义 Repository Protocol。
 - [ ] 定义 `Tool` 和 `EventPublisher` Protocol。
@@ -170,6 +170,7 @@
 - 创建不可变的最小 `Run` 数据对象，包含运行身份、所属 Conversation、状态和创建/更新时间；暂不关联具体 Message，也不实现状态迁移。
 - 创建顶层 `AppPaths` 路径契约；入口通过 `from_root()` 或显式字段提供路径，业务代码不读取用户主目录，构造过程不创建目录。
 - 创建不可变的最小 `RunEvent` 数据对象；`event_id` 用于唯一标识和去重，`sequence` 用于 Run 内排序与未来回放，事件数据保留只读顶层快照。
+- 创建不可变的最小 `ToolCall` 数据对象；调用参数保留只读顶层快照，完成结果与错误互斥，二者都为空时表示待执行。
 
 ### 验证
 
@@ -193,6 +194,8 @@
 - 结果：通过；14 个测试通过，AppPaths 的稳定目录映射、显式构造、无副作用和不可变性均已验证，Ruff、strict mypy、锁文件和 diff 检查无问题。
 - 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
 - 结果：通过；17 个测试通过，RunEvent 的身份、顺序、顶层负载快照和不可变性均已验证，Ruff、strict mypy、锁文件和 diff 检查无问题。
+- 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
+- 结果：通过；21 个测试通过，ToolCall 的调用信息、待执行状态、参数快照和结果/错误互斥规则均已验证，Ruff、strict mypy、锁文件和 diff 检查无问题。
 
 ### 决策变化
 
@@ -204,4 +207,4 @@
 
 ### 下一步
 
-- 在下一个独立任务中为最小 `ToolCall` 数据对象定义验收样例；本次不开始该任务。
+- 在下一个独立任务中为 `ModelProvider` Protocol 定义最小验收样例；本次不开始该任务。
