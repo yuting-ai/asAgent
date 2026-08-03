@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 0 已启动，Python/uv 工程骨架与质量工具闭环已完成
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的用户可见 Message、Run、RunEvent 和 ToolCall 数据对象、Provider-neutral 模型交换数据类型、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的用户可见 Message、Run、RunEvent 和 ToolCall 数据对象、Provider-neutral 模型交换数据类型与 `ModelProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-03
-- 当前目标：Provider-neutral 的模型交换数据类型已完成；下一独立任务是定义 `ModelProvider` Protocol
+- 当前目标：`ModelProvider` Protocol 已完成；下一独立任务是定义 Repository Protocol
 
 ## 2. 已完成
 
@@ -40,10 +40,11 @@
 - [x] 创建不可变的最小 `RunEvent` 数据对象。
 - [x] 创建不可变的最小 `ToolCall` 数据对象。
 - [x] 创建 Provider-neutral 的模型交换数据类型。
+- [x] 创建 `ModelProvider` Protocol。
 
 ## 3. 尚未开始
 
-- [ ] 定义 ModelProvider、Repository、Tool 和 Event Protocol。
+- [ ] 定义 Repository、Tool 和 Event Protocol。
 - [ ] 实现 Fake Model。
 
 ## 4. 下一阶段：阶段 0
@@ -80,7 +81,7 @@
 - [x] 创建不可变的最小 RunEvent 数据对象；包含 `event_id`、从 1 开始的 `sequence` 和只读顶层 `data` 快照。
 - [x] 创建不可变的最小 ToolCall 数据对象；包含调用参数快照，以及互斥的结果或错误。
 - [x] 定义 Provider-neutral 的 `ModelMessage`、`ModelToolDefinition`、`ModelToolCall`、`ModelRequest`、`ModelResponse` 和 `ModelEvent` 数据类型。
-- [ ] 定义 `ModelProvider` Protocol。
+- [x] 定义 `ModelProvider` Protocol，支持一次性 `complete()` 与异步迭代 `stream()`。
 - [ ] 定义 Repository Protocol。
 - [ ] 定义 `Tool` 和 `EventPublisher` Protocol。
 - [ ] 实现 `FakeModelProvider`。
@@ -174,6 +175,7 @@
 - 创建不可变的最小 `RunEvent` 数据对象；`event_id` 用于唯一标识和去重，`sequence` 用于 Run 内排序与未来回放，事件数据保留只读顶层快照。
 - 创建不可变的最小 `ToolCall` 数据对象；调用参数保留只读顶层快照，完成结果与错误互斥，二者都为空时表示待执行。
 - 创建 Provider-neutral 的模型交换数据类型；请求、响应和流事件与用户可见 Message、内部 RunEvent 分开建模，Provider 工具调用保留独立的 `call_id`。
+- 创建可运行时检查的 `ModelProvider` Protocol；一次性调用返回 `ModelResponse`，流式调用直接返回可由 `async for` 消费的 `AsyncIterator[ModelEvent]`。
 
 ### 验证
 
@@ -201,6 +203,8 @@
 - 结果：通过；21 个测试通过，ToolCall 的调用信息、待执行状态、参数快照和结果/错误互斥规则均已验证，Ruff、strict mypy、锁文件和 diff 检查无问题。
 - 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
 - 结果：通过；25 个测试通过，模型交换类型的请求、响应、流事件、工具调用与顶层参数 Schema 快照均已验证，Ruff、strict mypy、锁文件和 diff 检查无问题。
+- 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
+- 结果：通过；27 个测试通过，ModelProvider 的结构化兼容性、一次性调用和异步事件流均已验证，Ruff、strict mypy、锁文件和 diff 检查无问题。
 
 ### 决策变化
 
@@ -212,4 +216,4 @@
 
 ### 下一步
 
-- 在下一个独立任务中为 `ModelProvider` Protocol 定义最小验收样例；本次不开始该任务。
+- 在下一个独立任务中为 Repository Protocol 定义最小验收样例；本次不开始该任务。

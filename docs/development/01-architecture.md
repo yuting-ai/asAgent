@@ -250,8 +250,10 @@ Channel 不参与 Prompt 构建、模型路由、工具执行和数据库事务�
 ```python
 class ModelProvider(Protocol):
     async def complete(self, request: ModelRequest) -> ModelResponse: ...
-    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelEvent]: ...
+    def stream(self, request: ModelRequest) -> AsyncIterator[ModelEvent]: ...
 ```
+
+`complete()` 是 awaitable 的一次性调用；`stream()` 直接返回可由 `async for` 消费的异步迭代器。具体 Provider 可以将 `stream()` 实现为含 `yield` 的 `async def` 异步生成器。
 
 `ModelRequest`、`ModelResponse` 和 `ModelEvent` 是 Provider-neutral 的模型交换数据类型：它们在定义 `ModelProvider` Protocol 前先完成，以避免 Protocol 使用未定义的类型、厂商 SDK 对象或无约束的 `dict`/`Any`。它们与用户可见 Message、内部 RunEvent 分开，专门表达向模型发送和从模型接收的运行时材料。
 
