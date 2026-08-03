@@ -52,7 +52,7 @@ Ragent 采用“每个阶段完成一个可运行闭环”的方式开发。不�
 - Pydantic 2 主要用于系统边界；Core 领域对象优先使用 dataclass、Enum、NewType 和 Protocol。
 - 创建 `core` 基础对象和 ID 类型。
 - 定义顶层 `AppPaths` 路径契约；测试使用临时目录，不读取真实用户目录。
-- 定义 `ModelProvider`、Repository、Tool 和 EventPublisher Protocol。
+- 先定义 Provider-neutral 的 `ModelMessage`、`ModelToolDefinition`、`ModelToolCall`、`ModelRequest`、`ModelResponse` 和 `ModelEvent` 数据类型，再定义 `ModelProvider`、Repository、Tool 和 EventPublisher Protocol。
 - 实现 `FakeModelProvider`。
 - 定义结构化错误和 Run 状态。
 - 建立单元测试目录和测试约定。
