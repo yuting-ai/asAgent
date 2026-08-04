@@ -6,7 +6,7 @@
 - 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool` 与 `EventPublisher` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-04
-- 当前目标：`FakeModelProvider` 已完成；下一独立任务是创建第一篇 `Conversation 与 Run` 学习笔记
+- 当前目标：第一篇 `Conversation 与 Run` 学习笔记已完成；下一独立任务是添加最小测试 Dockerfile
 
 ## 2. 已完成
 
@@ -46,6 +46,7 @@
 - [x] 创建不可变的最小 `ToolDefinition` 数据对象。
 - [x] 创建 `Tool` 与 `EventPublisher` Protocol。
 - [x] 实现可脚本化的离线 `FakeModelProvider`。
+- [x] 创建第一篇 `Conversation 与 Run` 学习笔记。
 
 ## 3. 尚未开始
 
@@ -91,7 +92,7 @@
 - [x] 定义异步 `Tool` 与 `EventPublisher` Protocol；工具执行与事件发布均不包含后续的横切实现细节。
 - [x] 实现可脚本化的 `FakeModelProvider`；支持预设文本、工具调用和流式事件。
 - [x] 为核心对象和 Fake Model 编写测试。
-- [ ] 创建 `docs/learning-notes/01-conversation-and-run.md`。
+- [x] 创建 `docs/learning-notes/01-conversation-and-run.md`。
 - [ ] 添加最小测试 Dockerfile。
 
 ### 阶段 0 验收
@@ -233,6 +234,7 @@
 - 创建不可变的最小 `ToolDefinition` 数据对象，保存工具元数据和执行前的安全要求，但不实现执行或策略。
 - 创建异步 `Tool` 与 `EventPublisher` Protocol；具体 Tool 只执行准备好的参数，事件发布与事件历史查询保持分离。
 - 创建可脚本化的离线 `FakeModelProvider`；按调用顺序消费预设的一次性响应或流事件脚本，并保留请求历史供测试断言。
+- 创建第一篇学习笔记，说明 Conversation 与 Run 的不同生命周期，以及 Message、RunEvent、ToolCall 和模型上下文的职责边界。
 
 ### 验证
 
@@ -246,10 +248,12 @@
 - 结果：通过；36 个测试通过，示例 Tool 与事件收集器满足异步 Protocol，Ruff 与 strict mypy 无问题，锁文件和 diff 检查通过。
 - 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
 - 结果：通过；39 个测试通过，FakeModelProvider 的文本、工具调用、流事件、请求历史与未脚本化调用失败路径均已验证，Ruff 与 strict mypy 无问题，锁文件和 diff 检查通过。
+- 检查：运行 `git diff --check`，并复核学习笔记中的领域关系和当前未实现范围。
+- 结果：通过；笔记清楚区分 Conversation、Run、Message、RunEvent、ToolCall 和模型上下文，且没有将未来实现误记为当前能力。
 
 ### 决策变化
 
-- 无；Conversation、Repository、ToolDefinition、Tool、EventPublisher 与 FakeModelProvider 均为既有架构中的边界，本次仅补齐最小 Core 数据对象和接口契约。
+- 无；本次仅记录既有领域边界的学习笔记，不改变架构决策。
 
 ### 风险或问题
 
@@ -257,4 +261,4 @@
 
 ### 下一步
 
-- 创建第一篇 `Conversation 与 Run` 学习笔记。
+- 添加最小测试 Dockerfile。
