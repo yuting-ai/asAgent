@@ -286,6 +286,8 @@ class ToolDefinition:
     timeout_seconds: float
 ```
 
+阶段 0 的 `ToolDefinition` 是不可变 Core 数据对象：输入 Schema 在构造时保留只读顶层快照，权限使用不可变集合，且 `timeout_seconds` 必须为正数。它只声明工具元数据和安全要求，不执行 JSON Schema 校验、Policy 或工具本身；这些职责属于后续 Registry、Executor 和 Policy。
+
 内部 `tool_id` 必须命名空间化：
 
 ```text
