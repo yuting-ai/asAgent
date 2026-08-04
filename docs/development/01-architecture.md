@@ -430,6 +430,13 @@ mcp_servers
 
 Repository 接口属于 Core，SQLite 实现属于 Storage。事务边界由 ChatService/RunService 控制。
 
+阶段 0 的最小 Repository 契约按运行时聚合划分，而不是一张未来数据库表一个接口：
+
+- `ConversationRepository` 读取、列举和保存 `Conversation`，并追加、读取该 Conversation 的用户可见 `UserMessage` 与 `AssistantMessage`。
+- `RunRepository` 读取、列举和保存 `Run`，并追加、读取其 `RunEvent` 与 `ToolCall`。
+
+这两个接口均为异步 Core `Protocol`，不导入 SQLite 或 SQLAlchemy。读取方法返回不可变的元组快照；`RunRepository.list_events()` 通过 `after_sequence` 明确从 Run 内顺序点继续读取，不能依据时间戳排序或续传。`save()` 用于保存同一稳定 ID 的当前对象；`append_event()` 保持仅追加语义。
+
 `run_events` 至少对 `(run_id, sequence)` 建立唯一约束。创建用户消息与 Run 时需要一个明确事务边界，避免 API 重试后产生孤立消息或重复 Run。
 
 ## 15. 并发与取消

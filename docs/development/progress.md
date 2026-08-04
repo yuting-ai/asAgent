@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 0 已启动，Python/uv 工程骨架与质量工具闭环已完成
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent 和 ToolCall 数据对象、Provider-neutral 模型交换数据类型与 `ModelProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent 和 ToolCall 数据对象、Provider-neutral 模型交换数据类型、`ModelProvider` 与 Repository Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-04
-- 当前目标：最小 `Conversation` 数据对象已完成；下一独立任务是定义 Repository Protocol
+- 当前目标：Repository Protocol 已完成；下一独立任务是定义 `Tool` 和 `EventPublisher` Protocol
 
 ## 2. 已完成
 
@@ -42,10 +42,11 @@
 - [x] 创建 Provider-neutral 的模型交换数据类型。
 - [x] 创建 `ModelProvider` Protocol。
 - [x] 创建不可变的最小 `Conversation` 数据对象。
+- [x] 创建 `ConversationRepository` 与 `RunRepository` Protocol。
 
 ## 3. 尚未开始
 
-- [ ] 定义 Repository、Tool 和 Event Protocol。
+- [ ] 定义 `Tool` 和 `EventPublisher` Protocol。
 - [ ] 实现 Fake Model。
 
 ## 4. 下一阶段：阶段 0
@@ -84,7 +85,7 @@
 - [x] 定义 Provider-neutral 的 `ModelMessage`、`ModelToolDefinition`、`ModelToolCall`、`ModelRequest`、`ModelResponse` 和 `ModelEvent` 数据类型。
 - [x] 定义 `ModelProvider` Protocol，支持一次性 `complete()` 与异步迭代 `stream()`。
 - [x] 创建不可变的最小 `Conversation` 数据对象；包含 Conversation 身份、所属用户和创建/更新时间。
-- [ ] 定义 Repository Protocol。
+- [x] 定义异步 `ConversationRepository` 与 `RunRepository` Protocol；事件查询使用 `after_sequence` 续传点。
 - [ ] 定义 `Tool` 和 `EventPublisher` Protocol。
 - [ ] 实现 `FakeModelProvider`。
 - [ ] 为核心对象和 Fake Model 编写测试。
@@ -226,15 +227,18 @@
 
 - 创建不可变的最小 `Conversation` 数据对象，作为后续 `ConversationRepository` 的类型完整返回值。
 - Conversation 包含 `conversation_id`、`user_id`、`created_at` 与 `updated_at`；标题、消息集合、持久化和生命周期操作仍留给后续任务。
+- 创建异步 `ConversationRepository` 与 `RunRepository` Protocol；前者管理 Conversation 与可见 Message，后者管理 Run、RunEvent 与 ToolCall。
 
 ### 验证
 
 - 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
 - 结果：通过；29 个测试通过，Ruff 与 strict mypy 无问题，锁文件和 diff 检查通过。
+- 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
+- 结果：通过；31 个测试通过，两个类型完整的异步示例 Repository 满足 Protocol，Ruff 与 strict mypy 无问题，锁文件和 diff 检查通过。
 
 ### 决策变化
 
-- 无；Conversation 是既有架构中的实体，本次仅补齐其最小 Core 数据对象。
+- 无；Conversation 与 Repository 均为既有架构中的边界，本次仅补齐最小 Core 数据对象和接口契约。
 
 ### 风险或问题
 
@@ -242,4 +246,4 @@
 
 ### 下一步
 
-- 定义不依赖 SQLite 的 Repository Protocol。
+- 定义 `Tool` 和 `EventPublisher` Protocol。
