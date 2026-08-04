@@ -272,6 +272,8 @@ class ModelProvider(Protocol):
 
 第一版实现一个 OpenAI-compatible Provider 和一个完全离线的 Fake Provider。测试默认使用 Fake Provider，避免费用和不稳定响应。
 
+阶段 0 的 `FakeModelProvider` 只用于离线测试：构造时分别提供一次性 `ModelResponse` 脚本和每次流式调用对应的一组 `ModelEvent` 脚本；每次调用按顺序消费一项。脚本耗尽时抛出明确错误，而不是生成默认响应，从而避免测试意外通过。Fake 同时保留只读请求历史，供测试断言传入模型边界的请求内容。
+
 ## 10. Tool 架构
 
 ### 10.1 工具定义
