@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 0 已启动，Python/uv 工程骨架与质量工具闭环已完成
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的用户可见 Message、Run、RunEvent 和 ToolCall 数据对象、Provider-neutral 模型交换数据类型与 `ModelProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent 和 ToolCall 数据对象、Provider-neutral 模型交换数据类型与 `ModelProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
-- 当前日期：2026-08-03
-- 当前目标：`ModelProvider` Protocol 已完成；下一独立任务是定义 Repository Protocol
+- 当前日期：2026-08-04
+- 当前目标：最小 `Conversation` 数据对象已完成；下一独立任务是定义 Repository Protocol
 
 ## 2. 已完成
 
@@ -41,6 +41,7 @@
 - [x] 创建不可变的最小 `ToolCall` 数据对象。
 - [x] 创建 Provider-neutral 的模型交换数据类型。
 - [x] 创建 `ModelProvider` Protocol。
+- [x] 创建不可变的最小 `Conversation` 数据对象。
 
 ## 3. 尚未开始
 
@@ -82,6 +83,7 @@
 - [x] 创建不可变的最小 ToolCall 数据对象；包含调用参数快照，以及互斥的结果或错误。
 - [x] 定义 Provider-neutral 的 `ModelMessage`、`ModelToolDefinition`、`ModelToolCall`、`ModelRequest`、`ModelResponse` 和 `ModelEvent` 数据类型。
 - [x] 定义 `ModelProvider` Protocol，支持一次性 `complete()` 与异步迭代 `stream()`。
+- [x] 创建不可变的最小 `Conversation` 数据对象；包含 Conversation 身份、所属用户和创建/更新时间。
 - [ ] 定义 Repository Protocol。
 - [ ] 定义 `Tool` 和 `EventPublisher` Protocol。
 - [ ] 实现 `FakeModelProvider`。
@@ -217,3 +219,27 @@
 ### 下一步
 
 - 在下一个独立任务中为 Repository Protocol 定义最小验收样例；本次不开始该任务。
+
+## 2026-08-04 工作记录
+
+### 完成
+
+- 创建不可变的最小 `Conversation` 数据对象，作为后续 `ConversationRepository` 的类型完整返回值。
+- Conversation 包含 `conversation_id`、`user_id`、`created_at` 与 `updated_at`；标题、消息集合、持久化和生命周期操作仍留给后续任务。
+
+### 验证
+
+- 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
+- 结果：通过；29 个测试通过，Ruff 与 strict mypy 无问题，锁文件和 diff 检查通过。
+
+### 决策变化
+
+- 无；Conversation 是既有架构中的实体，本次仅补齐其最小 Core 数据对象。
+
+### 风险或问题
+
+- 无。
+
+### 下一步
+
+- 定义不依赖 SQLite 的 Repository Protocol。
