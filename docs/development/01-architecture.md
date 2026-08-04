@@ -144,6 +144,8 @@ run.failed
 
 用于流式 UI、审计、调试和回放。
 
+阶段 0 的 `EventPublisher` 是异步 Core `Protocol`，只提供 `publish(event: RunEvent)`。它负责把运行时产生的事件交给后续的内存、持久化或 SSE 桥接实现；事件历史查询和回放仍由 `RunRepository` 负责，因此 Publisher 不提供查询或订阅方法。
+
 ### 模型上下文
 
 发送给模型的标准化 Message 列表，可能包含摘要、历史文本、tool_use 和 tool_result。它是运行时材料，不等同于完整数据库历史。
@@ -287,6 +289,8 @@ class ToolDefinition:
 ```
 
 阶段 0 的 `ToolDefinition` 是不可变 Core 数据对象：输入 Schema 在构造时保留只读顶层快照，权限使用不可变集合，且 `timeout_seconds` 必须为正数。它只声明工具元数据和安全要求，不执行 JSON Schema 校验、Policy 或工具本身；这些职责属于后续 Registry、Executor 和 Policy。
+
+阶段 0 的 `Tool` 是异步 Core `Protocol`：它公开只读 `definition`，并接受已准备好的参数 Mapping 执行后返回文本结果。具体 Tool 不负责参数校验、权限、批准、超时、取消、审计或结果截断；这些横切职责由后续 `ToolExecutor` 与 Policy 管线统一处理。
 
 内部 `tool_id` 必须命名空间化：
 

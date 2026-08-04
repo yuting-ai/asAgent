@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 0 已启动，Python/uv 工程骨架与质量工具闭环已完成
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、`ModelProvider` 与 Repository Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、`ModelProvider`、Repository、`Tool` 与 `EventPublisher` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-04
-- 当前目标：`ToolDefinition` 已完成；下一独立任务是定义 `Tool` 和 `EventPublisher` Protocol
+- 当前目标：`Tool` 与 `EventPublisher` Protocol 已完成；下一独立任务是实现 `FakeModelProvider`
 
 ## 2. 已完成
 
@@ -44,10 +44,10 @@
 - [x] 创建不可变的最小 `Conversation` 数据对象。
 - [x] 创建 `ConversationRepository` 与 `RunRepository` Protocol。
 - [x] 创建不可变的最小 `ToolDefinition` 数据对象。
+- [x] 创建 `Tool` 与 `EventPublisher` Protocol。
 
 ## 3. 尚未开始
 
-- [ ] 定义 `Tool` 和 `EventPublisher` Protocol。
 - [ ] 实现 Fake Model。
 
 ## 4. 下一阶段：阶段 0
@@ -88,7 +88,7 @@
 - [x] 创建不可变的最小 `Conversation` 数据对象；包含 Conversation 身份、所属用户和创建/更新时间。
 - [x] 定义异步 `ConversationRepository` 与 `RunRepository` Protocol；事件查询使用 `after_sequence` 续传点。
 - [x] 创建不可变的最小 `ToolDefinition`；包含工具元数据、顶层 Schema 快照、权限、批准要求与正数超时。
-- [ ] 定义 `Tool` 和 `EventPublisher` Protocol。
+- [x] 定义异步 `Tool` 与 `EventPublisher` Protocol；工具执行与事件发布均不包含后续的横切实现细节。
 - [ ] 实现 `FakeModelProvider`。
 - [ ] 为核心对象和 Fake Model 编写测试。
 - [ ] 创建 `docs/learning-notes/01-conversation-and-run.md`。
@@ -231,6 +231,7 @@
 - Conversation 包含 `conversation_id`、`user_id`、`created_at` 与 `updated_at`；标题、消息集合、持久化和生命周期操作仍留给后续任务。
 - 创建异步 `ConversationRepository` 与 `RunRepository` Protocol；前者管理 Conversation 与可见 Message，后者管理 Run、RunEvent 与 ToolCall。
 - 创建不可变的最小 `ToolDefinition` 数据对象，保存工具元数据和执行前的安全要求，但不实现执行或策略。
+- 创建异步 `Tool` 与 `EventPublisher` Protocol；具体 Tool 只执行准备好的参数，事件发布与事件历史查询保持分离。
 
 ### 验证
 
@@ -240,10 +241,12 @@
 - 结果：通过；31 个测试通过，两个类型完整的异步示例 Repository 满足 Protocol，Ruff 与 strict mypy 无问题，锁文件和 diff 检查通过。
 - 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
 - 结果：通过；34 个测试通过，ToolDefinition 的元数据、顶层 Schema 快照、正数超时与不可变性均已验证，Ruff 与 strict mypy 无问题，锁文件和 diff 检查通过。
+- 检查：运行 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 和 `git diff --check`。
+- 结果：通过；36 个测试通过，示例 Tool 与事件收集器满足异步 Protocol，Ruff 与 strict mypy 无问题，锁文件和 diff 检查通过。
 
 ### 决策变化
 
-- 无；Conversation、Repository 与 ToolDefinition 均为既有架构中的边界，本次仅补齐最小 Core 数据对象和接口契约。
+- 无；Conversation、Repository、ToolDefinition、Tool 与 EventPublisher 均为既有架构中的边界，本次仅补齐最小 Core 数据对象和接口契约。
 
 ### 风险或问题
 
@@ -251,4 +254,4 @@
 
 ### 下一步
 
-- 定义 `Tool` 和 `EventPublisher` Protocol。
+- 实现 `FakeModelProvider`。
