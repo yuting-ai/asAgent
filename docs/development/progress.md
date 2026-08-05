@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 0 已启动，Python/uv 工程骨架与质量工具闭环已完成
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool` 与 `EventPublisher` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`
+- 项目阶段：阶段 0 实现任务已完成，等待阶段验收审查
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool` 与 `EventPublisher` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供最小 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
-- 当前日期：2026-08-04
-- 当前目标：第一篇 `Conversation 与 Run` 学习笔记已完成；下一独立任务是添加最小测试 Dockerfile
+- 当前日期：2026-08-05
+- 当前目标：最小测试 Dockerfile 已验证；下一独立任务是进行阶段 0 验收审查
 
 ## 2. 已完成
 
@@ -47,9 +47,11 @@
 - [x] 创建 `Tool` 与 `EventPublisher` Protocol。
 - [x] 实现可脚本化的离线 `FakeModelProvider`。
 - [x] 创建第一篇 `Conversation 与 Run` 学习笔记。
+- [x] 添加最小测试 Dockerfile，并在干净 Linux 容器中验证。
 
 ## 3. 尚未开始
 
+- [ ] 执行阶段 0 验收审查，并确认是否具备进入阶段 1 的条件。
 
 ## 4. 下一阶段：阶段 0
 
@@ -65,7 +67,8 @@
 4. 实现 Fake Model。
 5. 编写单元测试。
 6. 记录第一篇学习笔记。
-7. 更新本文件。
+7. 添加最小测试 Dockerfile。
+8. 更新本文件。
 
 ### 阶段 0 待办
 
@@ -93,7 +96,7 @@
 - [x] 实现可脚本化的 `FakeModelProvider`；支持预设文本、工具调用和流式事件。
 - [x] 为核心对象和 Fake Model 编写测试。
 - [x] 创建 `docs/learning-notes/01-conversation-and-run.md`。
-- [ ] 添加最小测试 Dockerfile。
+- [x] 添加最小测试 Dockerfile；使用提交的锁文件在干净 Linux 容器中运行测试、Ruff、mypy 和锁文件检查。
 
 ### 阶段 0 验收
 
@@ -262,3 +265,28 @@
 ### 下一步
 
 - 添加最小测试 Dockerfile。
+
+## 2026-08-05 工作记录
+
+### 完成
+
+- 创建 `docker/Dockerfile.test`，以 Python 3.13 和 uv 0.12.0 在干净 Linux 容器中安装锁定依赖。
+- 创建 `.dockerignore`，排除 Git 元数据、本地虚拟环境、缓存、本地数据和环境变量，避免它们进入镜像构建上下文。
+- 将 Docker 测试命令确定为直接构建并运行 `docker/Dockerfile.test`；当前阶段不需要 Docker Compose。
+
+### 验证
+
+- 检查：运行 `docker build --file docker/Dockerfile.test --tag ragent-tests:local .` 与 `docker run --rm ragent-tests:local`。
+- 结果：通过；容器使用 Linux CPython 3.13.14，39 个测试通过，Ruff 检查与格式检查通过，strict mypy 无问题，`uv lock --check` 通过。
+
+### 决策变化
+
+- 无；本次落实既有 Docker 测试/CI 边界，不改变 Docker 作为非桌面运行依赖的定位。
+
+### 风险或问题
+
+- 无。
+
+### 下一步
+
+- 在下一个独立任务中执行阶段 0 验收审查；本次不开始该任务。

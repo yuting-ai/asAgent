@@ -342,6 +342,8 @@ desktop/build/dist/ragent-backend/
 - MCP stdio 测试 Server。
 - CI。
 
+当前最小实现为仓库根目录的 `docker/Dockerfile.test`。它使用 Python 3.13、固定的 uv 版本和已提交的 `uv.lock`，在干净 Linux 容器中执行单元测试、Ruff、mypy 与锁文件检查；`.dockerignore` 排除本地虚拟环境、缓存、本地数据和环境变量。当前不需要 Compose 文件。
+
 ### docker-server
 
 后期可选，用于无 Electron 的后台运行：
@@ -360,7 +362,7 @@ Electron GUI、文件选择器、本地浏览器、用户 PATH、系统通知、
 
 ## 11. 推荐开发命令形态
 
-具体命令在阶段 0 创建项目后确定，目标体验：
+当前已确定的命令形态如下；尚未创建的后续组件命令仅代表目标体验：
 
 ```bash
 # Python 快速测试
@@ -373,7 +375,8 @@ uv run ragent serve
 cd desktop && npm run dev
 
 # Docker 干净环境测试
-docker compose -f docker/compose.test.yml run --rm tests
+docker build --file docker/Dockerfile.test --tag ragent-tests:local .
+docker run --rm ragent-tests:local
 
 # 构建 Sidecar
 ./scripts/build-backend.sh
