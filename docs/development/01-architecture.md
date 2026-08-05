@@ -54,7 +54,7 @@ Ragent/
 │       ├── tools/                # Registry、Executor、Policy、内置工具、MCP
 │       ├── memory/               # 摘要、个人记忆、检索
 │       ├── workspace/            # WorkspaceResolver、作用域和权限
-│       ├── storage/              # SQLite、Repository 实现和迁移
+│       ├── storage/              # Repository 实现；阶段 1 内存适配器，阶段 3 SQLite 与迁移
 │       ├── api/                  # FastAPI、本地 HTTP、SSE
 │       ├── paths.py              # AppPaths：所有运行方式共享的路径契约
 │       └── app.py                # 组合依赖和启动应用
@@ -444,6 +444,8 @@ Repository 接口属于 Core，SQLite 实现属于 Storage。事务边界由 Cha
 - `RunRepository` 读取、列举和保存 `Run`，并追加、读取其 `RunEvent` 与 `ToolCall`。
 
 这两个接口均为异步 Core `Protocol`，不导入 SQLite 或 SQLAlchemy。读取方法返回不可变的元组快照；`RunRepository.list_events()` 通过 `after_sequence` 明确从 Run 内顺序点继续读取，不能依据时间戳排序或续传。`save()` 用于保存同一稳定 ID 的当前对象；`append_event()` 保持仅追加语义。
+
+阶段 1 的 `InMemoryConversationRepository` 位于 `storage`，是 `ConversationRepository` 的进程内适配器，而不是 Core 的一部分。它按 `conversation_id` 覆盖保存 Conversation，按用户筛选 Conversation，并按追加顺序返回同一 Conversation 的用户可见 Message；向未保存的 Conversation 追加 Message 会明确失败，避免产生孤儿 Message。数据只存活到当前 Python 进程结束，阶段 3 的 SQLite 实现将替换这一适配器而不改变上层 Repository 依赖。
 
 `run_events` 至少对 `(run_id, sequence)` 建立唯一约束。创建用户消息与 Run 时需要一个明确事务边界，避免 API 重试后产生孤立消息或重复 Run。
 

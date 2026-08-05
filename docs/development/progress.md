@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 0 已完成；阶段 1 尚未开始
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool` 与 `EventPublisher` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供最小 Docker 干净环境测试入口
+- 项目阶段：阶段 1 已启动；内存版 Conversation Repository 已完成
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool` 与 `EventPublisher` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository 与最小 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-05
-- 当前目标：阶段 0 验收已通过；下一独立任务是阶段 1 的内存版 Conversation Repository
+- 当前目标：内存版 Conversation Repository 已完成；下一独立任务是实现最小 ChatService
 
 ## 2. 已完成
 
@@ -48,10 +48,11 @@
 - [x] 实现可脚本化的离线 `FakeModelProvider`。
 - [x] 创建第一篇 `Conversation 与 Run` 学习笔记。
 - [x] 添加最小测试 Dockerfile，并在干净 Linux 容器中验证。
+- [x] 实现阶段 1 的内存版 Conversation Repository。
 
 ## 3. 尚未开始
 
-- [ ] 实现阶段 1 的内存版 Conversation Repository。
+- [ ] 实现阶段 1 的最小 ChatService。
 
 ## 4. 阶段 0（已完成）
 
@@ -292,3 +293,30 @@
 ### 下一步
 
 - 阶段 0 已完成；在下一个独立任务中实现阶段 1 的内存版 Conversation Repository，本次不开始该任务。
+
+## 2026-08-05 阶段 1 工作记录
+
+### 完成
+
+- 在 `storage` 创建 `InMemoryConversationRepository`，作为既有异步 `ConversationRepository` Protocol 的首个具体实现。
+- Conversation 以稳定 `conversation_id` 覆盖保存并按 `user_id` 查询；Message 按追加顺序隔离保存，且拒绝向未保存 Conversation 写入孤儿 Message。
+- 内存数据只在当前 Python 进程存活，后续 SQLite Repository 将保持同一 Protocol。
+
+### 验证
+
+- 检查：运行 `uv run pytest tests/unit/test_in_memory_conversation_repository.py`。
+- 结果：通过；3 个测试覆盖 Protocol 兼容性、Conversation 覆盖与用户隔离、Message 顺序/隔离和孤儿 Message 拒绝。
+- 检查：运行完整质量门禁。
+- 结果：通过；42 个测试通过，Ruff、格式检查、strict mypy、锁文件和 diff 检查均无问题。
+
+### 决策变化
+
+- 无；内存实现遵循既有 Repository 边界，不改变长期 SQLite 主数据决策。
+
+### 风险或问题
+
+- 无；该实现按设计不跨进程持久化，不能替代阶段 3 的 SQLite Repository。
+
+### 下一步
+
+- 在下一个独立任务中实现最小 ChatService；本次不开始该任务。
