@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 1 已启动；内存版 Conversation Repository 已完成
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool` 与 `EventPublisher` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository 与最小 Docker 干净环境测试入口
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool` 与 `EventPublisher` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService` 与 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-05
-- 当前目标：内存版 Conversation Repository 已完成；下一独立任务是实现最小 ChatService
+- 当前目标：最小 ChatService 已完成；下一独立任务是实现 CLI 对话入口
 
 ## 2. 已完成
 
@@ -49,10 +49,11 @@
 - [x] 创建第一篇 `Conversation 与 Run` 学习笔记。
 - [x] 添加最小测试 Dockerfile，并在干净 Linux 容器中验证。
 - [x] 实现阶段 1 的内存版 Conversation Repository。
+- [x] 实现阶段 1 的最小 ChatService。
 
 ## 3. 尚未开始
 
-- [ ] 实现阶段 1 的最小 ChatService。
+- [ ] 实现阶段 1 的 CLI 对话入口。
 
 ## 4. 阶段 0（已完成）
 
@@ -320,3 +321,31 @@
 ### 下一步
 
 - 在下一个独立任务中实现最小 ChatService；本次不开始该任务。
+
+## 2026-08-05 阶段 1 ChatService 工作记录
+
+### 完成
+
+- 在 `chat` 创建最小 `ChatService`，协调 Conversation Repository 与 ModelProvider 完成一次非流式文本对话。
+- 每次发送先保存 Conversation 和 UserMessage，再将该 Conversation 的可见历史转换为 Provider-neutral `ModelRequest`；成功文本响应保存为 AssistantMessage。
+- 时间和 Message ID 通过构造函数注入；Provider 失败时用户消息保留，工具调用响应明确拒绝，未提前实现 Run、流式或 Agent Loop。
+- 修正架构文档中 CLI 与 Local API 已实现的旧表述；当前它们仍是后续入口。
+
+### 验证
+
+- 检查：运行 `uv run pytest tests/unit/test_chat_service.py`。
+- 结果：通过；3 个测试覆盖连续历史、Provider 失败后保留用户消息和阶段 2 前拒绝工具调用。
+- 检查：运行完整质量门禁。
+- 结果：通过；45 个测试通过，Ruff、格式检查、strict mypy、锁文件和 diff 检查均无问题。
+
+### 决策变化
+
+- 无；本次实现既有 Chat/Model/Repository 边界，不新增架构决策。
+
+### 风险或问题
+
+- 无；当前 ChatService 只支持非流式文本响应，工具调用和 Run 生命周期按路线图留给后续阶段。
+
+### 下一步
+
+- 在下一个独立任务中实现 CLI 对话入口；本次不开始该任务。

@@ -222,7 +222,9 @@ MODEL_RESPONDED                  │
 
 ## 8. Chat 与 Channel 边界
 
-当前实现 CLI 和 Local API。未来渠道通过同一个接口进入：
+阶段 1 先实现不依赖入口的最小 `ChatService`：调用方提供已创建的 `Conversation`、用户文本、模型名称和系统提示词；Service 保存 Conversation 与 UserMessage，读取该 Conversation 的可见历史并构造无工具的 `ModelRequest`，调用 `ModelProvider.complete()` 后保存并返回 AssistantMessage。时间和 Message ID 由构造函数注入，使 Service 不隐式依赖系统时间或随机数。当前不创建 Run、不处理流式或工具调用；Provider 异常时已保存的用户消息保留，工具调用响应会明确失败，等待阶段 2 的 Agent Loop。
+
+CLI、Local API 与未来渠道将通过同一个更完整的入口接口进入：
 
 ```python
 class ChatRequest:
