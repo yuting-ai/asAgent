@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 0 实现任务已完成，等待阶段验收审查
+- 项目阶段：阶段 0 已完成；阶段 1 尚未开始
 - 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool` 与 `EventPublisher` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供最小 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-05
-- 当前目标：最小测试 Dockerfile 已验证；下一独立任务是进行阶段 0 验收审查
+- 当前目标：阶段 0 验收已通过；下一独立任务是阶段 1 的内存版 Conversation Repository
 
 ## 2. 已完成
 
@@ -51,9 +51,9 @@
 
 ## 3. 尚未开始
 
-- [ ] 执行阶段 0 验收审查，并确认是否具备进入阶段 1 的条件。
+- [ ] 实现阶段 1 的内存版 Conversation Repository。
 
-## 4. 下一阶段：阶段 0
+## 4. 阶段 0（已完成）
 
 ### 目标
 
@@ -100,13 +100,13 @@
 
 ### 阶段 0 验收
 
-- [ ] `pytest` 全部通过。
-- [ ] Ruff 检查通过。
-- [ ] 类型检查通过。
-- [ ] 测试无需网络和 API Key。
-- [ ] Core 不依赖 FastAPI、Electron、SQLite 或模型 SDK。
-- [ ] Fake Model 能预设文本响应和 ToolCall 响应。
-- [ ] AppPaths 的开发、测试和发布构造方式有测试，业务代码不读取或拼接用户主目录。
+- [x] `pytest` 全部通过。
+- [x] Ruff 检查通过。
+- [x] 类型检查通过。
+- [x] 测试无需网络和 API Key。
+- [x] Core 不依赖 FastAPI、Electron、SQLite 或模型 SDK。
+- [x] Fake Model 能预设文本响应和 ToolCall 响应。
+- [x] AppPaths 的开发、测试和发布构造方式有测试，业务代码不读取或拼接用户主目录。
 
 ## 5. 新 Codex 任务启动提示词
 
@@ -278,6 +278,8 @@
 
 - 检查：运行 `docker build --file docker/Dockerfile.test --tag ragent-tests:local .` 与 `docker run --rm ragent-tests:local`。
 - 结果：通过；容器使用 Linux CPython 3.13.14，39 个测试通过，Ruff 检查与格式检查通过，strict mypy 无问题，`uv lock --check` 通过。
+- 检查：运行本机完整质量门禁、`FakeModelProvider`/`AppPaths` 定向测试，以及 Core 依赖和网络/API Key/环境变量读取的静态搜索。
+- 结果：通过；本机 39 个测试、Ruff、格式检查、strict mypy、锁文件与 diff 检查均通过；7 个定向测试通过；静态搜索无匹配，确认当前阶段的 Core 和离线测试边界。
 
 ### 决策变化
 
@@ -289,4 +291,4 @@
 
 ### 下一步
 
-- 在下一个独立任务中执行阶段 0 验收审查；本次不开始该任务。
+- 阶段 0 已完成；在下一个独立任务中实现阶段 1 的内存版 Conversation Repository，本次不开始该任务。
