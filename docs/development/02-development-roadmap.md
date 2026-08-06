@@ -86,7 +86,9 @@ Ragent 采用“每个阶段完成一个可运行闭环”的方式开发。不�
 - 实现内存版 Conversation Repository。
 - 实现 `ChatService`。
 - 实现 CLI：新建对话、发送消息、退出。
-- 实现一个 OpenAI-compatible Provider。
+- 锁定 Provider Profile 与 Secret 引用边界：Profile 保存非敏感连接参数并引用 `secret_id`，不保存 API Key。
+- 实现一个 OpenAI-compatible Provider；首个真实 Profile 使用 DeepSeek，未来 OpenAI 与其他兼容服务复用该 Adapter。
+- 将 Claude 等原生 Messages API Provider 作为独立 Adapter 后续实现，不将其协议细节混入 OpenAI-compatible Adapter。
 - 保存使用量和模型元数据。
 - 添加 Provider 错误转换和重试边界。
 

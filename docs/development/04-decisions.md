@@ -173,6 +173,17 @@
 - 影响：Core ID 模块、Message 数据对象、后续 SQLite `messages` 表和历史 API 均使用 `message_id`；Conversation 内排序将在阶段 3 Schema 设计中通过独立字段和约束确认。
 - 替代方案：SQLite 自增主键、`(conversation_id, created_at)` 复合身份、列表位置或复用 `run_id`；当前均不采用。
 
+### DEC-025：Provider 使用统一配置 Profile 与协议 Adapter
+
+- 日期：2026-08-06
+- 状态：已确认
+- 背景：阶段 1 需要接入第一个真实模型。DeepSeek 作为首个目标，同时产品未来需要支持 OpenAI、Claude 和其他服务；若每家 Provider 都拥有独立且重复的配置结构，会把“用户选择什么服务”与“代码实现什么协议”混为一谈。
+- 决策：首个真实 Provider Profile 为 `deepseek`，使用 `openai_compatible` Adapter。配置以 `config_dir/providers.toml` 中的命名 Profile 表达；每个 Profile 包含 `adapter`、`model`、`base_url`、超时等非敏感参数和 `secret_id` 引用。OpenAI 与其他兼容服务复用同一 Adapter，仅新增 Profile；Claude 使用独立的 `anthropic_messages` Adapter。所有实现继续只满足内部 `ModelProvider` Protocol。
+- Secret：API Key 不写入 Profile、仓库、日志或测试夹具。后续通过 SecretProvider 从系统 Keychain/Secret Store 解析 `secret_id`；开发期环境变量只能由入口层显式作为后备，不能由 ChatService、Core 或 Provider 业务逻辑直接读取。
+- 原因：DeepSeek 的官方 API 支持兼容格式，适合作为首个低复杂度实现；统一 Profile 消除重复配置，并允许将相同协议的服务作为配置扩展。Claude 的原生 Messages API 有独立请求与认证语义，应保持单独 Adapter，避免兼容 Adapter 逐渐变成难以维护的多厂商分支。
+- 影响：下一任务先定义 Pydantic ProviderConfig 与 SecretProvider 边界，不立即写网络客户端。测试继续默认使用 Fake Provider；CLI 的 Echo Provider 保持离线默认值。真实 DeepSeek 网络调用、Provider 错误转换和重试在后续独立任务实现。
+- 替代方案：每个厂商单独一套配置文件和 Python Provider、把 API Key 写入 TOML、让所有 Provider 强行共用 OpenAI 格式；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：
@@ -231,9 +242,9 @@
 
 ### OPEN-002：第一家真实模型 Provider
 
-- 选择可能包括 OpenAI-compatible、自定义 Base URL、DeepSeek 等。
-- 建议：Core 使用通用接口；第一个实现采用 OpenAI-compatible。
-- 待确认：开发和验收使用哪个实际模型服务。
+- 状态：已解决，见 DEC-025。
+- 当前决定：首个真实 Profile 使用 DeepSeek 的 OpenAI-compatible Adapter；未来 OpenAI 复用 Adapter，Claude 采用独立原生 Adapter。
+- 实施时点：先定义配置与 Secret 边界，再实现 DeepSeek 的真实网络客户端。
 
 ### OPEN-003：Shell 工具开放程度
 

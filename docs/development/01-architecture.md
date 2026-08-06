@@ -278,6 +278,10 @@ class ModelProvider(Protocol):
 
 阶段 0 的 `FakeModelProvider` 只用于离线测试：构造时分别提供一次性 `ModelResponse` 脚本和每次流式调用对应的一组 `ModelEvent` 脚本；每次调用按顺序消费一项。脚本耗尽时抛出明确错误，而不是生成默认响应，从而避免测试意外通过。Fake 同时保留只读请求历史，供测试断言传入模型边界的请求内容。
 
+Provider 的代码实现与用户选择的配置 Profile 分开。每个 Profile 保存适配器类型、模型名、Base URL、超时等非敏感参数，并引用一个 `secret_id`；API Key 不进入 Profile、仓库、日志或测试夹具。阶段 1 先使用 `config_dir/providers.toml` 管理多个命名 Profile，并由后续 SecretProvider 边界从系统 Secret Store 解析 `secret_id`；开发期环境变量只能作为入口层显式后备，业务代码不直接读取。
+
+首个真实 Profile 为 `deepseek`，使用 `openai_compatible` Adapter。未来 `openai` 或其他兼容 Chat Completions 服务只需增加 Profile，复用同一 Adapter；Claude 使用独立的 `anthropic_messages` Adapter，不能塞入 OpenAI-compatible Adapter 的条件分支。所有 Adapter 最终仍只向 Core 暴露 `ModelProvider`。
+
 ## 10. Tool 架构
 
 ### 10.1 工具定义

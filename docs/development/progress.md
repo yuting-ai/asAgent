@@ -6,7 +6,7 @@
 - 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool` 与 `EventPublisher` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI 与 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-06
-- 当前目标：开发 CLI 已完成；下一独立任务是确认首个真实模型 Provider 的选择与配置边界
+- 当前目标：已锁定 DeepSeek 首个真实 Provider、统一 Profile 与 Secret 引用边界；下一独立任务是定义 ProviderConfig 与 SecretProvider
 
 ## 2. 已完成
 
@@ -51,10 +51,11 @@
 - [x] 实现阶段 1 的内存版 Conversation Repository。
 - [x] 实现阶段 1 的最小 ChatService。
 - [x] 实现阶段 1 的 CLI 对话入口。
+- [x] 确认阶段 1 首个真实模型 Provider 的选择与配置边界。
 
 ## 3. 尚未开始
 
-- [ ] 确认阶段 1 首个真实模型 Provider 的选择与配置边界。
+- [ ] 定义阶段 1 的 ProviderConfig 与 SecretProvider 边界。
 
 ## 4. 阶段 0（已完成）
 
@@ -157,7 +158,7 @@
 ## 7. 当前风险
 
 - 第一目标操作系统尚未正式确认。
-- 第一家真实模型服务尚未选择，但不会阻塞 Fake Model 阶段。
+- 首个真实 Provider 已选择 DeepSeek；系统 Secret Store 的具体接入实现尚未开始。
 
 ## 8. 重要提醒
 
@@ -379,3 +380,28 @@
 ### 下一步
 
 - 在下一个独立任务中确认首个真实模型 Provider 的选择与配置边界；本次不开始该任务。
+
+## 2026-08-06 Provider 配置决策工作记录
+
+### 完成
+
+- 确认 DeepSeek 为首个真实模型 Profile，使用 OpenAI-compatible Adapter。
+- 确认以单一 `config_dir/providers.toml` 中的命名 Profile 管理非敏感 Provider 参数；OpenAI 等兼容服务复用 Adapter，Claude 使用独立原生 Adapter。
+- 确认 API Key 仅由 `secret_id` 引用，后续从系统 Secret Store 获取，不进入配置文件或业务层。
+
+### 验证
+
+- 检查：复核 DeepSeek 与 Claude 官方 API 文档，以及现有 Provider-neutral `ModelProvider` 边界。
+- 结果：通过；兼容服务与原生 Messages API 的协议差异已被明确隔离，当前设计不需要读取或复制 CowAgent。
+
+### 决策变化
+
+- 新增 DEC-025。
+
+### 风险或问题
+
+- SecretProvider、系统 Keychain/Secret Store 接入和真实 HTTP 调用尚未实现；测试仍必须默认离线。
+
+### 下一步
+
+- 在下一个独立任务中定义 ProviderConfig 与 SecretProvider 边界；本次不开始该任务。
