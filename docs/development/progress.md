@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 1 已启动；内存版 Conversation Repository、最小 ChatService 和开发 CLI 已完成
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool` 与 `EventPublisher` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI 与 Docker 干净环境测试入口
+- 项目阶段：阶段 1 已启动；内存版 Conversation Repository、最小 ChatService、开发 CLI 和 Provider 配置/Secret 边界已完成
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-06
-- 当前目标：已锁定 DeepSeek 首个真实 Provider、统一 Profile 与 Secret 引用边界；下一独立任务是定义 ProviderConfig 与 SecretProvider
+- 当前目标：已定义并验证 ProviderConfig 与 SecretProvider；下一独立任务是实现使用该边界的 DeepSeek OpenAI-compatible Provider
 
 ## 2. 已完成
 
@@ -52,10 +52,11 @@
 - [x] 实现阶段 1 的最小 ChatService。
 - [x] 实现阶段 1 的 CLI 对话入口。
 - [x] 确认阶段 1 首个真实模型 Provider 的选择与配置边界。
+- [x] 定义并验证阶段 1 的 ProviderConfig 与 SecretProvider 边界。
 
 ## 3. 尚未开始
 
-- [ ] 定义阶段 1 的 ProviderConfig 与 SecretProvider 边界。
+- [ ] 实现阶段 1 的 DeepSeek OpenAI-compatible Provider（不实现 Keychain 或其他 Secret Store）。
 
 ## 4. 阶段 0（已完成）
 
@@ -405,3 +406,30 @@
 ### 下一步
 
 - 在下一个独立任务中定义 ProviderConfig 与 SecretProvider 边界；本次不开始该任务。
+
+## 2026-08-06 ProviderConfig 与 SecretProvider 工作记录
+
+### 完成
+
+- 新增 Pydantic `ProviderConfig` 与 `ProviderProfiles`，校验命名 Profile 的适配器、模型名、HTTP Base URL、`secret_id` 与正超时值，并拒绝未知字段和空 Profile 名称。
+- 新增运行时可检查的 `SecretProvider` Protocol；它只按 `secret_id` 返回值或缺失值，未实现 Keychain、环境变量或任何真实 Secret 读取。
+- 配置与 Secret 抽象位于 `models` 边界，Core、ChatService 和 CLI 保持不读取 API Key 的既有约束。
+
+### 验证
+
+- 检查：运行 Provider 配置和 Secret Protocol 的定向测试。
+- 结果：通过；5 个 Provider 配置测试与 1 个 Secret Protocol 测试覆盖两种适配器、默认/显式超时、无效配置、Profile 名称和缺失 Secret。
+- 检查：运行完整质量门禁。
+- 结果：通过；54 个测试通过，Ruff、格式检查、strict mypy、锁文件与 diff 检查均无问题。
+
+### 决策变化
+
+- 无；本次落实 DEC-025 的配置与 Secret 引用边界，未改变真实 Provider、密钥存储或网络调用决策。
+
+### 风险或问题
+
+- 系统 Keychain/Secret Store 适配器、配置文件加载和真实 DeepSeek HTTP 调用仍未实现；当前测试继续完全离线，仓库中没有真实 API Key。
+
+### 下一步
+
+- 在下一个独立任务中实现使用 `ProviderConfig` 与 `SecretProvider` 的 DeepSeek OpenAI-compatible Provider；本次不开始该任务。
