@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 1 已启动；内存版 Conversation Repository 已完成
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool` 与 `EventPublisher` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService` 与 Docker 干净环境测试入口
+- 项目阶段：阶段 1 已启动；内存版 Conversation Repository、最小 ChatService 和开发 CLI 已完成
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool` 与 `EventPublisher` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI 与 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
-- 当前日期：2026-08-05
-- 当前目标：最小 ChatService 已完成；下一独立任务是实现 CLI 对话入口
+- 当前日期：2026-08-06
+- 当前目标：开发 CLI 已完成；下一独立任务是确认首个真实模型 Provider 的选择与配置边界
 
 ## 2. 已完成
 
@@ -50,10 +50,11 @@
 - [x] 添加最小测试 Dockerfile，并在干净 Linux 容器中验证。
 - [x] 实现阶段 1 的内存版 Conversation Repository。
 - [x] 实现阶段 1 的最小 ChatService。
+- [x] 实现阶段 1 的 CLI 对话入口。
 
 ## 3. 尚未开始
 
-- [ ] 实现阶段 1 的 CLI 对话入口。
+- [ ] 确认阶段 1 首个真实模型 Provider 的选择与配置边界。
 
 ## 4. 阶段 0（已完成）
 
@@ -349,3 +350,32 @@
 ### 下一步
 
 - 在下一个独立任务中实现 CLI 对话入口；本次不开始该任务。
+
+## 2026-08-06 阶段 1 CLI 工作记录
+
+### 完成
+
+- 新增 `ragent` 控制台脚本，作为复用 ChatService 的最小开发入口。
+- CLI 在进程内创建 Conversation、内存 Repository 和开发 Echo Provider；支持连续输入、`exit`/`quit` 退出、EOF 退出以及显示 Provider 错误后继续接收输入。
+- 开发 Echo Provider 不读取网络、Secret 或 API Key，只用于验证 CLI 到 ChatService 的本地闭环。
+
+### 验证
+
+- 检查：运行 `uv run pytest tests/unit/test_cli.py`。
+- 结果：通过；3 个测试覆盖连续多轮、Provider 错误恢复和 EOF 退出。
+- 检查：运行 `uv run ragent`，输入 `hi` 后输入 `exit`。
+- 结果：通过；终端显示 `Echo: hi` 并正常退出。
+- 检查：运行完整质量门禁。
+- 结果：通过；48 个测试通过，Ruff、格式检查、strict mypy、锁文件和 diff 检查均无问题。
+
+### 决策变化
+
+- 无；CLI 只是既有 ChatService 边界的开发适配器，首个真实 Provider 仍未选择。
+
+### 风险或问题
+
+- 首个真实模型 Provider 与对应 Secret/配置边界仍待用户确认，阶段 1 尚未完成。
+
+### 下一步
+
+- 在下一个独立任务中确认首个真实模型 Provider 的选择与配置边界；本次不开始该任务。
