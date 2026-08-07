@@ -280,7 +280,9 @@ class ModelProvider(Protocol):
 
 Provider 的代码实现与用户选择的配置 Profile 分开。`models.config.ProviderConfig` 是 Pydantic 的系统配置边界：它校验适配器类型、模型名、HTTP Base URL、`secret_id` 与正超时值，并拒绝未知字段；`ProviderProfiles` 保存多个非空命名 Profile。API Key 不进入 Profile、仓库、日志或测试夹具。`models.secrets.SecretProvider` 只声明按 `secret_id` 返回 Secret 或缺失值的能力，尚不绑定具体存储实现。阶段 1 使用 `config_dir/providers.toml` 管理多个命名 Profile，并由后续 Keychain/Secret Store 适配器实现该 Protocol；开发期环境变量只能作为入口层显式后备，业务代码不直接读取。
 
-首个真实 Profile 为 `deepseek`，使用 `openai_compatible` Adapter。未来 `openai` 或其他兼容 Chat Completions 服务只需增加 Profile，复用同一 Adapter；Claude 使用独立的 `anthropic_messages` Adapter，不能塞入 OpenAI-compatible Adapter 的条件分支。所有 Adapter 最终仍只向 Core 暴露 `ModelProvider`。
+首个真实 Profile 为 `deepseek`，使用 `openai_compatible` Adapter。阶段 1 的 `OpenAICompatibleProvider` 使用注入的 `httpx.AsyncClient`、`ProviderConfig` 和 `SecretProvider` 发起 `POST /chat/completions`；它将标准化的 system/user/assistant Message、工具定义、一次性响应的文本/推理/工具调用/usage，以及 SSE 的文本和推理增量在边缘处互相映射。HTTP Client 的生命周期由未来组合根管理，Provider 不创建或关闭它。缺失 Secret 会在发请求前明确失败；HTTP 状态错误暂时原样向上抛出，错误转换与重试留给后续任务。当前 Agent Loop 尚未存在，因此 Tool Message 和流式 ToolCall 明确拒绝而非静默生成不完整请求或事件。
+
+未来 `openai` 或其他兼容 Chat Completions 服务只需增加 Profile，复用同一 Adapter；Claude 使用独立的 `anthropic_messages` Adapter，不能塞入 OpenAI-compatible Adapter 的条件分支。所有 Adapter 最终仍只向 Core 暴露 `ModelProvider`。
 
 ## 10. Tool 架构
 

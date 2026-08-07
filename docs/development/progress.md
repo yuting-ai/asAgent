@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 1 已启动；内存版 Conversation Repository、最小 ChatService、开发 CLI 和 Provider 配置/Secret 边界已完成
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型，以及 Docker 干净环境测试入口
+- 项目阶段：阶段 1 已启动；内存版 Conversation Repository、最小 ChatService、开发 CLI、Provider 配置/Secret 边界和 OpenAI-compatible Provider 已完成
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
-- 当前日期：2026-08-06
-- 当前目标：已定义并验证 ProviderConfig 与 SecretProvider；下一独立任务是实现使用该边界的 DeepSeek OpenAI-compatible Provider
+- 当前日期：2026-08-07
+- 当前目标：已实现并离线验证 DeepSeek 可复用的 OpenAI-compatible Provider；下一独立任务是定义 Provider 错误转换与重试边界
 
 ## 2. 已完成
 
@@ -53,10 +53,11 @@
 - [x] 实现阶段 1 的 CLI 对话入口。
 - [x] 确认阶段 1 首个真实模型 Provider 的选择与配置边界。
 - [x] 定义并验证阶段 1 的 ProviderConfig 与 SecretProvider 边界。
+- [x] 实现并离线验证阶段 1 的 OpenAI-compatible Provider。
 
 ## 3. 尚未开始
 
-- [ ] 实现阶段 1 的 DeepSeek OpenAI-compatible Provider（不实现 Keychain 或其他 Secret Store）。
+- [ ] 定义阶段 1 的 Provider 错误转换与重试边界。
 
 ## 4. 阶段 0（已完成）
 
@@ -433,3 +434,30 @@
 ### 下一步
 
 - 在下一个独立任务中实现使用 `ProviderConfig` 与 `SecretProvider` 的 DeepSeek OpenAI-compatible Provider；本次不开始该任务。
+
+## 2026-08-07 OpenAI-compatible Provider 工作记录
+
+### 完成
+
+- 新增基于注入 `httpx.AsyncClient` 的 `OpenAICompatibleProvider`；它由 `ProviderConfig`、`SecretProvider` 和 Provider-neutral `ModelRequest` 组合，不引入 DeepSeek SDK 或厂商对象到 Core。
+- 实现 `POST /chat/completions` 的 system/user/assistant Message、工具定义、文本/推理/工具调用、token usage 映射，以及 SSE 文本和推理增量映射。
+- 缺失 Secret 时在请求前明确失败。Tool Message 与流式 ToolCall 因阶段 2 Agent Loop 尚未实现而明确拒绝，避免静默丢失协议信息。
+
+### 验证
+
+- 检查：使用 `httpx.MockTransport` 运行 OpenAI-compatible Provider 单元测试。
+- 结果：通过；4 个离线测试覆盖一次性请求/响应映射、SSE 文本与推理增量、缺失 Secret 不发请求，以及流式 ToolCall 的明确拒绝。
+- 检查：运行完整质量门禁。
+- 结果：通过；58 个测试通过，Ruff、格式检查、strict mypy、锁文件与 diff 检查均无问题。
+
+### 决策变化
+
+- 无；本次使用 DEC-025 已确认的通用协议 Adapter 方案，未改变 Provider、Secret 或桌面架构决策。
+
+### 风险或问题
+
+- HTTP 状态错误转换、重试策略、配置文件加载、系统 Keychain/Secret Store，以及真实 Key 的手动连通性检查仍未实现；测试保持离线。
+
+### 下一步
+
+- 在下一个独立任务中定义 Provider 错误转换与重试边界；本次不开始该任务。
