@@ -6,7 +6,7 @@
 - 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-07
-- 当前目标：已实现并离线验证开发入口的环境 Secret 后备；下一独立任务是组合 Profile、SecretProvider、HTTP Client 与 OpenAI-compatible Provider
+- 当前目标：已实现并离线验证 Provider 组合根；下一独立任务是设计可选的真实 DeepSeek 手动连通性验证
 
 ## 2. 已完成
 
@@ -57,10 +57,11 @@
 - [x] 定义并验证阶段 1 的 Provider 错误转换与保守重试边界。
 - [x] 实现并验证阶段 1 的 `providers.toml` 非敏感 Profile 配置加载。
 - [x] 实现并验证阶段 1 的开发入口环境 Secret 后备。
+- [x] 在组合根按 Profile 创建 OpenAI-compatible Provider。
 
 ## 3. 尚未开始
 
-- [ ] 在组合根按 Profile 创建 OpenAI-compatible Provider。
+- [ ] 设计阶段 1 的可选真实 DeepSeek 手动连通性验证（不进入默认测试）。
 
 ## 4. 阶段 0（已完成）
 
@@ -543,3 +544,28 @@
 ### 下一步
 
 - 在下一个独立任务中在组合根按 Profile 创建 OpenAI-compatible Provider；本次不开始该任务。
+
+## 2026-08-07 Provider 组合根工作记录
+
+### 完成
+
+- 新增 `create_model_provider()`，按命名 Profile 将 ProviderConfig、SecretProvider 和入口拥有的 AsyncClient 组合为 ModelProvider。
+- 当前仅创建 OpenAI-compatible Adapter；未知 Profile 与未实现的 Anthropic Adapter 明确转换为 ProviderConfigurationError。
+- 工厂不读取文件、环境变量或 Secret，也不创建、关闭或发起 HTTP Client 请求。
+
+### 验证
+
+- 检查：运行 Provider Factory 定向测试和完整质量门禁。
+- 结果：通过；3 个定向测试覆盖 DeepSeek Adapter 创建、未知 Profile 与未实现 Adapter；完整 72 个测试通过，Ruff、格式检查、strict mypy、锁文件与 diff 检查均无问题。
+
+### 决策变化
+
+- 无；本次按 DEC-025 组合既有 Profile、Secret 与 Adapter 边界。
+
+### 风险或问题
+
+- CLI 仍只运行离线 Echo Provider；真实 DeepSeek 连通性验证必须保持可选，不能使用仓库或默认测试中的 Secret。
+
+### 下一步
+
+- 在下一个独立任务中设计可选的真实 DeepSeek 手动连通性验证；本次不开始该任务。
