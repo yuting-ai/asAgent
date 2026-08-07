@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 1 已启动；内存版 Conversation Repository、最小 ChatService、开发 CLI、Provider 配置/Secret 边界和 OpenAI-compatible Provider 已完成
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider，以及 Docker 干净环境测试入口
+- 项目阶段：阶段 1 已启动；内存版 Conversation Repository、最小 ChatService、开发 CLI、Provider 配置/Secret 边界、OpenAI-compatible Provider 及其错误/重试边界已完成
+- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-07
-- 当前目标：已实现并离线验证 DeepSeek 可复用的 OpenAI-compatible Provider；下一独立任务是定义 Provider 错误转换与重试边界
+- 当前目标：已实现并离线验证 Provider 错误转换与保守重试；下一独立任务是加载 `providers.toml` 的非敏感 Profile 配置
 
 ## 2. 已完成
 
@@ -54,10 +54,11 @@
 - [x] 确认阶段 1 首个真实模型 Provider 的选择与配置边界。
 - [x] 定义并验证阶段 1 的 ProviderConfig 与 SecretProvider 边界。
 - [x] 实现并离线验证阶段 1 的 OpenAI-compatible Provider。
+- [x] 定义并验证阶段 1 的 Provider 错误转换与保守重试边界。
 
 ## 3. 尚未开始
 
-- [ ] 定义阶段 1 的 Provider 错误转换与重试边界。
+- [ ] 实现阶段 1 的 `providers.toml` 非敏感 Profile 配置加载。
 
 ## 4. 阶段 0（已完成）
 
@@ -461,3 +462,30 @@
 ### 下一步
 
 - 在下一个独立任务中定义 Provider 错误转换与重试边界；本次不开始该任务。
+
+## 2026-08-07 Provider 错误与重试工作记录
+
+### 完成
+
+- 新增脱敏 `ProviderError` 分类：配置、认证、余额、请求、响应格式、传输、限流和服务端错误可被入口稳定区分，错误不保存服务端响应正文、请求或 Secret。
+- `OpenAICompatibleProvider.complete()` 仅对 HTTP 429 和 5xx 以固定短延迟重试一次；其他 HTTP 状态、Secret 缺失、无效 JSON/响应及传输错误均明确不重试。
+- 流式调用转换 HTTP、传输和响应格式错误，但不自动重试，避免重复展示已经产生的增量。
+
+### 验证
+
+- 检查：运行 OpenAI-compatible Provider 定向测试。
+- 结果：通过；8 个测试覆盖正常映射、SSE、缺失 Secret、流式 ToolCall 拒绝、429 单次重试、401 不重试、传输错误不重试与无效 JSON 的脱敏包装。
+- 检查：运行完整质量门禁。
+- 结果：通过；62 个测试通过，Ruff、格式检查、strict mypy、锁文件与 diff 检查均无问题。
+
+### 决策变化
+
+- 新增 DEC-026：Provider 错误分类与保守重试。
+
+### 风险或问题
+
+- 当前固定重试延迟不解析 `Retry-After`，也未实现指数退避；真实连通性、配置文件加载和系统 Secret Store 仍未实现。
+
+### 下一步
+
+- 在下一个独立任务中加载 `providers.toml` 的非敏感 Profile 配置；本次不开始该任务。

@@ -11,6 +11,12 @@ from ragent.models.contracts import (
     ModelRequest,
     ModelToolDefinition,
 )
+from ragent.models.errors import (
+    ProviderAuthenticationError,
+    ProviderConfigurationError,
+    ProviderResponseError,
+    ProviderTransportError,
+)
 from ragent.models.openai_compatible_provider import OpenAICompatibleProvider
 from ragent.models.provider import ModelProvider
 
@@ -200,7 +206,10 @@ async def test_complete_rejects_missing_secret_before_request() -> None:
             http_client=client,
         )
 
-        with pytest.raises(ValueError, match="secret is unavailable"):
+        with pytest.raises(
+            ProviderConfigurationError,
+            match="secret is unavailable",
+        ):
             await provider.complete(make_request())
 
 
@@ -233,3 +242,125 @@ async def test_stream_rejects_tool_call_chunks_until_agent_loop_exists() -> None
             _events: list[ModelEvent] = [
                 event async for event in provider.stream(make_request())
             ]
+
+
+@pytest.mark.asyncio
+async def test_complete_retries_rate_limit_once() -> None:
+    calls = 0
+    delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+
+        if calls == 1:
+            return httpx.Response(429)
+
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "Recovered."}}],
+                "usage": {
+                    "prompt_tokens": 3,
+                    "completion_tokens": 2,
+                },
+            },
+        )
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        provider = OpenAICompatibleProvider(
+            config=make_config(),
+            secrets=InMemorySecretProvider(
+                {"deepseek_api_key": "value-from-secret-store"},
+            ),
+            http_client=client,
+            sleep=record_sleep,
+        )
+
+        response = await provider.complete(make_request())
+
+    assert response.text == "Recovered."
+    assert calls == 2
+    assert delays == [0.5]
+
+
+@pytest.mark.asyncio
+async def test_complete_does_not_retry_authentication_error() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(401)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        provider = OpenAICompatibleProvider(
+            config=make_config(),
+            secrets=InMemorySecretProvider(
+                {"deepseek_api_key": "value-from-secret-store"},
+            ),
+            http_client=client,
+        )
+
+        with pytest.raises(ProviderAuthenticationError) as error:
+            await provider.complete(make_request())
+
+    assert error.value.status_code == 401
+    assert error.value.retryable is False
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_complete_does_not_retry_ambiguous_transport_error() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise httpx.ConnectError("connection failed", request=request)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        provider = OpenAICompatibleProvider(
+            config=make_config(),
+            secrets=InMemorySecretProvider(
+                {"deepseek_api_key": "value-from-secret-store"},
+            ),
+            http_client=client,
+        )
+
+        with pytest.raises(ProviderTransportError) as error:
+            await provider.complete(make_request())
+
+    assert error.value.retryable is False
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_complete_wraps_invalid_json_without_response_body() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content="not-json")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        provider = OpenAICompatibleProvider(
+            config=make_config(),
+            secrets=InMemorySecretProvider(
+                {"deepseek_api_key": "value-from-secret-store"},
+            ),
+            http_client=client,
+        )
+
+        with pytest.raises(ProviderResponseError) as error:
+            await provider.complete(make_request())
+
+    assert str(error.value) == "model provider returned an invalid completion response"

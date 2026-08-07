@@ -1,5 +1,6 @@
+import asyncio
 import json
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 
 import httpx
 
@@ -10,6 +11,17 @@ from ragent.models.contracts import (
     ModelRequest,
     ModelResponse,
     ModelToolCall,
+)
+from ragent.models.errors import (
+    ProviderAuthenticationError,
+    ProviderBillingError,
+    ProviderConfigurationError,
+    ProviderError,
+    ProviderRateLimitError,
+    ProviderRequestError,
+    ProviderResponseError,
+    ProviderServiceError,
+    ProviderTransportError,
 )
 from ragent.models.secrets import SecretProvider
 
@@ -23,52 +35,99 @@ class OpenAICompatibleProvider:
         config: ProviderConfig,
         secrets: SecretProvider,
         http_client: httpx.AsyncClient,
+        retry_delay_seconds: float = 0.5,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         if config.adapter is not ProviderAdapter.OPENAI_COMPATIBLE:
-            raise ValueError(
-                "OpenAICompatibleProvider requires openai_compatible config"
+            raise ProviderConfigurationError(
+                "OpenAICompatibleProvider requires openai_compatible config",
             )
 
         self._config = config
         self._secrets = secrets
         self._http_client = http_client
+        self._retry_delay_seconds = retry_delay_seconds
+        self._sleep = sleep
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
-        response = await self._http_client.post(
-            self._endpoint(),
-            headers=self._headers(),
-            json=self._payload(request, stream=False),
-            timeout=self._config.timeout_seconds,
-        )
-        response.raise_for_status()
-        return self._parse_response(response.json())
+        for attempt in range(2):
+            try:
+                response = await self._post(request, stream=False)
+                return self._parse_response(response.json())
+            except (json.JSONDecodeError, ValueError) as error:
+                raise ProviderResponseError(
+                    "model provider returned an invalid completion response",
+                ) from error
+            except ProviderError as error:
+                if not error.retryable or attempt == 1:
+                    raise
+
+                await self._sleep(self._retry_delay_seconds)
+
+        raise AssertionError("unreachable")
 
     async def stream(self, request: ModelRequest) -> AsyncIterator[ModelEvent]:
-        async with self._http_client.stream(
-            "POST",
-            self._endpoint(),
-            headers=self._headers(),
-            json=self._payload(request, stream=True),
-            timeout=self._config.timeout_seconds,
-        ) as response:
+        try:
+            async with self._http_client.stream(
+                "POST",
+                self._endpoint(),
+                headers=self._headers(),
+                json=self._payload(request, stream=True),
+                timeout=self._config.timeout_seconds,
+            ) as response:
+                response.raise_for_status()
+
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+
+                    data = line.removeprefix("data:").strip()
+                    if not data:
+                        continue
+                    if data == "[DONE]":
+                        return
+
+                    try:
+                        chunk = self._as_mapping(
+                            json.loads(data),
+                            "stream response chunk",
+                        )
+                        events = self._parse_stream_chunk(chunk)
+                    except (json.JSONDecodeError, ValueError) as error:
+                        raise ProviderResponseError(
+                            "model provider returned an invalid stream response",
+                        ) from error
+
+                    for event in events:
+                        yield event
+        except httpx.HTTPStatusError as error:
+            raise self._error_from_status(error.response.status_code) from error
+        except httpx.RequestError as error:
+            raise ProviderTransportError(
+                "model provider transport request failed",
+            ) from error
+
+    async def _post(
+        self,
+        request: ModelRequest,
+        *,
+        stream: bool,
+    ) -> httpx.Response:
+        try:
+            response = await self._http_client.post(
+                self._endpoint(),
+                headers=self._headers(),
+                json=self._payload(request, stream=stream),
+                timeout=self._config.timeout_seconds,
+            )
             response.raise_for_status()
-
-            async for line in response.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-
-                data = line.removeprefix("data:").strip()
-                if not data:
-                    continue
-                if data == "[DONE]":
-                    return
-
-                chunk = self._as_mapping(
-                    json.loads(data),
-                    "stream response chunk",
-                )
-                for event in self._parse_stream_chunk(chunk):
-                    yield event
+            return response
+        except httpx.HTTPStatusError as error:
+            raise self._error_from_status(error.response.status_code) from error
+        except httpx.RequestError as error:
+            raise ProviderTransportError(
+                "model provider transport request failed",
+            ) from error
 
     def _endpoint(self) -> str:
         return f"{str(self._config.base_url).rstrip('/')}/chat/completions"
@@ -76,8 +135,8 @@ class OpenAICompatibleProvider:
     def _headers(self) -> dict[str, str]:
         secret = self._secrets.get_secret(self._config.secret_id)
         if not secret:
-            raise ValueError(
-                f"secret is unavailable for provider profile {self._config.secret_id!r}",
+            raise ProviderConfigurationError(
+                "model provider secret is unavailable",
             )
 
         return {
@@ -235,6 +294,39 @@ class OpenAICompatibleProvider:
             call_id=self._required_string(tool_call.get("id"), "tool call id"),
             name=self._required_string(function.get("name"), "tool call name"),
             arguments=dict(arguments),
+        )
+
+    @staticmethod
+    def _error_from_status(status_code: int) -> ProviderError:
+        if status_code == 401:
+            return ProviderAuthenticationError(
+                "model provider authentication failed",
+                status_code=status_code,
+            )
+        if status_code == 402:
+            return ProviderBillingError(
+                "model provider account has insufficient balance",
+                status_code=status_code,
+            )
+        if status_code in {400, 422}:
+            return ProviderRequestError(
+                "model provider rejected the request",
+                status_code=status_code,
+            )
+        if status_code == 429:
+            return ProviderRateLimitError(
+                "model provider rate limit reached",
+                status_code=status_code,
+            )
+        if status_code >= 500:
+            return ProviderServiceError(
+                "model provider service failed",
+                status_code=status_code,
+            )
+
+        return ProviderRequestError(
+            "model provider request failed",
+            status_code=status_code,
         )
 
     @staticmethod
