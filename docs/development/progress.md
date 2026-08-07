@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 1 已完成；阶段 2 尚未开始
-- 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试，以及 Docker 干净环境测试入口
+- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry
+- 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试、最小 ToolRegistry，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-07
-- 当前目标：阶段 2 尚未开始，等待确定下一个独立任务
+- 当前目标：阶段 2 的最小 ToolRegistry 已验证；等待确定下一个独立任务
 
 ## 2. 已完成
 
@@ -14,6 +14,7 @@
 - [x] 确认最终项目名称恢复为 asAgent，并由 DEC-027 替代 Ragent 命名。
 - [x] 完成 asAgent 命名迁移的本地质量验证。
 - [x] 创建私有 GitHub 仓库、推送 `main`，并验证 GitHub Actions CI 首次成功运行。
+- [x] 实现并验证阶段 2 的最小 ToolRegistry。
 - [x] 确认本地私有个人助手定位。
 - [x] 确认默认单用户并预留 UserProvider。
 - [x] 确认当前只实现本地对话入口。
@@ -68,7 +69,8 @@
 
 - [x] 创建阶段 1 收尾后的统一本地质量门禁 Pipeline。
 - [x] 创建 GitHub Actions CI workflow，复用离线质量门禁。
-- [ ] 创建阶段 2 的最小 ToolRegistry。
+- [x] 创建阶段 2 的最小 ToolRegistry。
+- [ ] 实现阶段 2 的最小 ToolExecutor。
 
 ## 4. 阶段 0（已完成）
 
@@ -731,3 +733,28 @@
 ### 下一步
 
 - 阶段 2 尚未开始；在用户确认后，再领取一个边界清晰的最小任务。
+
+## 2026-08-07 阶段 2 ToolRegistry 工作记录
+
+### 完成
+
+- 新增 `asagent.tools.ToolRegistry`，以内部命名空间化的 `tool_id` 注册和查询既有 `Tool` 实现。
+- Registry 拒绝重复 ID，且保留原工具不被静默覆盖；查询未知 ID 会给出明确错误。
+- Registry 只维护工具目录，不执行工具，不承担参数校验、权限、批准、超时、审计或模型 Provider 名称映射。
+
+### 验证
+
+- 检查：运行 `uv run pytest tests/unit/test_tool_registry.py` 与完整 `scripts/check.sh`。
+- 结果：通过；3 个定向测试覆盖注册/查询、重复 ID 与未知 ID；完整 75 个测试通过，Ruff、格式检查与 strict mypy 无问题。
+
+### 决策变化
+
+- 无；本次落实既有 Tools/Registry 边界，不新增架构决策。
+
+### 风险或问题
+
+- 无；参数校验、权限、批准、超时、审计和执行仍明确留给后续 `ToolExecutor`。
+
+### 下一步
+
+- 在用户确认后，单独实现阶段 2 的最小 ToolExecutor；本次不开始该任务。
