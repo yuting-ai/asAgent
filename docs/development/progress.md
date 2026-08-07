@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 1 已启动；内存版 Conversation Repository、最小 ChatService、开发 CLI、Provider 配置/Secret 边界、OpenAI-compatible Provider、错误/重试边界与 Profile 配置加载已完成
+- 项目阶段：阶段 1 已完成；阶段 2 尚未开始
 - 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-07
-- 当前目标：已完成可选真实 DeepSeek 手动连通性验证；下一独立任务待确认阶段 1 收尾范围
+- 当前目标：阶段 1 已在本机与 Docker 干净环境验收；下一独立任务是阶段 2 的最小 ToolRegistry
 
 ## 2. 已完成
 
@@ -59,10 +59,11 @@
 - [x] 实现并验证阶段 1 的开发入口环境 Secret 后备。
 - [x] 在组合根按 Profile 创建 OpenAI-compatible Provider。
 - [x] 完成阶段 1 的可选真实 DeepSeek 手动连通性验证。
+- [x] 在 Docker 干净 Linux 环境完成阶段 1 收尾验收。
 
 ## 3. 尚未开始
 
-- [ ] 确认阶段 1 收尾范围与进入阶段 2 的前置条件。
+- [ ] 创建阶段 2 的最小 ToolRegistry。
 
 ## 4. 阶段 0（已完成）
 
@@ -597,3 +598,27 @@
 ### 下一步
 
 - 确认阶段 1 的收尾范围与进入阶段 2 的前置条件；本次不开始下一阶段。
+
+## 2026-08-07 阶段 1 Docker 收尾验收
+
+### 完成
+
+- 在 Docker 干净 Linux 环境重新构建并验证完整阶段 1 代码与锁定依赖。
+- 阶段 1 的连续 CLI、离线 Fake 路径、Profile/Secret/Provider 组合、脱敏错误处理及可选真实连通性验证均已满足最小聊天目标；阶段 2 尚未开始。
+
+### 验证
+
+- 检查：运行 `docker build --file docker/Dockerfile.test --tag ragent-tests:local .` 与 `docker run --rm ragent-tests:local`。
+- 结果：通过；Linux CPython 3.13.14 中 72 个测试通过，Ruff、格式检查、strict mypy 与 `uv lock --check` 均通过。构建与测试未使用本机 `.local-data` 或真实 API Key。
+
+### 决策变化
+
+- 无；本次确认阶段 1 的既有验收条件，不改变 Provider、Docker 或桌面边界。
+
+### 风险或问题
+
+- Claude 原生 Adapter、正式系统 Secret Store 与 usage 的持久化均为后续独立工作；它们不阻塞阶段 1 的最小聊天闭环。
+
+### 下一步
+
+- 在下一个独立任务中创建阶段 2 的最小 ToolRegistry；本次不开始该任务。
