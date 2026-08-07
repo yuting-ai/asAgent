@@ -282,6 +282,8 @@ Provider 的代码实现与用户选择的配置 Profile 分开。`models.config
 
 `models.profile_loader.load_provider_profiles(config_dir)` 是该文件进入系统的唯一当前加载路径：它只读取 `config_dir/providers.toml`，使用标准库 `tomllib` 解析后交给 `ProviderProfiles` 验证；文件不存在、TOML 语法错误和 Profile Schema 错误统一转换为脱敏 `ProviderConfigurationError`。加载过程不创建目录、不读取 Secret、环境变量或 Keychain，也不选择或实例化 Provider。
 
+开发入口可使用 `bootstrap.EnvironmentSecretProvider` 作为临时后备：入口显式传入环境 Mapping，并为每个 `secret_id` 提供允许的环境变量名称绑定。该适配器只读取绑定过且非空的值；它不导入 `os`、不扫描任意环境变量，也不被 Provider、ChatService 或 Core 直接构造。系统 Keychain/Secret Store 仍是后续正式实现。
+
 首个真实 Profile 为 `deepseek`，使用 `openai_compatible` Adapter。阶段 1 的 `OpenAICompatibleProvider` 使用注入的 `httpx.AsyncClient`、`ProviderConfig` 和 `SecretProvider` 发起 `POST /chat/completions`；它将标准化的 system/user/assistant Message、工具定义、一次性响应的文本/推理/工具调用/usage，以及 SSE 的文本和推理增量在边缘处互相映射。HTTP Client 的生命周期由未来组合根管理，Provider 不创建或关闭它。当前 Agent Loop 尚未存在，因此 Tool Message 和流式 ToolCall 明确拒绝而非静默生成不完整请求或事件。
 
 Provider 边缘以 `ProviderError` 及其子类向上报告故障：配置/缺失 Secret、认证、余额、请求、响应格式、传输、限流和服务端错误彼此可区分；错误仅携带安全的类别与可选 HTTP 状态码，不保留响应正文、请求或 Secret。非流式 `complete()` 只对明确可重试的 HTTP 429 和 5xx 使用固定短延迟重试一次；401、402、400、422、响应格式错误、Secret 缺失及传输/超时均不重试。传输故障的结果可能不确定，自动重试会造成重复计费风险；流式调用一旦可能已产生增量，也绝不自动重试。后续入口可根据错误类别给用户可理解提示，后续可再评估 Provider 专用 backoff/Retry-After 支持。

@@ -6,7 +6,7 @@
 - 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-07
-- 当前目标：已实现并离线验证 `providers.toml` 的非敏感 Profile 配置加载；下一独立任务是定义 SecretProvider 的开发入口后备实现
+- 当前目标：已实现并离线验证开发入口的环境 Secret 后备；下一独立任务是组合 Profile、SecretProvider、HTTP Client 与 OpenAI-compatible Provider
 
 ## 2. 已完成
 
@@ -56,10 +56,11 @@
 - [x] 实现并离线验证阶段 1 的 OpenAI-compatible Provider。
 - [x] 定义并验证阶段 1 的 Provider 错误转换与保守重试边界。
 - [x] 实现并验证阶段 1 的 `providers.toml` 非敏感 Profile 配置加载。
+- [x] 实现并验证阶段 1 的开发入口环境 Secret 后备。
 
 ## 3. 尚未开始
 
-- [ ] 定义阶段 1 的 SecretProvider 开发入口后备实现（不接入业务层环境变量读取）。
+- [ ] 在组合根按 Profile 创建 OpenAI-compatible Provider。
 
 ## 4. 阶段 0（已完成）
 
@@ -517,3 +518,28 @@
 ### 下一步
 
 - 在下一个独立任务中定义 SecretProvider 的开发入口后备实现；本次不开始该任务。
+
+## 2026-08-07 开发环境 Secret 后备工作记录
+
+### 完成
+
+- 新增 `EnvironmentSecretProvider`，通过显式 `secret_id` 到环境变量名称的绑定从注入的环境 Mapping 读取开发 Secret。
+- 未绑定、缺失或空 Secret 一律返回缺失值；适配器不导入 `os`，也不扫描任意系统环境变量。
+- Provider、ChatService 与 Core 继续只依赖 `SecretProvider` Protocol；实际环境读取仍只允许由未来组合根显式执行。
+
+### 验证
+
+- 检查：运行 EnvironmentSecretProvider 定向测试和完整质量门禁。
+- 结果：通过；3 个定向测试覆盖显式绑定、拒绝未绑定读取和缺失/空值；完整 69 个测试通过，Ruff、格式检查、strict mypy、锁文件与 diff 检查均无问题。
+
+### 决策变化
+
+- 无；本次实现 DEC-025 的开发期入口后备约束，不替代未来系统 Secret Store。
+
+### 风险或问题
+
+- 尚未实现正式 Keychain/Secret Store，也尚未由组合根创建真实 Provider；CLI 继续默认离线。
+
+### 下一步
+
+- 在下一个独立任务中在组合根按 Profile 创建 OpenAI-compatible Provider；本次不开始该任务。
