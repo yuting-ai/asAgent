@@ -6,7 +6,7 @@
 - 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-07
-- 当前目标：已实现并离线验证 Provider 组合根；下一独立任务是设计可选的真实 DeepSeek 手动连通性验证
+- 当前目标：已完成可选真实 DeepSeek 手动连通性验证；下一独立任务待确认阶段 1 收尾范围
 
 ## 2. 已完成
 
@@ -58,10 +58,11 @@
 - [x] 实现并验证阶段 1 的 `providers.toml` 非敏感 Profile 配置加载。
 - [x] 实现并验证阶段 1 的开发入口环境 Secret 后备。
 - [x] 在组合根按 Profile 创建 OpenAI-compatible Provider。
+- [x] 完成阶段 1 的可选真实 DeepSeek 手动连通性验证。
 
 ## 3. 尚未开始
 
-- [ ] 设计阶段 1 的可选真实 DeepSeek 手动连通性验证（不进入默认测试）。
+- [ ] 确认阶段 1 收尾范围与进入阶段 2 的前置条件。
 
 ## 4. 阶段 0（已完成）
 
@@ -569,3 +570,30 @@
 ### 下一步
 
 - 在下一个独立任务中设计可选的真实 DeepSeek 手动连通性验证；本次不开始该任务。
+
+## 2026-08-07 DeepSeek 手动连通性验证工作记录
+
+### 完成
+
+- 新增可选 `scripts/check_deepseek.py`，作为开发入口显式加载本地忽略的 Profile 配置、绑定临时环境 Secret，并创建 OpenAI-compatible Provider 发起一次最小请求。
+- 手动调用 DeepSeek 成功；响应为预期确认文本，记录到 95 输入 token 与 45 输出 token。
+- 该脚本不属于默认 pytest 或开发 CLI；Profile 和 API Key 均不进入仓库。
+
+### 验证
+
+- 检查：运行脚本的 Ruff、Ruff check 与 strict mypy。
+- 结果：通过；脚本格式、Lint 和类型检查均无问题。
+- 检查：用户在当前终端临时设置环境变量后运行 `uv run python scripts/check_deepseek.py`。
+- 结果：通过；真实 DeepSeek 返回预期文本与 usage，终端输出未包含 API Key。
+
+### 决策变化
+
+- 无；本次只验证既有 DEC-025 Provider 路径，不改变 CLI 默认离线策略。
+
+### 风险或问题
+
+- 临时环境变量应在验证结束后从当前 Shell 清除；系统 Keychain/Secret Store 和正式入口选择仍未实现。
+
+### 下一步
+
+- 确认阶段 1 的收尾范围与进入阶段 2 的前置条件；本次不开始下一阶段。
