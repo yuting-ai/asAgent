@@ -91,6 +91,7 @@ Ragent 采用“每个阶段完成一个可运行闭环”的方式开发。不�
 - 将 Claude 等原生 Messages API Provider 作为独立 Adapter 后续实现，不将其协议细节混入 OpenAI-compatible Adapter。
 - 保存使用量和模型元数据。
 - 添加 Provider 错误转换和重试边界。
+- 阶段 1 收尾后，单独建立质量门禁 Pipeline：先提供一个统一的本地检查入口，再评估 Git pre-commit hook；代码托管到 Git 平台后，用 CI Runner 在干净环境复用同一套 uv 锁文件执行测试、Ruff、mypy 和锁文件检查。当前学习阶段不启用“保存文件即运行完整测试”的文件监听。
 
 ### 验收
 
