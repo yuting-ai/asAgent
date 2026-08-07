@@ -6,7 +6,7 @@
 - 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-07
-- 当前目标：阶段 1 已在本机与 Docker 干净环境验收；下一独立任务是阶段 2 的最小 ToolRegistry
+- 当前目标：阶段 1 本地质量门禁 Pipeline 已完成；下一独立任务是评估并创建 GitHub Actions CI
 
 ## 2. 已完成
 
@@ -63,6 +63,8 @@
 
 ## 3. 尚未开始
 
+- [x] 创建阶段 1 收尾后的统一本地质量门禁 Pipeline。
+- [ ] 创建 GitHub Actions CI，复用离线质量门禁。
 - [ ] 创建阶段 2 的最小 ToolRegistry。
 
 ## 4. 阶段 0（已完成）
@@ -621,4 +623,28 @@
 
 ### 下一步
 
-- 在下一个独立任务中创建阶段 2 的最小 ToolRegistry；本次不开始该任务。
+- 在下一个独立任务中评估并创建 GitHub Actions CI，复用离线质量门禁；本次不开始该任务。
+
+## 2026-08-07 本地质量门禁 Pipeline 工作记录
+
+### 完成
+
+- 新增可执行 `scripts/check.sh`，按固定顺序运行 pytest、Ruff Lint、Ruff 格式检查、strict mypy、锁文件检查和 diff 检查。
+- 该入口作为每个独立小任务结束时的统一本地验收，不使用文件监听，也不替代 Docker 干净环境验证。
+
+### 验证
+
+- 检查：执行 `scripts/check.sh`。
+- 结果：通过；72 个测试通过，Ruff、格式检查、strict mypy、锁文件与 diff 检查均无问题。
+
+### 决策变化
+
+- 无；本次落实路线图的阶段 1 收尾 Pipeline 计划，不引入 pre-commit 或远程 CI。
+
+### 风险或问题
+
+- 本地脚本不能替代独立 Runner；GitHub Actions CI 仍待在代码托管远端建立。
+
+### 下一步
+
+- 在下一个独立任务中评估并创建 GitHub Actions CI，复用离线质量门禁；本次不开始该任务。
