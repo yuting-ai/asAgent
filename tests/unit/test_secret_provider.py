@@ -1,4 +1,4 @@
-from ragent.models.secrets import SecretProvider
+from asagent.models.secrets import SecretProvider
 
 
 class InMemorySecretProvider:

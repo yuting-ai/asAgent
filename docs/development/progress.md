@@ -1,16 +1,18 @@
-# Ragent 当前进度
+# asAgent 当前进度
 
 ## 1. 当前状态
 
 - 项目阶段：阶段 1 已完成；阶段 2 尚未开始
-- 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试，以及 Docker 干净环境测试入口
-- 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
+- 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试，以及 Docker 干净环境测试入口
+- 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-07
-- 当前目标：GitHub Actions CI workflow 已创建，等待推送到 GitHub 后验证云端运行；阶段 2 尚未开始
+- 当前目标：创建或关联 GitHub 远端并检查首个 CI 运行结果；阶段 2 尚未开始
 
 ## 2. 已完成
 
 - [x] 确认项目名称由 AsAgent 变更为 Ragent。
+- [x] 确认最终项目名称恢复为 asAgent，并由 DEC-027 替代 Ragent 命名。
+- [x] 完成 asAgent 命名迁移的本地质量验证。
 - [x] 确认本地私有个人助手定位。
 - [x] 确认默认单用户并预留 UserProvider。
 - [x] 确认当前只实现本地对话入口。
@@ -124,13 +126,13 @@
 
 ## 5. 新 Codex 任务启动提示词
 
-在 Ragent 项目下创建新任务后，使用：
+在 asAgent 项目下创建新任务后，使用：
 
 ```text
 请先完整阅读项目根目录 AGENTS.md，以及其中列出的 docs/development 全部文档。
 
 暂时不要写代码。请先总结：
-1. Ragent 的产品定位和当前范围；
+1. asAgent 的产品定位和当前范围；
 2. Conversation、Run、Message、RunEvent、ToolCall 的关系；
 3. Python Core、Local API、Electron、PyInstaller 和 Docker 的边界，以及 Backend 动态端口握手与 SSE 认证方式；
 4. 已确认决策与仍待确认问题；
@@ -676,3 +678,28 @@
 ### 下一步
 
 - 在下一个独立任务中创建或关联 GitHub 远端、推送当前分支并检查首个 CI 运行结果；本次不执行推送。
+
+## 2026-08-07 asAgent 文档收尾工作记录
+
+### 完成
+
+- 以 DEC-027 为准，将 AGENTS、开发概览、架构、路线、桌面/Docker 文档、学习笔记和当前进度摘要中的有效命名统一为 `asAgent` / `asagent`。
+- 同步 Python 包/CLI、后端 Sidecar、macOS 应用数据目录与 Docker 镜像标签的示例名称。
+- 保留 DEC-023 与带日期工作记录中的 Ragent 表述，确保命名变更的历史可追溯。
+
+### 验证
+
+- 检查：搜索 `AGENTS.md` 与 `docs/` 中的 Ragent 相关命名，并运行 `scripts/check.sh`。
+- 结果：通过；当前文档中仅保留历史决策和历史工作记录的 Ragent 表述；72 个测试通过，Ruff、格式检查、strict mypy、锁文件与 diff 检查均无问题。
+
+### 决策变化
+
+- 无；本次落实既有 DEC-027，不新增架构决策。
+
+### 风险或问题
+
+- GitHub Actions 尚未在云端 Runner 执行，需在创建或关联远端并推送后验证。
+
+### 下一步
+
+- 在下一个独立任务中创建或关联 GitHub 远端、推送当前分支并检查首个 CI 运行结果；阶段 2 仍不开始。

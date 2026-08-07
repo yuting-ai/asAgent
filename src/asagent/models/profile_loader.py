@@ -3,8 +3,8 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from ragent.models.config import ProviderProfiles
-from ragent.models.errors import ProviderConfigurationError
+from asagent.models.config import ProviderProfiles
+from asagent.models.errors import ProviderConfigurationError
 
 
 def load_provider_profiles(config_dir: Path) -> ProviderProfiles:

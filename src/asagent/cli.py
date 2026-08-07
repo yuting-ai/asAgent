@@ -3,16 +3,16 @@ from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from ragent.chat.service import ChatService
-from ragent.core.conversation import Conversation
-from ragent.core.ids import ConversationId, MessageId, UserId
-from ragent.models.contracts import (
+from asagent.chat.service import ChatService
+from asagent.core.conversation import Conversation
+from asagent.core.ids import ConversationId, MessageId, UserId
+from asagent.models.contracts import (
     ModelEvent,
     ModelMessageRole,
     ModelRequest,
     ModelResponse,
 )
-from ragent.storage.in_memory_conversation_repository import (
+from asagent.storage.in_memory_conversation_repository import (
     InMemoryConversationRepository,
 )
 
@@ -44,7 +44,7 @@ async def run_chat(
     read_line: Callable[[str], str],
     write_line: Callable[[str], None],
 ) -> None:
-    write_line("Ragent development chat. Type 'exit' to quit.")
+    write_line("asAgent development chat. Type 'exit' to quit.")
 
     while True:
         try:
@@ -69,7 +69,7 @@ async def run_chat(
             write_line(f"Error: {error}")
             continue
 
-        write_line(f"Ragent: {reply.content}")
+        write_line(f"asAgent: {reply.content}")
 
 
 def now() -> datetime:
@@ -103,7 +103,7 @@ def main() -> None:
             chat_service=chat_service,
             conversation=conversation,
             model_name="development-echo",
-            system_prompt="You are Ragent's development echo assistant.",
+            system_prompt="You are asAgent's development echo assistant.",
             read_line=input,
             write_line=print,
         ),

@@ -2,11 +2,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ragent.core.conversation import Conversation
-from ragent.core.ids import ConversationId, MessageId, UserId
-from ragent.core.messages import AssistantMessage, UserMessage
-from ragent.core.repositories import ConversationRepository
-from ragent.storage.in_memory_conversation_repository import (
+from asagent.core.conversation import Conversation
+from asagent.core.ids import ConversationId, MessageId, UserId
+from asagent.core.messages import AssistantMessage, UserMessage
+from asagent.core.repositories import ConversationRepository
+from asagent.storage.in_memory_conversation_repository import (
     InMemoryConversationRepository,
 )
 
@@ -73,7 +73,7 @@ async def test_messages_are_scoped_ordered_and_require_a_saved_conversation() ->
     user_message = UserMessage(
         message_id=MessageId("msg_user_123"),
         conversation_id=conversation_id,
-        content="Hello, Ragent.",
+        content="Hello, asAgent.",
         created_at=datetime(2026, 8, 5, 9, 2, tzinfo=UTC),
     )
     assistant_message = AssistantMessage(

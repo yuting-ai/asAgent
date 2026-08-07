@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
 
-from ragent.core.tool_definition import ToolDefinition
+from asagent.core.tool_definition import ToolDefinition
 
 
 @runtime_checkable

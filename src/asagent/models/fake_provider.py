@@ -1,7 +1,7 @@
 from collections import deque
 from collections.abc import AsyncIterator, Iterable
 
-from ragent.models.contracts import ModelEvent, ModelRequest, ModelResponse
+from asagent.models.contracts import ModelEvent, ModelRequest, ModelResponse
 
 
 class FakeModelProvider:

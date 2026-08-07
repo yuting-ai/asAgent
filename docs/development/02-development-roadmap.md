@@ -1,8 +1,8 @@
-# Ragent 开发与学习路线
+# asAgent 开发与学习路线
 
 ## 1. 路线原则
 
-Ragent 采用“每个阶段完成一个可运行闭环”的方式开发。不得先写大量框架再等待最后集成。
+asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不得先写大量框架再等待最后集成。
 
 每个阶段按相同节奏进行：
 
@@ -46,7 +46,7 @@ Ragent 采用“每个阶段完成一个可运行闭环”的方式开发。不�
 
 ### 开发任务
 
-- 初始化 Git、`pyproject.toml` 和 `src/ragent` 布局。
+- 初始化 Git、`pyproject.toml` 和 `src/asagent` 布局。
 - 配置 Python 3.13、uv、pytest、pytest-asyncio、Ruff 和 strict mypy；启用 `pydantic.mypy`。
 - 使用 `.python-version` 固定 Python 3.13，提交跨平台 `uv.lock`；本地、Docker 和 CI 均通过 uv 使用同一依赖锁。
 - Pydantic 2 主要用于系统边界；Core 领域对象优先使用 dataclass、Enum、NewType 和 Protocol。

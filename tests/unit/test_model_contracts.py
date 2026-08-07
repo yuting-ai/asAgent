@@ -2,7 +2,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from ragent.models.contracts import (
+from asagent.models.contracts import (
     ModelEvent,
     ModelMessage,
     ModelMessageRole,

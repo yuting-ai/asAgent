@@ -3,18 +3,18 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ragent.chat.service import ChatService
-from ragent.core.conversation import Conversation
-from ragent.core.ids import ConversationId, MessageId, UserId
-from ragent.core.messages import UserMessage
-from ragent.models.contracts import (
+from asagent.chat.service import ChatService
+from asagent.core.conversation import Conversation
+from asagent.core.ids import ConversationId, MessageId, UserId
+from asagent.core.messages import UserMessage
+from asagent.models.contracts import (
     ModelMessage,
     ModelMessageRole,
     ModelResponse,
     ModelToolCall,
 )
-from ragent.models.fake_provider import FakeModelProvider
-from ragent.storage.in_memory_conversation_repository import (
+from asagent.models.fake_provider import FakeModelProvider
+from asagent.storage.in_memory_conversation_repository import (
     InMemoryConversationRepository,
 )
 
@@ -56,7 +56,7 @@ async def test_send_persists_messages_and_uses_conversation_history() -> None:
     provider = FakeModelProvider(
         responses=(
             ModelResponse(text="Hello!", tool_calls=()),
-            ModelResponse(text="I am Ragent.", tool_calls=()),
+            ModelResponse(text="I am asAgent.", tool_calls=()),
         ),
     )
     service = make_chat_service(
@@ -83,7 +83,7 @@ async def test_send_persists_messages_and_uses_conversation_history() -> None:
 
     first_reply = await service.send(
         conversation=conversation,
-        content="Hello, Ragent.",
+        content="Hello, asAgent.",
         model_name="fake-model",
         system_prompt="You are a helpful assistant.",
     )
@@ -95,22 +95,22 @@ async def test_send_persists_messages_and_uses_conversation_history() -> None:
     )
 
     assert first_reply.content == "Hello!"
-    assert second_reply.content == "I am Ragent."
+    assert second_reply.content == "I am asAgent."
     assert [
         message.content
         for message in await repository.list_messages(
             conversation.conversation_id,
         )
     ] == [
-        "Hello, Ragent.",
+        "Hello, asAgent.",
         "Hello!",
         "Who are you?",
-        "I am Ragent.",
+        "I am asAgent.",
     ]
     assert provider.requests[1].messages == (
         ModelMessage(
             role=ModelMessageRole.USER,
-            content="Hello, Ragent.",
+            content="Hello, asAgent.",
         ),
         ModelMessage(
             role=ModelMessageRole.ASSISTANT,
@@ -137,7 +137,7 @@ async def test_send_preserves_user_message_when_provider_fails() -> None:
     with pytest.raises(RuntimeError, match="no scripted response"):
         await service.send(
             conversation=conversation,
-            content="Hello, Ragent.",
+            content="Hello, asAgent.",
             model_name="fake-model",
             system_prompt="You are a helpful assistant.",
         )
@@ -146,7 +146,7 @@ async def test_send_preserves_user_message_when_provider_fails() -> None:
         UserMessage(
             message_id=MessageId("msg_user_1"),
             conversation_id=conversation.conversation_id,
-            content="Hello, Ragent.",
+            content="Hello, asAgent.",
             created_at=datetime(2026, 8, 5, 10, 1, tzinfo=UTC),
         ),
     )

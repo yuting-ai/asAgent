@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ragent.core.ids import RunId, ToolCallId
-from ragent.core.tool_call import ToolCall
+from asagent.core.ids import RunId, ToolCallId
+from asagent.core.tool_call import ToolCall
 
 
 def test_tool_call_preserves_request_and_result() -> None:

@@ -4,15 +4,15 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequenc
 
 import httpx
 
-from ragent.models.config import ProviderAdapter, ProviderConfig
-from ragent.models.contracts import (
+from asagent.models.config import ProviderAdapter, ProviderConfig
+from asagent.models.contracts import (
     ModelEvent,
     ModelMessageRole,
     ModelRequest,
     ModelResponse,
     ModelToolCall,
 )
-from ragent.models.errors import (
+from asagent.models.errors import (
     ProviderAuthenticationError,
     ProviderBillingError,
     ProviderConfigurationError,
@@ -23,11 +23,11 @@ from ragent.models.errors import (
     ProviderServiceError,
     ProviderTransportError,
 )
-from ragent.models.secrets import SecretProvider
+from asagent.models.secrets import SecretProvider
 
 
 class OpenAICompatibleProvider:
-    """Maps Ragent's provider-neutral contracts to Chat Completions HTTP."""
+    """Maps asAgent's provider-neutral contracts to Chat Completions HTTP."""
 
     def __init__(
         self,

@@ -1,16 +1,16 @@
 from collections.abc import Callable
 from datetime import datetime
 
-from ragent.core.conversation import Conversation
-from ragent.core.ids import MessageId
-from ragent.core.messages import AssistantMessage, UserMessage
-from ragent.core.repositories import ConversationRepository
-from ragent.models.contracts import (
+from asagent.core.conversation import Conversation
+from asagent.core.ids import MessageId
+from asagent.core.messages import AssistantMessage, UserMessage
+from asagent.core.repositories import ConversationRepository
+from asagent.models.contracts import (
     ModelMessage,
     ModelMessageRole,
     ModelRequest,
 )
-from ragent.models.provider import ModelProvider
+from asagent.models.provider import ModelProvider
 
 
 class ChatService:

@@ -1,14 +1,12 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from ragent.core.ids import ConversationId, RunId
-from ragent.core.run_status import RunStatus
+from asagent.core.ids import ConversationId, UserId
 
 
 @dataclass(frozen=True, slots=True)
-class Run:
-    run_id: RunId
+class Conversation:
     conversation_id: ConversationId
-    status: RunStatus
+    user_id: UserId
     created_at: datetime
     updated_at: datetime

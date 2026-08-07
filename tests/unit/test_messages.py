@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ragent.core.ids import ConversationId, MessageId
-from ragent.core.messages import AssistantMessage, UserMessage
+from asagent.core.ids import ConversationId, MessageId
+from asagent.core.messages import AssistantMessage, UserMessage
 
 
 def test_user_message_preserves_visible_history_fields() -> None:
@@ -13,13 +13,13 @@ def test_user_message_preserves_visible_history_fields() -> None:
     message = UserMessage(
         message_id=MessageId("msg_user_123"),
         conversation_id=ConversationId("conv_123"),
-        content="Hello, Ragent.",
+        content="Hello, asAgent.",
         created_at=created_at,
     )
 
     assert message.message_id == "msg_user_123"
     assert message.conversation_id == "conv_123"
-    assert message.content == "Hello, Ragent."
+    assert message.content == "Hello, asAgent."
     assert message.created_at == created_at
 
 

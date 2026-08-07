@@ -65,7 +65,7 @@ Message 分为 `UserMessage` 与 `AssistantMessage`，它们表达用户可见�
 
 其中，UserMessage 和 AssistantMessage 属于可见历史；Run、RunEvent 和 ToolCall 属于内部运行过程。
 
-Provider `call_id` 与内部 `ToolCallId` 不能混用：前者由模型 Provider 协议产生，后者是 Ragent 自己稳定的内部身份。`event_id` 用于事件唯一标识和去重；每个 Run 从 1 开始单调递增的 `sequence` 用于严格排序、回放和 SSE 断线续传。
+Provider `call_id` 与内部 `ToolCallId` 不能混用：前者由模型 Provider 协议产生，后者是 asAgent 自己稳定的内部身份。`event_id` 用于事件唯一标识和去重；每个 Run 从 1 开始单调递增的 `sequence` 用于严格排序、回放和 SSE 断线续传。
 
 ## 6. 当前阶段尚未实现的部分
 

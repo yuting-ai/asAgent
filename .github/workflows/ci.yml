@@ -1,4 +1,4 @@
-name: Ragent CI
+name: asAgent CI
 
 on:
   push:

@@ -4,17 +4,17 @@ from pathlib import Path
 
 import httpx
 
-from ragent.bootstrap.environment_secret_provider import (
+from asagent.bootstrap.environment_secret_provider import (
     EnvironmentSecretProvider,
 )
-from ragent.bootstrap.provider_factory import create_model_provider
-from ragent.models.contracts import (
+from asagent.bootstrap.provider_factory import create_model_provider
+from asagent.models.contracts import (
     ModelMessage,
     ModelMessageRole,
     ModelRequest,
 )
-from ragent.models.errors import ProviderError
-from ragent.models.profile_loader import load_provider_profiles
+from asagent.models.errors import ProviderError
+from asagent.models.profile_loader import load_provider_profiles
 
 
 async def run_check() -> int:
@@ -26,7 +26,7 @@ async def run_check() -> int:
     secrets = EnvironmentSecretProvider(
         environment=dict(os.environ),
         bindings={
-            profile.secret_id: "RAGENT_DEEPSEEK_API_KEY",
+            profile.secret_id: "ASAGENT_DEEPSEEK_API_KEY",
         },
     )
 
@@ -41,7 +41,7 @@ async def run_check() -> int:
             response = await provider.complete(
                 ModelRequest(
                     model=profile.model,
-                    system_prompt="Reply with exactly: Ragent connectivity confirmed.",
+                    system_prompt="Reply with exactly: asAgent connectivity confirmed.",
                     messages=(
                         ModelMessage(
                             role=ModelMessageRole.USER,

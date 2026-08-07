@@ -1,23 +1,23 @@
-# Ragent 项目概览
+# asAgent 项目概览
 
 ## 1. 项目定位
 
-Ragent 是一个本地运行、默认单用户、私有化的个人 AI 助手。
+asAgent 是一个本地运行、默认单用户、私有化的个人 AI 助手。
 
 它同时是一个学习型开发项目：开发者通过亲手实现模型调用、Agent Loop、工具系统、会话持久化、上下文管理、MCP、Skills、Memory 和 Electron 桌面客户端，系统理解一个现代 Agent 产品从输入到执行、持久化和交付的完整链路。
 
-项目不以复制 CowAgent 为目标。CowAgent 可以作为成熟实现的参考，Ragent 会在需要时吸收其中有效的工程经验，并重新建立更清晰的身份、状态、Workspace、工具和桌面边界。
+项目不以复制 CowAgent 为目标。CowAgent 可以作为成熟实现的参考，asAgent 会在需要时吸收其中有效的工程经验，并重新建立更清晰的身份、状态、Workspace、工具和桌面边界。
 
-CowAgent 源码位于 `/Users/yuting/Desktop/BityDev/CowAgent`。它不是默认读取的上下文，也不是 Ragent 的运行时或构建依赖。开发过程中只有两种情况可以参考：
+CowAgent 源码位于 `/Users/yuting/Desktop/BityDev/CowAgent`。它不是默认读取的上下文，也不是 asAgent 的运行时或构建依赖。开发过程中只有两种情况可以参考：
 
 1. 用户明确要求查看或比较 CowAgent。
 2. Codex 先说明具体参考目的、准备查看的模块和预期收益，用户确认后再查看。
 
-除此之外，开发应只依据 Ragent 自己的文档、代码和测试推进。参考 CowAgent 时也应优先理解设计取舍，而不是直接复制代码和历史兼容逻辑。
+除此之外，开发应只依据 asAgent 自己的文档、代码和测试推进。参考 CowAgent 时也应优先理解设计取舍，而不是直接复制代码和历史兼容逻辑。
 
 ## 2. 产品愿景
 
-用户安装 Ragent 后，不需要安装 Python 或 Docker，就可以在自己的电脑上与私人助手对话，并逐步让助手安全地读取本地文件、执行工具、调用 MCP 服务、使用 Skills、形成个人记忆和知识。
+用户安装 asAgent 后，不需要安装 Python 或 Docker，就可以在自己的电脑上与私人助手对话，并逐步让助手安全地读取本地文件、执行工具、调用 MCP 服务、使用 Skills、形成个人记忆和知识。
 
 核心承诺：
 
@@ -66,7 +66,7 @@ CowAgent 源码位于 `/Users/yuting/Desktop/BityDev/CowAgent`。它不是默认
 - 微服务、Kubernetes、消息队列集群。
 - 第一版即引入向量数据库。
 - 把 Docker 作为桌面用户的运行前提。
-- 把 CowAgent 源码作为 Ragent 的代码依赖、默认上下文或自动同步来源。
+- 把 CowAgent 源码作为 asAgent 的代码依赖、默认上下文或自动同步来源。
 
 这些能力可以预留接口，但不得增加当前实现复杂度。
 
@@ -203,9 +203,9 @@ Telegram / WeChat 外部消息
 
 ## 9. 产品名称
 
-- 项目名称：`Ragent`
-- Python 包名建议：`ragent`
-- 后端可执行文件建议：`ragent-backend`
-- 桌面应用显示名：`Ragent`
+- 项目名称：`asAgent`
+- Python 包名：`asagent`
+- 后端可执行文件：`asagent-backend`
+- 桌面应用显示名：`asAgent`
 
 名称应保持简单。模块名称优先使用 `chat`、`agent`、`models`、`tools`、`memory`、`workspace`、`storage`、`api` 和 `desktop`。

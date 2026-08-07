@@ -1,13 +1,13 @@
 import httpx
 
-from ragent.models.config import (
+from asagent.models.config import (
     ProviderAdapter,
     ProviderProfiles,
 )
-from ragent.models.errors import ProviderConfigurationError
-from ragent.models.openai_compatible_provider import OpenAICompatibleProvider
-from ragent.models.provider import ModelProvider
-from ragent.models.secrets import SecretProvider
+from asagent.models.errors import ProviderConfigurationError
+from asagent.models.openai_compatible_provider import OpenAICompatibleProvider
+from asagent.models.provider import ModelProvider
+from asagent.models.secrets import SecretProvider
 
 
 def create_model_provider(

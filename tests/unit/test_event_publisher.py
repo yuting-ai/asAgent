@@ -2,9 +2,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ragent.core.event_publisher import EventPublisher
-from ragent.core.ids import ConversationId, EventId, RunId
-from ragent.core.run_event import RunEvent
+from asagent.core.event_publisher import EventPublisher
+from asagent.core.ids import ConversationId, EventId, RunId
+from asagent.core.run_event import RunEvent
 
 
 class CollectingEventPublisher:

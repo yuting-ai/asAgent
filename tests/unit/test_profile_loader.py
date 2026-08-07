@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from ragent.models.errors import ProviderConfigurationError
-from ragent.models.profile_loader import load_provider_profiles
+from asagent.models.errors import ProviderConfigurationError
+from asagent.models.profile_loader import load_provider_profiles
 
 
 def write_profiles(config_dir: Path) -> None:

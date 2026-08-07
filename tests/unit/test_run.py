@@ -3,9 +3,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ragent.core.ids import ConversationId, RunId
-from ragent.core.run import Run
-from ragent.core.run_status import RunStatus
+from asagent.core.ids import ConversationId, RunId
+from asagent.core.run import Run
+from asagent.core.run_status import RunStatus
 
 
 def test_run_preserves_execution_identity_and_state() -> None:

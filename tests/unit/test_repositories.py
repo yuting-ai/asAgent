@@ -2,8 +2,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ragent.core.conversation import Conversation
-from ragent.core.ids import (
+from asagent.core.conversation import Conversation
+from asagent.core.ids import (
     ConversationId,
     EventId,
     MessageId,
@@ -11,12 +11,12 @@ from ragent.core.ids import (
     ToolCallId,
     UserId,
 )
-from ragent.core.messages import AssistantMessage, UserMessage
-from ragent.core.repositories import ConversationRepository, RunRepository
-from ragent.core.run import Run
-from ragent.core.run_event import RunEvent
-from ragent.core.run_status import RunStatus
-from ragent.core.tool_call import ToolCall
+from asagent.core.messages import AssistantMessage, UserMessage
+from asagent.core.repositories import ConversationRepository, RunRepository
+from asagent.core.run import Run
+from asagent.core.run_event import RunEvent
+from asagent.core.run_status import RunStatus
+from asagent.core.tool_call import ToolCall
 
 
 def make_conversation() -> Conversation:
@@ -71,7 +71,7 @@ class ExampleConversationRepository:
             UserMessage(
                 message_id=MessageId("msg_user_123"),
                 conversation_id=conversation_id,
-                content="Hello, Ragent.",
+                content="Hello, asAgent.",
                 created_at=created_at,
             ),
         )
@@ -141,7 +141,7 @@ class ExampleRunRepository:
                 tool_call_id=ToolCallId("tool_123"),
                 run_id=run_id,
                 tool_id="builtin.echo",
-                arguments={"text": "Hello, Ragent."},
+                arguments={"text": "Hello, asAgent."},
                 result=None,
                 error=None,
                 created_at=datetime(2026, 8, 4, 10, 4, tzinfo=UTC),

@@ -1,10 +1,10 @@
 import asyncio
 
-import ragent
+import asagent
 
 
 def test_package_is_importable() -> None:
-    assert ragent.__name__ == "ragent"
+    assert asagent.__name__ == "asagent"
 
 
 async def test_asyncio_support() -> None:

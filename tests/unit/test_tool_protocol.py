@@ -2,8 +2,8 @@ from collections.abc import Mapping
 
 import pytest
 
-from ragent.core.tool import Tool
-from ragent.core.tool_definition import ToolDefinition
+from asagent.core.tool import Tool
+from asagent.core.tool_definition import ToolDefinition
 
 
 class ExampleTool:
@@ -33,4 +33,4 @@ async def test_example_tool_satisfies_protocol_and_executes() -> None:
 
     assert isinstance(tool, Tool)
     assert tool.definition.tool_id == "builtin.echo"
-    assert await tool.execute({"text": "Hello, Ragent."}) == "Echo: Hello, Ragent."
+    assert await tool.execute({"text": "Hello, asAgent."}) == "Echo: Hello, asAgent."

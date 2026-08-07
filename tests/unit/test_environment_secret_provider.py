@@ -1,16 +1,16 @@
-from ragent.bootstrap.environment_secret_provider import (
+from asagent.bootstrap.environment_secret_provider import (
     EnvironmentSecretProvider,
 )
-from ragent.models.secrets import SecretProvider
+from asagent.models.secrets import SecretProvider
 
 
 def test_environment_secret_provider_uses_explicit_binding() -> None:
     provider: SecretProvider = EnvironmentSecretProvider(
         environment={
-            "RAGENT_DEEPSEEK_API_KEY": "development-secret-value",
+            "ASAGENT_DEEPSEEK_API_KEY": "development-secret-value",
         },
         bindings={
-            "deepseek_api_key": "RAGENT_DEEPSEEK_API_KEY",
+            "deepseek_api_key": "ASAGENT_DEEPSEEK_API_KEY",
         },
     )
 

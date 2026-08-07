@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from ragent.core.ids import ConversationId, MessageId
+from asagent.core.ids import ConversationId, MessageId
 
 
 @dataclass(frozen=True, slots=True)

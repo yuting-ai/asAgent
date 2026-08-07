@@ -1,8 +1,8 @@
-# Ragent 桌面端、打包与 Docker 决策
+# asAgent 桌面端、打包与 Docker 决策
 
 ## 1. 总结
 
-此前架构讨论形成了双交付路线，Ragent 在此基础上进一步明确安全和一致性细节：
+此前架构讨论形成了双交付路线，asAgent 在此基础上进一步明确安全和一致性细节：
 
 ```text
 同一套 Python Agent Core
@@ -103,7 +103,7 @@ Renderer 不启动 Python、不读取 API Key、不直接操作文件系统。
 Backend 独立支持：
 
 ```bash
-ragent serve \
+asagent serve \
   --host 127.0.0.1 \
   --port 0 \
   --app-home '<path>' \
@@ -117,13 +117,13 @@ Token 不作为命令行参数。首选由 Main 通过仅连接到该子进程�
 开发环境命令可为：
 
 ```bash
-uv run ragent serve ...
+uv run asagent serve ...
 ```
 
 发布环境命令为：
 
 ```text
-resources/backend/ragent-backend/ragent-backend
+resources/backend/asagent-backend/asagent-backend
 ```
 
 Electron 只依赖 `BackendLauncher` 契约，不关心具体命令。
@@ -246,7 +246,7 @@ class AppPaths:
 macOS 发布环境建议基于 Electron `app.getPath('userData')`：
 
 ```text
-~/Library/Application Support/Ragent/
+~/Library/Application Support/asAgent/
 ├── config/
 │   └── mcp.json                 # 仅非敏感 MCP 配置
 ├── data/
@@ -263,7 +263,7 @@ MCP Token、密码和带凭据的环境变量进入系统 Keychain/Secret Store�
 程序资源位于只读安装目录：
 
 ```text
-Ragent.app/Contents/Resources/
+asAgent.app/Contents/Resources/
 ├── backend/
 └── app-assets/
 ```
@@ -284,8 +284,8 @@ Ragent.app/Contents/Resources/
 输出：
 
 ```text
-desktop/build/dist/ragent-backend/
-├── ragent-backend
+desktop/build/dist/asagent-backend/
+├── asagent-backend
 └── _internal/
 ```
 
@@ -315,8 +315,8 @@ desktop/build/dist/ragent-backend/
 
 ```json
 {
-  "from": "build/dist/ragent-backend",
-  "to": "backend/ragent-backend"
+  "from": "build/dist/asagent-backend",
+  "to": "backend/asagent-backend"
 }
 ```
 
@@ -369,14 +369,14 @@ Electron GUI、文件选择器、本地浏览器、用户 PATH、系统通知、
 uv run pytest
 
 # 本地 Backend
-uv run ragent serve
+uv run asagent serve
 
 # Electron 开发
 cd desktop && npm run dev
 
 # Docker 干净环境测试
-docker build --file docker/Dockerfile.test --tag ragent-tests:local .
-docker run --rm ragent-tests:local
+docker build --file docker/Dockerfile.test --tag asagent-tests:local .
+docker run --rm asagent-tests:local
 
 # 构建 Sidecar
 ./scripts/build-backend.sh

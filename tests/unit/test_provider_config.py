@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from ragent.models.config import (
+from asagent.models.config import (
     ProviderAdapter,
     ProviderConfig,
     ProviderProfiles,

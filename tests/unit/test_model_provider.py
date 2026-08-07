@@ -2,12 +2,12 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from ragent.models.contracts import (
+from asagent.models.contracts import (
     ModelEvent,
     ModelRequest,
     ModelResponse,
 )
-from ragent.models.provider import ModelProvider
+from asagent.models.provider import ModelProvider
 
 
 class ExampleModelProvider:

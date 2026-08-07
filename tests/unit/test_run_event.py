@@ -3,12 +3,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ragent.core.ids import ConversationId, EventId, RunId
-from ragent.core.run_event import RunEvent
+from asagent.core.ids import ConversationId, EventId, RunId
+from asagent.core.run_event import RunEvent
 
 
 def test_run_event_preserves_identity_order_and_payload() -> None:
-    payload = {"text": "Hello, Ragent."}
+    payload = {"text": "Hello, asAgent."}
     created_at = datetime(2026, 8, 3, 10, 0, tzinfo=UTC)
 
     event = RunEvent(
@@ -27,10 +27,10 @@ def test_run_event_preserves_identity_order_and_payload() -> None:
     assert event.sequence == 2
     assert event.event_type == "model.delta"
     assert event.created_at == created_at
-    assert event.data == {"text": "Hello, Ragent."}
+    assert event.data == {"text": "Hello, asAgent."}
 
     payload["text"] = "Changed after publishing."
-    assert event.data == {"text": "Hello, Ragent."}
+    assert event.data == {"text": "Hello, asAgent."}
 
 
 def test_run_event_sequence_must_start_at_one() -> None:

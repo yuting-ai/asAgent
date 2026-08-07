@@ -3,22 +3,22 @@ import json
 import httpx
 import pytest
 
-from ragent.models.config import ProviderConfig
-from ragent.models.contracts import (
+from asagent.models.config import ProviderConfig
+from asagent.models.contracts import (
     ModelEvent,
     ModelMessage,
     ModelMessageRole,
     ModelRequest,
     ModelToolDefinition,
 )
-from ragent.models.errors import (
+from asagent.models.errors import (
     ProviderAuthenticationError,
     ProviderConfigurationError,
     ProviderResponseError,
     ProviderTransportError,
 )
-from ragent.models.openai_compatible_provider import OpenAICompatibleProvider
-from ragent.models.provider import ModelProvider
+from asagent.models.openai_compatible_provider import OpenAICompatibleProvider
+from asagent.models.provider import ModelProvider
 
 
 class InMemorySecretProvider:

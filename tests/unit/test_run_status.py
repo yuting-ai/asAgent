@@ -1,4 +1,4 @@
-from ragent.core.run_status import RunStatus
+from asagent.core.run_status import RunStatus
 
 
 def test_run_status_values_are_stable() -> None:

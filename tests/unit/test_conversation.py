@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ragent.core.conversation import Conversation
-from ragent.core.ids import ConversationId, UserId
+from asagent.core.conversation import Conversation
+from asagent.core.ids import ConversationId, UserId
 
 
 def test_conversation_preserves_identity_owner_and_timestamps() -> None:

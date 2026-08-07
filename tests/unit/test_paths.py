@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from ragent.paths import AppPaths
+from asagent.paths import AppPaths
 
 
 def test_app_paths_from_root_uses_a_stable_directory_layout(

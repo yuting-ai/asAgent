@@ -1,6 +1,6 @@
-from ragent.core.conversation import Conversation
-from ragent.core.ids import ConversationId, UserId
-from ragent.core.messages import AssistantMessage, UserMessage
+from asagent.core.conversation import Conversation
+from asagent.core.ids import ConversationId, UserId
+from asagent.core.messages import AssistantMessage, UserMessage
 
 
 class InMemoryConversationRepository:

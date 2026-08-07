@@ -3,13 +3,13 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ragent.chat.service import ChatService
-from ragent.cli import run_chat
-from ragent.core.conversation import Conversation
-from ragent.core.ids import ConversationId, MessageId, UserId
-from ragent.models.contracts import ModelResponse
-from ragent.models.fake_provider import FakeModelProvider
-from ragent.storage.in_memory_conversation_repository import (
+from asagent.chat.service import ChatService
+from asagent.cli import run_chat
+from asagent.core.conversation import Conversation
+from asagent.core.ids import ConversationId, MessageId, UserId
+from asagent.models.contracts import ModelResponse
+from asagent.models.fake_provider import FakeModelProvider
+from asagent.storage.in_memory_conversation_repository import (
     InMemoryConversationRepository,
 )
 
@@ -51,7 +51,7 @@ async def test_cli_runs_multiple_turns_until_exit() -> None:
     provider = FakeModelProvider(
         responses=(
             ModelResponse(text="Hello!", tool_calls=()),
-            ModelResponse(text="I am Ragent.", tool_calls=()),
+            ModelResponse(text="I am asAgent.", tool_calls=()),
         ),
     )
     chat_service = make_chat_service(
@@ -74,7 +74,7 @@ async def test_cli_runs_multiple_turns_until_exit() -> None:
             ),
         ),
     )
-    inputs = iter(("Hello, Ragent.", "Who are you?", "exit"))
+    inputs = iter(("Hello, asAgent.", "Who are you?", "exit"))
     output: list[str] = []
 
     def read_line(prompt: str) -> str:
@@ -91,9 +91,9 @@ async def test_cli_runs_multiple_turns_until_exit() -> None:
     )
 
     assert output == [
-        "Ragent development chat. Type 'exit' to quit.",
-        "Ragent: Hello!",
-        "Ragent: I am Ragent.",
+        "asAgent development chat. Type 'exit' to quit.",
+        "asAgent: Hello!",
+        "asAgent: I am asAgent.",
     ]
     assert len(provider.requests) == 2
 
@@ -108,7 +108,7 @@ async def test_cli_reports_provider_errors_and_returns_to_input() -> None:
         message_ids=iter((MessageId("msg_user_1"),)),
     )
     output: list[str] = []
-    inputs = iter(("Hello, Ragent.", "exit"))
+    inputs = iter(("Hello, asAgent.", "exit"))
 
     await run_chat(
         chat_service=chat_service,
@@ -120,7 +120,7 @@ async def test_cli_reports_provider_errors_and_returns_to_input() -> None:
     )
 
     assert output == [
-        "Ragent development chat. Type 'exit' to quit.",
+        "asAgent development chat. Type 'exit' to quit.",
         "Error: no scripted response available",
     ]
 
@@ -148,4 +148,4 @@ async def test_cli_stops_cleanly_on_end_of_input() -> None:
         write_line=output.append,
     )
 
-    assert output == ["Ragent development chat. Type 'exit' to quit."]
+    assert output == ["asAgent development chat. Type 'exit' to quit."]

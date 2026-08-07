@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator
 from typing import Protocol, runtime_checkable
 
-from ragent.models.contracts import ModelEvent, ModelRequest, ModelResponse
+from asagent.models.contracts import ModelEvent, ModelRequest, ModelResponse
 
 
 @runtime_checkable

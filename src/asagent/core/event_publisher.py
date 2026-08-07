@@ -1,6 +1,6 @@
 from typing import Protocol, runtime_checkable
 
-from ragent.core.run_event import RunEvent
+from asagent.core.run_event import RunEvent
 
 
 @runtime_checkable

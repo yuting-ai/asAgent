@@ -1,13 +1,13 @@
 import pytest
 
-from ragent.models.contracts import (
+from asagent.models.contracts import (
     ModelEvent,
     ModelRequest,
     ModelResponse,
     ModelToolCall,
 )
-from ragent.models.fake_provider import FakeModelProvider
-from ragent.models.provider import ModelProvider
+from asagent.models.fake_provider import FakeModelProvider
+from asagent.models.provider import ModelProvider
 
 
 def make_request() -> ModelRequest:
@@ -29,7 +29,7 @@ async def test_fake_provider_returns_scripted_text_and_tool_call() -> None:
     )
     fake = FakeModelProvider(
         responses=(
-            ModelResponse(text="Hello, Ragent.", tool_calls=()),
+            ModelResponse(text="Hello, asAgent.", tool_calls=()),
             ModelResponse(text=None, tool_calls=(tool_call,)),
         ),
     )
@@ -39,7 +39,7 @@ async def test_fake_provider_returns_scripted_text_and_tool_call() -> None:
     tool_response = await provider.complete(request)
 
     assert isinstance(provider, ModelProvider)
-    assert text_response.text == "Hello, Ragent."
+    assert text_response.text == "Hello, asAgent."
     assert text_response.tool_calls == ()
     assert tool_response.text is None
     assert tool_response.tool_calls == (tool_call,)
@@ -53,7 +53,7 @@ async def test_fake_provider_returns_scripted_stream() -> None:
         streams=(
             (
                 ModelEvent(event_type="text.delta", text_delta="Hello"),
-                ModelEvent(event_type="text.delta", text_delta=", Ragent."),
+                ModelEvent(event_type="text.delta", text_delta=", asAgent."),
             ),
         ),
     )
@@ -63,7 +63,7 @@ async def test_fake_provider_returns_scripted_stream() -> None:
 
     assert events == [
         ModelEvent(event_type="text.delta", text_delta="Hello"),
-        ModelEvent(event_type="text.delta", text_delta=", Ragent."),
+        ModelEvent(event_type="text.delta", text_delta=", asAgent."),
     ]
     assert fake.requests == (request,)
 

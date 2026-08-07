@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
 
-from ragent.core.ids import ConversationId, EventId, RunId
+from asagent.core.ids import ConversationId, EventId, RunId
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,10 +1,10 @@
 import httpx
 import pytest
 
-from ragent.bootstrap.provider_factory import create_model_provider
-from ragent.models.config import ProviderProfiles
-from ragent.models.errors import ProviderConfigurationError
-from ragent.models.openai_compatible_provider import OpenAICompatibleProvider
+from asagent.bootstrap.provider_factory import create_model_provider
+from asagent.models.config import ProviderProfiles
+from asagent.models.errors import ProviderConfigurationError
+from asagent.models.openai_compatible_provider import OpenAICompatibleProvider
 
 
 class InMemorySecretProvider:

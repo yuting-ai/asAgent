@@ -1,6 +1,6 @@
-# Ragent development instructions
+# asAgent development instructions
 
-Ragent 是一个本地运行、默认单用户、私有化的个人 AI 助手，也是一个边开发边学习 Agent 架构的项目。
+asAgent 是一个本地运行、默认单用户、私有化的个人 AI 助手，也是一个边开发边学习 Agent 架构的项目。
 
 ## 开始工作前
 
@@ -25,15 +25,15 @@ Ragent 是一个本地运行、默认单用户、私有化的个人 AI 助手，
 
 ## CowAgent 参考策略
 
-CowAgent 源码位于 `/Users/yuting/Desktop/BityDev/CowAgent`，它只是 Ragent 的可选、只读参考资料，不是 Ragent 的代码依赖或默认上下文。
+CowAgent 源码位于 `/Users/yuting/Desktop/BityDev/CowAgent`，它只是 asAgent 的可选、只读参考资料，不是 asAgent 的代码依赖或默认上下文。
 
 - 不要在每个任务开始时自动扫描、搜索或读取 CowAgent。
 - 只有用户明确要求参考 CowAgent 时，才读取与当前问题直接相关的文件。
 - 如果认为参考 CowAgent 可能有价值，必须先向用户说明准备比较的具体问题、预计读取的模块以及参考的收益，得到用户确认后再读取。
-- 用户没有确认时，继续基于 Ragent 自己的文档、接口和测试进行设计，不因缺少 CowAgent 参考而停止工作。
+- 用户没有确认时，继续基于 asAgent 自己的文档、接口和测试进行设计，不因缺少 CowAgent 参考而停止工作。
 - 参考时只读取必要范围，先比较设计意图、职责边界和失败处理，不默认复制实现。
 - 不直接复制 CowAgent 代码、配置、Secret、依赖清单或历史兼容逻辑；确需借鉴代码时，必须先解释理由和适配方案。
-- 任何因参考 CowAgent 而改变的 Ragent 架构，都必须记录到 `docs/development/04-decisions.md`。
+- 任何因参考 CowAgent 而改变的 asAgent 架构，都必须记录到 `docs/development/04-decisions.md`。
 
 ## 开发原则
 

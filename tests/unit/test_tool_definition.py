@@ -2,7 +2,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from ragent.core.tool_definition import ToolDefinition
+from asagent.core.tool_definition import ToolDefinition
 
 
 def make_tool_definition(
