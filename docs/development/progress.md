@@ -6,7 +6,7 @@
 - 代码状态：已创建最小 `src/ragent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `ragent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/Ragent`
 - 当前日期：2026-08-07
-- 当前目标：阶段 1 本地质量门禁 Pipeline 已完成；下一独立任务是评估并创建 GitHub Actions CI
+- 当前目标：GitHub Actions CI workflow 已创建，等待推送到 GitHub 后验证云端运行；阶段 2 尚未开始
 
 ## 2. 已完成
 
@@ -64,7 +64,7 @@
 ## 3. 尚未开始
 
 - [x] 创建阶段 1 收尾后的统一本地质量门禁 Pipeline。
-- [ ] 创建 GitHub Actions CI，复用离线质量门禁。
+- [x] 创建 GitHub Actions CI workflow，复用离线质量门禁。
 - [ ] 创建阶段 2 的最小 ToolRegistry。
 
 ## 4. 阶段 0（已完成）
@@ -648,3 +648,31 @@
 ### 下一步
 
 - 在下一个独立任务中评估并创建 GitHub Actions CI，复用离线质量门禁；本次不开始该任务。
+
+## 2026-08-07 GitHub Actions CI 工作记录
+
+### 完成
+
+- 新增 `.github/workflows/ci.yml`；它在 `push` 和 `pull_request` 时运行一个 Ubuntu Runner。
+- Workflow 从提交的 `.python-version` 设置 Python，安装 uv，并通过 `uv sync --locked` 安装锁定依赖。
+- CI 最后复用 `scripts/check.sh`，因此云端与本地执行同一套 pytest、Ruff、mypy、锁文件和 diff 质量门禁。
+- Workflow 权限限制为只读仓库内容，且不读取或配置任何真实模型 Secret。
+
+### 验证
+
+- 检查：本地运行 `scripts/check.sh` 与 `git diff --check`。
+- 结果：通过；72 个测试通过，Ruff、格式检查、strict mypy、锁文件与 diff 检查均无问题。
+- 检查：确认 `.github/workflows/ci.yml` 已创建。
+- 结果：通过；当前本地仓库尚未配置 GitHub remote，故云端 Runner 尚未实际执行。
+
+### 决策变化
+
+- 无；本次落实既有阶段 1 收尾 Pipeline 计划，不改变测试、依赖或 Secret 边界。
+
+### 风险或问题
+
+- GitHub 的实际运行结果必须在创建远端仓库并推送后才能取得；该操作需要单独的用户授权与账户选择。
+
+### 下一步
+
+- 在下一个独立任务中创建或关联 GitHub 远端、推送当前分支并检查首个 CI 运行结果；本次不执行推送。
