@@ -746,6 +746,8 @@
 
 - 检查：运行 `uv run pytest tests/unit/test_tool_registry.py` 与完整 `scripts/check.sh`。
 - 结果：通过；3 个定向测试覆盖注册/查询、重复 ID 与未知 ID；完整 75 个测试通过，Ruff、格式检查与 strict mypy 无问题。
+- 检查：推送 `feat: add tool registry` 后查看 GitHub Actions。
+- 结果：通过；远端 Ubuntu Runner 的 Quality gate 成功完成，确认提交的测试与质量门禁在干净环境中可复现。
 
 ### 决策变化
 
