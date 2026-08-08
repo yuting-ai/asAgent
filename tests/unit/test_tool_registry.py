@@ -33,6 +33,7 @@ def test_register_and_get_tool() -> None:
     registry.register(tool)
 
     assert registry.get("builtin.echo") is tool
+    assert registry.definitions() == (tool.definition,)
 
 
 def test_duplicate_tool_id_is_rejected_without_overwriting() -> None:

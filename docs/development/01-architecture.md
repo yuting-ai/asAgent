@@ -377,6 +377,8 @@ ToolCall
 
 每个 Run 开始时确定一个工具快照，包含内部工具定义、Schema Hash 和 Provider 名称映射。即使 MCP Server 在运行中热更新，本次 Run 的 Schema 和名称映射保持稳定，下一个 Run 再使用新版本。
 
+阶段 2 当前的最小运行时实现为 `tools.snapshot.ToolSnapshot`：它冻结按 Registry 顺序取得的 `ToolDefinition`、内部 `tool_id` 与 Provider 名称的双向 Binding，并导出对应的 `ModelToolDefinition`。当前 OpenAI-compatible 名称规则位于 `models.tool_names`，将不兼容字符规范化并限制为最多 64 个允许字符；名称碰撞在构造 Snapshot 时明确拒绝。Snapshot 还未写入 `Run` 或数据库，阶段 3 持久化时再将同一边界保存为可回放记录。
+
 ## 11. MCP 架构
 
 阶段 8 才实现。结构为：

@@ -1,4 +1,5 @@
 from asagent.core.tool import Tool
+from asagent.core.tool_definition import ToolDefinition
 
 
 class ToolRegistry:
@@ -17,3 +18,6 @@ class ToolRegistry:
             return self._tools[tool_id]
         except KeyError as error:
             raise KeyError(f"tool_id is not registered: {tool_id}") from error
+
+    def definitions(self) -> tuple[ToolDefinition, ...]:
+        return tuple(tool.definition for tool in self._tools.values())
