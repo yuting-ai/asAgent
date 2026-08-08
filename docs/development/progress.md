@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、`builtin.echo` 与 `builtin.calculator`
+- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、`builtin.echo`、`builtin.calculator` 与 `builtin.current_time`
 - 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试、最小 ToolRegistry、最小 ToolExecutor、无副作用的 `builtin.echo`，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-07
-- 当前目标：阶段 2 的最小 ToolRegistry、ToolExecutor、`builtin.echo` 与 `builtin.calculator` 已验证；等待确定下一个独立任务
+- 当前目标：阶段 2 的最小 ToolRegistry、ToolExecutor、`builtin.echo`、`builtin.calculator` 与 `builtin.current_time` 已验证；等待确定下一个独立任务
 
 ## 2. 已完成
 
@@ -18,6 +18,7 @@
 - [x] 实现并验证阶段 2 的最小 ToolExecutor。
 - [x] 实现并验证阶段 2 的首个内置工具 `builtin.echo`。
 - [x] 实现并验证阶段 2 的内置工具 `builtin.calculator`。
+- [x] 实现并验证阶段 2 的内置工具 `builtin.current_time`。
 - [x] 确认本地私有个人助手定位。
 - [x] 确认默认单用户并预留 UserProvider。
 - [x] 确认当前只实现本地对话入口。
@@ -76,7 +77,8 @@
 - [x] 实现阶段 2 的最小 ToolExecutor。
 - [x] 实现阶段 2 的首个内置工具 `builtin.echo`。
 - [x] 实现阶段 2 的内置工具 `builtin.calculator`。
-- [ ] 实现阶段 2 的内置工具 `builtin.current_time`。
+- [x] 实现阶段 2 的内置工具 `builtin.current_time`。
+- [ ] 设计最小 Agent Loop 的输入、步骤限制与终态。
 
 ## 4. 阶段 0（已完成）
 
@@ -868,3 +870,28 @@
 ### 下一步
 
 - 提交本次文档约定后，在下一个独立任务中实现 `builtin.current_time`。
+
+## 2026-08-08 阶段 2 builtin.current_time 工作记录
+
+### 完成
+
+- 新增 `CurrentTimeTool`，内部 ID 为 `builtin.current_time`，不接受参数并返回 UTC ISO 8601 时间字符串。
+- 将时间函数注入 Tool；生产默认使用 UTC 当前时间，测试传入固定时间，避免依赖机器时钟。
+- 拒绝 naive datetime，确保返回结果始终带时区偏移。
+
+### 验证
+
+- 检查：运行 `uv run pytest tests/unit/test_current_time_tool.py` 与完整 `scripts/check.sh`。
+- 结果：通过；3 个定向测试覆盖 Tool Protocol/定义、固定 UTC 时间和 naive 时间拒绝；完整 86 个测试通过，Ruff、格式检查、strict mypy 与锁文件检查无问题。
+
+### 决策变化
+
+- 无；本次落实路线图既有的内置工具范围，不新增架构决策。
+
+### 风险或问题
+
+- 无；时区语义固定为 UTC，后续若需用户时区应由入口或配置层显式提供。
+
+### 下一步
+
+- 在用户确认后，单独设计阶段 2 最小 Agent Loop 的输入、步骤限制与终态；本次不开始该任务。
