@@ -204,6 +204,16 @@
 - 影响：迁移 `src/ragent` 至 `src/asagent` 并更新所有导入、项目元数据、CLI、脚本、测试、Docker/CI、路径示例和当前文档。历史工作记录与 DEC-023 中的 Ragent 表述不改写；迁移完成前不创建 GitHub 远端或推送。由于当前没有发布数据，无需提供运行时名称兼容别名或数据迁移。
 - 替代方案：保留 Ragent、仅把 GitHub 仓库命名为 asAgent、或在 Python 中使用混合大小写 `asAgent`；当前均不采用。
 
+### DEC-028：单人开发使用本地 Commit 与定期 Push 节奏
+
+- 日期：2026-08-08
+- 状态：已确认
+- 背景：当前项目由单人开发。每个小任务都立即 Push 会打断学习节奏，但只保留本地提交又缺少远端备份与 GitHub Actions 的独立环境验证。
+- 决策：每个通过 `scripts/check.sh` 的边界清晰小任务都创建本地 Git commit；Push 在每日收尾、阶段子里程碑、开始风险较高的改动前，或需要 GitHub Actions 验证时执行。GitHub Actions 成功作为远端验收证据，不为单纯的成功结果再单独修改 `progress.md`。
+- 原因：本地 commit 保持小步、可回退历史；定期 push 同时提供异地备份与干净 Runner 验证，避免为每次成功 CI 产生额外的文档提交。
+- 影响：Codex 在小任务完成时提醒 commit；在上述时机提醒 push。`git status -sb` 与 `git log --oneline origin/main..main` 用于查看未同步状态。
+- 替代方案：每个 commit 立即 push，或长期不 push；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：
