@@ -7,6 +7,7 @@ import httpx
 from asagent.models.config import ProviderAdapter, ProviderConfig
 from asagent.models.contracts import (
     ModelEvent,
+    ModelMessage,
     ModelMessageRole,
     ModelRequest,
     ModelResponse,
@@ -145,7 +146,7 @@ class OpenAICompatibleProvider:
         }
 
     def _payload(self, request: ModelRequest, *, stream: bool) -> dict[str, object]:
-        messages: list[dict[str, str]] = []
+        messages: list[dict[str, object]] = []
 
         if request.system_prompt:
             messages.append(
@@ -156,17 +157,7 @@ class OpenAICompatibleProvider:
             )
 
         for message in request.messages:
-            if message.role is ModelMessageRole.TOOL:
-                raise NotImplementedError(
-                    "tool messages require the later Agent Loop contract",
-                )
-
-            messages.append(
-                {
-                    "role": message.role.value,
-                    "content": message.content,
-                }
-            )
+            messages.append(self._message_payload(message))
 
         if not messages:
             raise ValueError("a model request must contain at least one message")
@@ -189,6 +180,32 @@ class OpenAICompatibleProvider:
                 }
                 for tool in request.tools
             ]
+
+        return payload
+
+    def _message_payload(self, message: ModelMessage) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "role": message.role.value,
+            "content": message.content,
+        }
+
+        if message.role is ModelMessageRole.ASSISTANT and message.tool_calls:
+            payload["tool_calls"] = [
+                {
+                    "id": tool_call.call_id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_call.name,
+                        "arguments": json.dumps(dict(tool_call.arguments)),
+                    },
+                }
+                for tool_call in message.tool_calls
+            ]
+
+        if message.role is ModelMessageRole.TOOL:
+            if message.tool_call_id is None:
+                raise AssertionError("validated tool message has no tool_call_id")
+            payload["tool_call_id"] = message.tool_call_id
 
         return payload
 

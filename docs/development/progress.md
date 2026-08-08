@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、`builtin.echo`、`builtin.calculator` 与 `builtin.current_time`
+- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具与非流式工具消息契约
 - 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试、最小 ToolRegistry、最小 ToolExecutor、无副作用的 `builtin.echo`，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-07
-- 当前目标：阶段 2 的最小 ToolRegistry、ToolExecutor、`builtin.echo`、`builtin.calculator` 与 `builtin.current_time` 已验证；等待确定下一个独立任务
+- 当前目标：阶段 2 的工具基础与非流式工具消息契约已验证；等待实现最小 Agent Loop
 
 ## 2. 已完成
 
@@ -19,6 +19,7 @@
 - [x] 实现并验证阶段 2 的首个内置工具 `builtin.echo`。
 - [x] 实现并验证阶段 2 的内置工具 `builtin.calculator`。
 - [x] 实现并验证阶段 2 的内置工具 `builtin.current_time`。
+- [x] 实现并验证阶段 2 的非流式工具消息契约与 OpenAI-compatible 映射。
 - [x] 确认本地私有个人助手定位。
 - [x] 确认默认单用户并预留 UserProvider。
 - [x] 确认当前只实现本地对话入口。
@@ -78,7 +79,8 @@
 - [x] 实现阶段 2 的首个内置工具 `builtin.echo`。
 - [x] 实现阶段 2 的内置工具 `builtin.calculator`。
 - [x] 实现阶段 2 的内置工具 `builtin.current_time`。
-- [ ] 设计最小 Agent Loop 的输入、步骤限制与终态。
+- [x] 实现阶段 2 的非流式工具消息契约与 OpenAI-compatible 映射。
+- [ ] 实现阶段 2 的最小 Agent Loop 与最大决策步数。
 
 ## 4. 阶段 0（已完成）
 
@@ -895,3 +897,28 @@
 ### 下一步
 
 - 在用户确认后，单独设计阶段 2 最小 Agent Loop 的输入、步骤限制与终态；本次不开始该任务。
+
+## 2026-08-08 阶段 2 非流式工具消息契约工作记录
+
+### 完成
+
+- 扩展 Provider-neutral `ModelMessage`：assistant message 可携带 `tool_calls`，TOOL message 必须携带结果文本和配对的 `tool_call_id`。
+- OpenAI-compatible Provider 现在可将 assistant tool call 历史及 tool result 映射为合法 Chat Completions 请求。
+- 保持流式 tool call 明确未实现；本轮只建立非流式 Agent Loop 所需的回传边界。
+
+### 验证
+
+- 检查：运行模型契约、OpenAI-compatible Provider 定向测试与完整 `scripts/check.sh`。
+- 结果：通过；14 个定向测试、完整 88 个测试通过，Ruff、格式检查、strict mypy 与锁文件检查无问题。
+
+### 决策变化
+
+- 无；本次落实既有 tool_use/tool_result 合法配对与 Provider 名称映射边界，不新增架构决策。
+
+### 风险或问题
+
+- 流式工具调用、Run Tool Snapshot 的内部/Provider 名称映射及 Agent Loop 仍未实现。
+
+### 下一步
+
+- 在下一个独立任务中实现带 `max_steps` 的最小非流式 Agent Loop；本次不开始该任务。

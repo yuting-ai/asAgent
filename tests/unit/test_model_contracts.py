@@ -99,3 +99,38 @@ def test_model_contracts_are_immutable() -> None:
 
     with pytest.raises(FrozenInstanceError):
         request.model = "other-model"  # type: ignore[misc]
+
+
+def test_model_messages_require_valid_tool_call_pairing() -> None:
+    tool_call = ModelToolCall(
+        call_id="call_123",
+        name="calculator",
+        arguments={"expression": "2 + 2"},
+    )
+
+    assistant_message = ModelMessage(
+        role=ModelMessageRole.ASSISTANT,
+        content=None,
+        tool_calls=(tool_call,),
+    )
+    tool_message = ModelMessage(
+        role=ModelMessageRole.TOOL,
+        content="4",
+        tool_call_id="call_123",
+    )
+
+    assert assistant_message.tool_calls == (tool_call,)
+    assert tool_message.tool_call_id == "call_123"
+
+    with pytest.raises(ValueError, match="tool_call_id"):
+        ModelMessage(
+            role=ModelMessageRole.TOOL,
+            content="4",
+        )
+
+    with pytest.raises(ValueError, match="only assistant"):
+        ModelMessage(
+            role=ModelMessageRole.USER,
+            content="hello",
+            tool_calls=(tool_call,),
+        )

@@ -265,6 +265,8 @@ class ModelProvider(Protocol):
 
 阶段 0 的最小契约还包括 `ModelMessage`、`ModelMessageRole`、`ModelToolDefinition` 和 `ModelToolCall`：请求使用标准化消息与 Provider 可见工具定义；响应和流事件使用 Provider 返回的 `call_id`、工具名称和参数。Provider `call_id` 不等同于内部 `ToolCallId`，后续 Runtime 通过 Run Tool Snapshot 映射两者。
 
+阶段 2 的非流式工具消息契约已经补齐：assistant `ModelMessage` 可以携带零或多个 `ModelToolCall`；每条 TOOL `ModelMessage` 必须携带文本结果和与原请求配对的 `tool_call_id`。只有 assistant message 可以携带 `tool_calls`，只有 TOOL message 可以携带 `tool_call_id`。OpenAI-compatible Provider 将这两类消息映射为 Chat Completions 的 assistant `tool_calls` 和 tool `tool_call_id`；流式工具调用仍留给后续独立任务。
+
 标准化对象至少覆盖：
 
 - System Prompt。

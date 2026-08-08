@@ -9,6 +9,7 @@ from asagent.models.contracts import (
     ModelMessage,
     ModelMessageRole,
     ModelRequest,
+    ModelToolCall,
     ModelToolDefinition,
 )
 from asagent.models.errors import (
@@ -364,3 +365,80 @@ async def test_complete_wraps_invalid_json_without_response_body() -> None:
             await provider.complete(make_request())
 
     assert str(error.value) == "model provider returned an invalid completion response"
+
+
+@pytest.mark.asyncio
+async def test_complete_maps_tool_call_history_without_network() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["messages"] == [
+            {"role": "system", "content": "Be concise."},
+            {"role": "user", "content": "What is 2 + 2?"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_123",
+                        "type": "function",
+                        "function": {
+                            "name": "calculator",
+                            "arguments": '{"expression": "2 + 2"}',
+                        },
+                    },
+                ],
+            },
+            {
+                "role": "tool",
+                "content": "4",
+                "tool_call_id": "call_123",
+            },
+        ]
+
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "The result is 4."}}]},
+        )
+
+    request = ModelRequest(
+        model="deepseek-test",
+        system_prompt="Be concise.",
+        messages=(
+            ModelMessage(
+                role=ModelMessageRole.USER,
+                content="What is 2 + 2?",
+            ),
+            ModelMessage(
+                role=ModelMessageRole.ASSISTANT,
+                content=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="call_123",
+                        name="calculator",
+                        arguments={"expression": "2 + 2"},
+                    ),
+                ),
+            ),
+            ModelMessage(
+                role=ModelMessageRole.TOOL,
+                content="4",
+                tool_call_id="call_123",
+            ),
+        ),
+        tools=(),
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        provider = OpenAICompatibleProvider(
+            config=make_config(),
+            secrets=InMemorySecretProvider(
+                {"deepseek_api_key": "value-from-secret-store"},
+            ),
+            http_client=client,
+        )
+
+        response = await provider.complete(request)
+
+    assert response.text == "The result is 4."
+    assert response.tool_calls == ()

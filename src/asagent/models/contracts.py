@@ -12,9 +12,41 @@ class ModelMessageRole(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class ModelToolCall:
+    call_id: str
+    name: str
+    arguments: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "arguments",
+            MappingProxyType(dict(self.arguments)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ModelMessage:
     role: ModelMessageRole
-    content: str
+    content: str | None
+    tool_calls: tuple[ModelToolCall, ...] = ()
+    tool_call_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.role is ModelMessageRole.TOOL:
+            if self.content is None:
+                raise ValueError("tool messages require content")
+            if self.tool_call_id is None:
+                raise ValueError("tool messages require tool_call_id")
+            if self.tool_calls:
+                raise ValueError("tool messages cannot contain tool_calls")
+            return
+
+        if self.tool_call_id is not None:
+            raise ValueError("only tool messages can contain tool_call_id")
+
+        if self.role is not ModelMessageRole.ASSISTANT and self.tool_calls:
+            raise ValueError("only assistant messages can contain tool_calls")
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,20 +60,6 @@ class ModelToolDefinition:
             self,
             "input_schema",
             MappingProxyType(dict(self.input_schema)),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class ModelToolCall:
-    call_id: str
-    name: str
-    arguments: Mapping[str, object]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "arguments",
-            MappingProxyType(dict(self.arguments)),
         )
 
 
