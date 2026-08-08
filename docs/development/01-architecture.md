@@ -267,6 +267,20 @@ class ModelProvider(Protocol):
 
 阶段 2 的非流式工具消息契约已经补齐：assistant `ModelMessage` 可以携带零或多个 `ModelToolCall`；每条 TOOL `ModelMessage` 必须携带文本结果和与原请求配对的 `tool_call_id`。只有 assistant message 可以携带 `tool_calls`，只有 TOOL message 可以携带 `tool_call_id`。OpenAI-compatible Provider 将这两类消息映射为 Chat Completions 的 assistant `tool_calls` 和 tool `tool_call_id`；流式工具调用仍留给后续独立任务。
 
+这项契约有两层不变量。单条消息层面由 `ModelMessage` 构造时校验：只有 assistant 可携带 `tool_calls`，只有 TOOL 可携带 `tool_call_id`，TOOL 必须有结果文本且不能再携带 `tool_calls`。跨消息层面由 Context Builder/Agent Loop 保证：每条 TOOL message 都必须对应同一轮中先前 assistant `tool_calls` 的一个 `call_id`，不得产生孤立、重复或未执行的结果。工具成功和失败都要形成可发送给模型的结果文本；不能以丢弃 TOOL message 的方式隐藏执行结果。
+
+### 9.1 最小 Agent Loop 的前置条件
+
+Agent Loop 不是只调用 `ModelProvider.complete()` 的控制流；它会把中间状态重新放回下一次模型请求。因此，在开始实现循环前，必须先满足并保持以下条件：
+
+- Provider-neutral 模型上下文能够表示 assistant tool call 和配对的 TOOL result。
+- 每次工具回合可构造合法的消息序列：assistant tool calls → 对应的 TOOL results → 下一次 model request。
+- 目标 Provider 可以无损映射这段历史；至少有离线 HTTP 边界测试断言生成的请求负载。
+- Fake Provider 可以脚本化“工具调用 → 最终文本”的两次响应，以测试 Loop，而不依赖网络。
+- Loop 在把结果追加到上下文前验证配对关系；Provider 只负责协议映射，不替 Runtime 猜测或修复不合法历史。
+
+这些条件成立后，最小非流式 Loop 才只需关注决策步数、调用工具、追加结果和终态。流式 tool call、持久化 Run Tool Snapshot、参数校验、权限、超时与审计仍按各自的独立任务推进，不能被这份最小上下文契约暗中替代。
+
 标准化对象至少覆盖：
 
 - System Prompt。

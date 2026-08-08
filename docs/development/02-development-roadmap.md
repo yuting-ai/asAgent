@@ -110,13 +110,12 @@ asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不
 
 ### 开发任务
 
-- 实现 `ToolDefinition`、`ToolRegistry`、`ToolExecutor`。
-- 区分内部 `tool_id` 与 Provider 可接受的工具名称，并将映射写入 Tool Snapshot。
-- 实现最小 Agent Loop。
-- 添加：
-  - `builtin.calculator`
-  - `builtin.current_time`
-  - `builtin.echo`
+- 按以下依赖顺序完成最小闭环，不能在模型上下文无法表达工具往返时提前实现 Loop：
+  1. 实现 `ToolDefinition`、`ToolRegistry`、`ToolExecutor` 与确定性的内置工具：`builtin.calculator`、`builtin.current_time`、`builtin.echo`。
+  2. 定义 assistant tool calls 与配对 TOOL results 的 Provider-neutral 消息契约，并覆盖不合法组合。
+  3. 验证目标 Provider 能将该完整历史映射为合法请求；测试必须检查出站负载，而不仅是解析最终响应。
+  4. 区分内部 `tool_id` 与 Provider 可接受的工具名称，并将映射写入 Tool Snapshot。
+  5. 在上述条件成立后实现最小非流式 Agent Loop。
 - 添加最大步骤、重复调用检测和结果截断。
 - 实现基础 Run 取消令牌、模型超时和工具超时；取消定位到 `run_id`。
 - 记录 ToolCall 和 RunEvent。
@@ -128,6 +127,7 @@ asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不
 - 达到最大步骤时进入明确的 `LIMIT_REACHED` 终态，不继续调用工具，也不记录为成功完成。
 - 在模型调用或工具执行期间取消 Run 后，状态进入 `CANCELLED`，下一次 Run 不受影响。
 - tool_use/tool_result 始终合法配对。
+- 每次“模型请求工具 → 工具结果 → 再次模型调用”的历史可由 Provider-neutral 契约表示，并可映射为目标 Provider 的合法请求。
 
 ## 6. 阶段 3：SQLite 与可恢复状态
 

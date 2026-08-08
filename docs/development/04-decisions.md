@@ -214,6 +214,16 @@
 - 影响：Codex 在小任务完成时提醒 commit；在上述时机提醒 push。`git status -sb` 与 `git log --oneline origin/main..main` 用于查看未同步状态。
 - 替代方案：每个 commit 立即 push，或长期不 push；当前均不采用。
 
+### DEC-029：Agent Loop 以完整模型上下文往返为实现前提
+
+- 日期：2026-08-08
+- 状态：已确认
+- 背景：工具执行不是单向的“模型选工具、程序执行”过程。下一次模型调用必须看见先前 assistant 的工具请求以及每个配对的工具结果；若标准化消息或 Provider 不能表达该历史，Loop 即使控制流可运行，也会在真实请求中产生不合法或丢失上下文的交互。
+- 决策：开始最小非流式 Agent Loop 前，先固定并测试完整的上下文往返：assistant `tool_calls`、带结果文本和 `tool_call_id` 的 TOOL message、Provider-neutral 请求，以及目标 Provider 的合法请求映射。`ModelMessage` 负责单条消息的局部不变量；Agent Loop/Context Builder 负责跨消息的 call/result 配对。Provider 只做协议转换，不修复不合法历史。
+- 原因：把工具往返作为明确前置条件，能在离线测试中发现历史表示和出站请求的缺口，避免把问题推迟到接入真实模型后才暴露。
+- 影响：阶段 2 的实施顺序调整为工具基础 → 工具消息契约 → Provider 映射测试 → 内部/Provider 名称映射与 Snapshot → 最小 Loop。流式 tool call、参数校验、权限、超时、审计和持久化仍是独立任务，不因最小 Loop 而视为完成。
+- 替代方案：先完成 Loop 控制流，再补消息模型和 Provider 映射；或让 Provider 容忍并猜测不完整历史；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

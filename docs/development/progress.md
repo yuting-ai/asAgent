@@ -5,8 +5,8 @@
 - 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具与非流式工具消息契约
 - 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试、最小 ToolRegistry、最小 ToolExecutor、无副作用的 `builtin.echo`，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
-- 当前日期：2026-08-07
-- 当前目标：阶段 2 的工具基础与非流式工具消息契约已验证；等待实现最小 Agent Loop
+- 当前日期：2026-08-08
+- 当前目标：已明确最小 Agent Loop 的上下文往返前置条件；下一步是完成内部/Provider 工具名称映射与最小 Run Tool Snapshot，再实现 Loop
 
 ## 2. 已完成
 
@@ -922,3 +922,28 @@
 ### 下一步
 
 - 在下一个独立任务中实现带 `max_steps` 的最小非流式 Agent Loop；本次不开始该任务。
+
+## 2026-08-08 阶段 2 Agent Loop 前置条件文档加固
+
+### 完成
+
+- 明确工具往返的两层约束：`ModelMessage` 负责单条消息字段合法性，Agent Loop/Context Builder 负责跨消息的 call/result 配对。
+- 将 Agent Loop 的开工门槛写入架构：上下文必须可表达完整工具往返，Provider 必须有离线请求映射测试，Fake Provider 必须可脚本化两次模型响应。
+- 调整阶段 2 路线顺序，并新增 DEC-029，禁止在这些前提未满足时先实现 Loop 控制流。
+
+### 验证
+
+- 检查：复核架构、路线图、决策与当前已验证的工具消息契约；运行 `git diff --check`。
+- 结果：通过；文档变更无空白错误，不涉及业务代码或远端 CI。
+
+### 决策变化
+
+- 新增 DEC-029：Agent Loop 以完整模型上下文往返为实现前提。
+
+### 风险或问题
+
+- Run Tool Snapshot 的持久化、流式 tool call 和工具安全管线仍未实现；它们不会被最小 Loop 的文档前提掩盖。
+
+### 下一步
+
+- 在用户确认后，先完成内部/Provider 工具名称映射与最小 Run Tool Snapshot，再实现带 `max_steps` 的最小非流式 Agent Loop；本次不开始该任务。
