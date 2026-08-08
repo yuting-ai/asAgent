@@ -802,6 +802,8 @@
 
 - 检查：运行 `uv run pytest tests/unit/test_echo_tool.py` 与完整 `scripts/check.sh`。
 - 结果：通过；2 个定向测试覆盖 Tool Protocol/定义与执行结果；完整 80 个测试通过，Ruff、格式检查、strict mypy 与锁文件检查无问题。
+- 检查：推送 `feat: add echo tool` 后查看 GitHub Actions。
+- 结果：通过；远端 Ubuntu Runner 的 Quality gate 成功完成，确认本地质量门禁可在干净环境复现。
 
 ### 决策变化
 
