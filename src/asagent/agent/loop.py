@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 
 from asagent.core.run_status import RunStatus
@@ -30,14 +31,18 @@ class AgentLoop:
         executor: ToolExecutor,
         tool_snapshot: ToolSnapshot,
         max_steps: int = 8,
+        max_calls_per_tool_input: int | None = None,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps must be positive")
+        if max_calls_per_tool_input is not None and max_calls_per_tool_input < 1:
+            raise ValueError("max_calls_per_tool_input must be positive")
 
         self._model = model
         self._executor = executor
         self._tool_snapshot = tool_snapshot
         self._max_steps = max_steps
+        self._max_calls_per_tool_input = max_calls_per_tool_input
 
     async def run(
         self,
@@ -47,6 +52,7 @@ class AgentLoop:
         messages: tuple[ModelMessage, ...],
     ) -> AgentLoopResult:
         history = list(messages)
+        calls_by_tool_input: dict[tuple[str, str], int] = {}
 
         for steps_used in range(1, self._max_steps + 1):
             response = await self._model.complete(
@@ -101,7 +107,10 @@ class AgentLoop:
                 )
 
             for tool_call in response.tool_calls:
-                result = await self._execute_tool(tool_call)
+                result = await self._execute_tool(
+                    tool_call,
+                    calls_by_tool_input,
+                )
                 history.append(
                     ModelMessage(
                         role=ModelMessageRole.TOOL,
@@ -112,11 +121,36 @@ class AgentLoop:
 
         raise AssertionError("agent loop exhausted unexpectedly")
 
-    async def _execute_tool(self, tool_call: ModelToolCall) -> str:
+    async def _execute_tool(
+        self,
+        tool_call: ModelToolCall,
+        calls_by_tool_input: dict[tuple[str, str], int],
+    ) -> str:
         try:
             tool_id = self._tool_snapshot.tool_id_for(tool_call.name)
         except KeyError:
             return "Error: requested tool is not in the run snapshot."
+
+        try:
+            canonical_arguments = json.dumps(
+                dict(tool_call.arguments),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+        except (TypeError, ValueError):
+            return "Error: tool arguments are not JSON-compatible."
+
+        call_key = (tool_id, canonical_arguments)
+        calls = calls_by_tool_input.get(call_key, 0)
+        if (
+            self._max_calls_per_tool_input is not None
+            and calls >= self._max_calls_per_tool_input
+        ):
+            return "Error: repeated tool call limit reached."
+
+        calls_by_tool_input[call_key] = calls + 1
 
         try:
             return await self._executor.execute(tool_id, tool_call.arguments)

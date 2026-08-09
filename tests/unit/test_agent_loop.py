@@ -44,7 +44,7 @@ class CountingEchoTool:
 
     async def execute(self, arguments: Mapping[str, object]) -> str:
         self.calls += 1
-        assert arguments == {"text": "hello"}
+        assert arguments["text"] == "hello"
         if self._error is not None:
             raise self._error
         return "Echo: hello"
@@ -62,6 +62,7 @@ def _loop(
     tool: CountingEchoTool,
     *,
     max_steps: int = 8,
+    max_calls_per_tool_input: int | None = None,
 ) -> AgentLoop:
     registry = ToolRegistry()
     registry.register(tool)
@@ -71,6 +72,7 @@ def _loop(
         executor=ToolExecutor(registry),
         tool_snapshot=_snapshot(tool),
         max_steps=max_steps,
+        max_calls_per_tool_input=max_calls_per_tool_input,
     )
 
 
@@ -243,6 +245,68 @@ async def test_loop_returns_error_result_when_tool_execution_fails() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_loop_blocks_the_third_call_with_equivalent_arguments() -> None:
+    first_arguments = {"text": "hello", "attempt": 1}
+    reordered_arguments = {"attempt": 1, "text": "hello"}
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="call_1",
+                        name="builtin_echo",
+                        arguments=first_arguments,
+                    ),
+                ),
+            ),
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="call_2",
+                        name="builtin_echo",
+                        arguments=reordered_arguments,
+                    ),
+                ),
+            ),
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="call_3",
+                        name="builtin_echo",
+                        arguments=first_arguments,
+                    ),
+                ),
+            ),
+            ModelResponse(text="I will stop retrying.", tool_calls=()),
+        ),
+    )
+    tool = CountingEchoTool()
+
+    result = await _loop(
+        provider,
+        tool,
+        max_steps=4,
+        max_calls_per_tool_input=2,
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.steps_used == 4
+    assert tool.calls == 2
+    assert provider.requests[3].messages[-1] == ModelMessage(
+        role=ModelMessageRole.TOOL,
+        content="Error: repeated tool call limit reached.",
+        tool_call_id="call_3",
+    )
+
+
 def test_loop_requires_a_positive_step_limit() -> None:
     provider = FakeModelProvider()
     tool = CountingEchoTool()
@@ -255,4 +319,15 @@ def test_loop_requires_a_positive_step_limit() -> None:
             executor=ToolExecutor(registry),
             tool_snapshot=_snapshot(tool),
             max_steps=0,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="max_calls_per_tool_input must be positive",
+    ):
+        AgentLoop(
+            model=provider,
+            executor=ToolExecutor(registry),
+            tool_snapshot=_snapshot(tool),
+            max_calls_per_tool_input=0,
         )

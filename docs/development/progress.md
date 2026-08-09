@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot 与最小非流式 Agent Loop
+- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop 与可配置的重复调用检测
 - 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试、最小 ToolRegistry、最小 ToolExecutor、无副作用的 `builtin.echo`，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-09
-- 当前目标：最小非流式 Agent Loop 已验证；下一步是为 Loop 实现重复工具调用检测
+- 当前目标：最小非流式 Agent Loop 与重复调用检测已验证；下一步是实现工具结果截断
 
 ## 2. 已完成
 
@@ -22,6 +22,7 @@
 - [x] 实现并验证阶段 2 的非流式工具消息契约与 OpenAI-compatible 映射。
 - [x] 实现并验证阶段 2 的内部/Provider 工具名称映射与最小 Run Tool Snapshot。
 - [x] 实现并验证阶段 2 的带 `max_steps` 最小非流式 Agent Loop。
+- [x] 实现并验证阶段 2 的可配置重复工具调用检测。
 - [x] 确认本地私有个人助手定位。
 - [x] 确认默认单用户并预留 UserProvider。
 - [x] 确认当前只实现本地对话入口。
@@ -84,6 +85,7 @@
 - [x] 实现阶段 2 的非流式工具消息契约与 OpenAI-compatible 映射。
 - [x] 实现阶段 2 的内部/Provider 工具名称映射与最小 Run Tool Snapshot。
 - [x] 实现阶段 2 的最小 Agent Loop 与最大决策步数。
+- [x] 实现阶段 2 的可配置重复工具调用检测。
 
 ## 4. 阶段 0（已完成）
 
@@ -1025,3 +1027,28 @@
 ### 下一步
 
 - 在用户确认后，实现基于内部 `tool_id` 与规范化参数的重复工具调用检测；本次不开始该任务。
+
+## 2026-08-09 阶段 2 重复工具调用检测工作记录
+
+### 完成
+
+- AgentLoop 现在按每次 Run 的内部 `tool_id` 与规范化 JSON 参数统计调用次数；不同 Mapping 键顺序的等价参数视为同一组合。
+- `max_calls_per_tool_input` 默认 `None`，不阻断可能合法的时间敏感或轮询调用；调用方显式设置正整数时，达到上限后返回配对的 TOOL 错误结果而不执行工具。
+- 增加测试：显式上限为 2 时，前两次等价调用正常执行，第三次被阻断；同时验证该上限必须为正数。
+
+### 验证
+
+- 检查：运行 AgentLoop 定向测试、Ruff、strict mypy 与完整 `scripts/check.sh`。
+- 结果：通过；7 个定向测试通过，完整本地质量门禁通过。
+
+### 决策变化
+
+- 新增 DEC-032：重复工具调用检测默认关闭并按策略启用。
+
+### 风险或问题
+
+- 当前仅有 Loop 级可选上限；工具级重复策略、参数校验、超时、取消、结果截断、RunEvent 和持久化仍未实现。
+
+### 下一步
+
+- 在用户确认后，实现工具结果截断；本次不开始该任务。
