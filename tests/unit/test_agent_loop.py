@@ -1,11 +1,14 @@
 import asyncio
 from collections.abc import AsyncIterator, Callable, Mapping
+from datetime import UTC, datetime
 
 import pytest
 
 from asagent.agent.cancellation import RunCancellationToken
 from asagent.agent.loop import AgentLoop
-from asagent.core.ids import RunId
+from asagent.core.event_publisher import EventPublisher
+from asagent.core.ids import ConversationId, EventId, RunId
+from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
 from asagent.core.tool_definition import ToolDefinition
 from asagent.models.contracts import (
@@ -107,6 +110,25 @@ class FixedApprovalPolicy:
         return self._approved
 
 
+class CollectingEventPublisher:
+    def __init__(self) -> None:
+        self.events: list[RunEvent] = []
+
+    async def publish(self, event: RunEvent) -> None:
+        self.events.append(event)
+
+
+class FailingEventPublisher:
+    def __init__(self, event_type: str) -> None:
+        self.events: list[RunEvent] = []
+        self._event_type = event_type
+
+    async def publish(self, event: RunEvent) -> None:
+        self.events.append(event)
+        if event.event_type == self._event_type:
+            raise RuntimeError("event publisher failed")
+
+
 def _snapshot(tool: CountingEchoTool) -> ToolSnapshot:
     return ToolSnapshot.from_definitions(
         (tool.definition,),
@@ -123,6 +145,9 @@ def _loop(
     max_tool_result_chars: int = 4_000,
     granted_permissions: frozenset[str] = frozenset(),
     approval_policy: ToolApprovalPolicy | None = None,
+    event_publisher: EventPublisher | None = None,
+    event_id_factory: Callable[[], EventId] | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> AgentLoop:
     registry = ToolRegistry()
     registry.register(tool)
@@ -138,6 +163,9 @@ def _loop(
         max_steps=max_steps,
         max_calls_per_tool_input=max_calls_per_tool_input,
         max_tool_result_chars=max_tool_result_chars,
+        event_publisher=event_publisher,
+        event_id_factory=event_id_factory,
+        clock=clock,
     )
 
 
@@ -626,6 +654,195 @@ async def test_loop_closes_pending_tool_calls_when_cancelled() -> None:
         content="Error: tool execution cancelled.",
         tool_call_id="call_2",
     )
+
+
+@pytest.mark.asyncio
+async def test_loop_publishes_ordered_safe_events_for_a_tool_round() -> None:
+    tool_call = ModelToolCall(
+        call_id="call_123",
+        name="builtin_echo",
+        arguments={"text": "hello"},
+    )
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(text=None, tool_calls=(tool_call,)),
+            ModelResponse(text="The tool replied.", tool_calls=()),
+        ),
+    )
+    publisher = CollectingEventPublisher()
+    event_ids = iter(EventId(f"evt_{index}") for index in range(1, 9))
+    now = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+
+    result = await _loop(
+        provider,
+        CountingEchoTool(),
+        event_publisher=publisher,
+        event_id_factory=lambda: next(event_ids),
+        clock=lambda: now,
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+        run_id=RunId("run_123"),
+        conversation_id=ConversationId("conv_123"),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert [event.event_type for event in publisher.events] == [
+        "run.started",
+        "model.requested",
+        "model.completed",
+        "tool.requested",
+        "tool.completed",
+        "model.requested",
+        "model.completed",
+        "run.completed",
+    ]
+    assert [event.sequence for event in publisher.events] == list(range(1, 9))
+    assert [event.event_id for event in publisher.events] == [
+        f"evt_{index}" for index in range(1, 9)
+    ]
+    assert all(event.run_id == "run_123" for event in publisher.events)
+    assert all(event.conversation_id == "conv_123" for event in publisher.events)
+    assert publisher.events[3].data == {
+        "tool_call_id": "call_123",
+        "provider_tool_name": "builtin_echo",
+    }
+    assert publisher.events[4].data == {
+        "tool_call_id": "call_123",
+        "tool_id": "builtin.echo",
+    }
+    assert all("hello" not in str(event.data) for event in publisher.events)
+
+
+@pytest.mark.asyncio
+async def test_loop_publishes_failed_terminal_event_for_model_timeout() -> None:
+    publisher = CollectingEventPublisher()
+    event_ids = iter(EventId(f"evt_{index}") for index in range(1, 4))
+    now = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+
+    result = await _loop(
+        TimeoutModelProvider(),
+        CountingEchoTool(),
+        event_publisher=publisher,
+        event_id_factory=lambda: next(event_ids),
+        clock=lambda: now,
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+        run_id=RunId("run_123"),
+        conversation_id=ConversationId("conv_123"),
+    )
+
+    assert result.status is RunStatus.FAILED
+    assert [event.event_type for event in publisher.events] == [
+        "run.started",
+        "model.requested",
+        "run.failed",
+    ]
+    assert publisher.events[-1].data == {"steps_used": 0}
+
+
+@pytest.mark.asyncio
+async def test_loop_publishes_cancelled_and_limit_reached_terminal_events() -> None:
+    now = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+    cancelled_publisher = CollectingEventPublisher()
+    token = RunCancellationToken(RunId("run_123"))
+    token.cancel()
+
+    cancelled = await _loop(
+        FakeModelProvider(),
+        CountingEchoTool(),
+        event_publisher=cancelled_publisher,
+        event_id_factory=lambda: EventId("evt_cancelled"),
+        clock=lambda: now,
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+        cancellation_token=token,
+        run_id=RunId("run_123"),
+        conversation_id=ConversationId("conv_123"),
+    )
+    limit_publisher = CollectingEventPublisher()
+
+    limit_reached = await _loop(
+        FakeModelProvider(
+            responses=(
+                ModelResponse(
+                    text=None,
+                    tool_calls=(
+                        ModelToolCall(
+                            call_id="call_123",
+                            name="builtin_echo",
+                            arguments={"text": "hello"},
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        CountingEchoTool(),
+        max_steps=1,
+        event_publisher=limit_publisher,
+        event_id_factory=lambda: EventId("evt_limit"),
+        clock=lambda: now,
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+        run_id=RunId("run_123"),
+        conversation_id=ConversationId("conv_123"),
+    )
+
+    assert cancelled.status is RunStatus.CANCELLED
+    assert [event.event_type for event in cancelled_publisher.events] == [
+        "run.started",
+        "run.cancelled",
+    ]
+    assert limit_reached.status is RunStatus.LIMIT_REACHED
+    assert [event.event_type for event in limit_publisher.events] == [
+        "run.started",
+        "model.requested",
+        "model.completed",
+        "run.limit_reached",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_loop_stops_when_event_publishing_fails() -> None:
+    tool_call = ModelToolCall(
+        call_id="call_123",
+        name="builtin_echo",
+        arguments={"text": "hello"},
+    )
+    publisher = FailingEventPublisher("model.completed")
+    tool = CountingEchoTool()
+
+    result = await _loop(
+        FakeModelProvider(
+            responses=(ModelResponse(text=None, tool_calls=(tool_call,)),),
+        ),
+        tool,
+        event_publisher=publisher,
+        event_id_factory=lambda: EventId("evt_123"),
+        clock=lambda: datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+        run_id=RunId("run_123"),
+        conversation_id=ConversationId("conv_123"),
+    )
+
+    assert result.status is RunStatus.FAILED
+    assert result.error == "run event publishing failed"
+    assert tool.calls == 0
+    assert [event.event_type for event in publisher.events] == [
+        "run.started",
+        "model.requested",
+        "model.completed",
+    ]
 
 
 def test_loop_requires_a_positive_step_limit() -> None:

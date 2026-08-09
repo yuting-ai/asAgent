@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop、可配置重复调用检测、工具结果截断、基础 Run 取消令牌、模型调用超时、工具执行超时、工具参数校验、最小工具权限策略与最小用户批准 Gate
+- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop、可配置重复调用检测、工具结果截断、基础 Run 取消令牌、模型调用超时、工具执行超时、工具参数校验、最小工具权限策略、最小用户批准 Gate 与最小 RunEvent 记录
 - 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试、最小 ToolRegistry、最小 ToolExecutor、无副作用的 `builtin.echo`，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-09
-- 当前目标：最小非流式 Agent Loop、重复调用检测、结果截断、基础取消令牌、模型调用超时、工具执行超时、工具参数校验、最小工具权限策略与最小用户批准 Gate 已验证；下一步是最小 RunEvent 记录，随后实现内存态开发 CLI 的 Agent 垂直切片
+- 当前目标：最小非流式 Agent Loop、重复调用检测、结果截断、基础取消令牌、模型调用超时、工具执行超时、工具参数校验、最小工具权限策略、最小用户批准 Gate 与最小 RunEvent 记录已验证；下一步是内存态开发 CLI 的 Agent 垂直切片
 
 ## 2. 已完成
 
@@ -25,6 +25,7 @@
 - [x] 实现并验证阶段 2 的可配置重复工具调用检测。
 - [x] 实现并验证阶段 2 的工具结果截断。
 - [x] 实现并验证阶段 2 的基础 Run 取消令牌。
+- [x] 实现并验证阶段 2 的最小 RunEvent 记录。
 - [x] 确认本地私有个人助手定位。
 - [x] 确认默认单用户并预留 UserProvider。
 - [x] 确认当前只实现本地对话入口。
@@ -1232,3 +1233,29 @@
 ### 下一步
 
 - 在用户确认后，实现最小 RunEvent 记录；本次不开始该任务。
+
+## 2026-08-09 阶段 2 最小 RunEvent 记录工作记录
+
+### 完成
+
+- `AgentLoop` 可选注入 `EventPublisher`；启用时，调用方显式传入 Run/Conversation 身份、事件 ID 工厂和时钟。
+- Loop 在 Run 内从 1 单调递增发布启动、模型、工具和四类终态事件；事件仅包含步骤数、工具身份和工具调用 ID，不写入模型文本、工具参数或结果正文。
+- 工具成功与失败分别发布 `tool.completed` 和 `tool.failed`，但模型上下文仍保持原有的配对 TOOL 结果语义。
+- 已配置 Publisher 的发布失败会停止后续工具与模型调用，并返回 `FAILED`；未配置 Publisher 时保持原有最小 Loop 行为。
+
+### 验证
+
+- 检查：运行 `uv run ruff format src/asagent/agent/loop.py tests/unit/test_agent_loop.py`、`uv run pytest tests/unit/test_agent_loop.py`、`uv run ruff check src/asagent/agent/loop.py tests/unit/test_agent_loop.py`、`uv run mypy`、`scripts/check.sh` 和 `git diff --check`。
+- 结果：通过；19 个 AgentLoop 定向测试、完整 117 个测试通过，77 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-043：最小 RunEvent 由 Loop 发布安全元数据，发布失败停止 Run。
+
+### 风险或问题
+
+- 当前事件仍未持久化、查询、回放或通过 SSE 发送；ToolCall 审计与完整运行记录留待后续独立任务。
+
+### 下一步
+
+- 在用户确认后，实现内存态开发 CLI 的 Agent 垂直切片；本次不开始该任务。

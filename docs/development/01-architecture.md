@@ -187,7 +187,7 @@ Runtime 不直接：
 - 读取具体模型厂商环境变量。
 - 向某个渠道发送消息。
 
-阶段 2 当前的 `agent.loop.AgentLoop` 是尚未接入 Repository 或 RunEvent 的最小非流式编排器。它接收 `ModelProvider`、`ToolExecutor`、本次 Run 的 `ToolSnapshot` 和可选取消令牌，在内存中维护模型消息历史，并返回 `AgentLoopResult`。每次 `complete()` 响应消耗一个决策步骤，默认上限为 8；同一响应中的多个工具按稳定顺序执行但不额外消耗步骤。Provider 报告超时时，Loop 返回 `FAILED` 且不计入尚未取得响应的步骤。每次请求始终使用 Snapshot 导出的工具定义，工具结果再作为 TOOL message 进入下一次请求。
+阶段 2 当前的 `agent.loop.AgentLoop` 是尚未接入 Repository 的最小非流式编排器。它接收 `ModelProvider`、`ToolExecutor`、本次 Run 的 `ToolSnapshot` 和可选取消令牌，在内存中维护模型消息历史，并返回 `AgentLoopResult`。每次 `complete()` 响应消耗一个决策步骤，默认上限为 8；同一响应中的多个工具按稳定顺序执行但不额外消耗步骤。Provider 报告超时时，Loop 返回 `FAILED` 且不计入尚未取得响应的步骤。每次请求始终使用 Snapshot 导出的工具定义，工具结果再作为 TOOL message 进入下一次请求。若注入 `EventPublisher`，调用方必须同时提供本次 `run_id`、`conversation_id`、事件 ID 工厂和时钟；Loop 从 1 递增发布 `run.started`、模型/工具状态和终态事件，事件数据只包含步骤数、工具身份与调用 ID 等安全元数据。Publisher 未注入时保持无事件的最小执行；已注入但发布失败时，Loop 立即停止后续模型或工具调用并以 `FAILED` 返回。
 
 ## 7. Agent Loop 状态机
 

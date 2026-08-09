@@ -357,6 +357,16 @@
 - 影响：阶段 2 的下一顺序为最小 RunEvent 记录、最小 CLI Agent 闭环体验，然后再继续 ToolCall 记录及后续阶段工作。该 CLI 是开发体验入口，不替代阶段 1 ChatService 或正式桌面客户端；Run 的持久化、SSE 续传和 UI 仍按既定阶段实现。
 - 替代方案：所有基础能力完成后一次性缝合，或先构建 Electron UI 再逐步补 Core；当前均不采用。
 
+### DEC-043：最小 RunEvent 由 Loop 发布安全元数据，发布失败停止 Run
+
+- 日期：2026-08-09
+- 状态：已确认
+- 背景：阶段 2 的 Loop 已能在内存中完成模型与工具回合，但缺少统一观察出口；未来 CLI、SQLite、SSE 与桌面 UI 若各自推断状态，会产生不一致的执行视图。事件同时不能携带模型上下文、工具参数或结果正文，以免将隐私和 Secret 扩散到日志与传输层。
+- 决策：`AgentLoop` 可选注入 `EventPublisher`。启用时调用方显式提供 `run_id`、`conversation_id`、事件 ID 工厂与时钟；Loop 为单次 Run 从 1 单调递增发布 `run.started`、`model.requested`、`model.completed`、`tool.requested`、`tool.completed` 或 `tool.failed`，以及 `run.completed`、`run.failed`、`run.cancelled`、`run.limit_reached` 终态。事件仅包含步骤数、内部或 Provider 工具名与 `tool_call_id` 等安全元数据。未配置 Publisher 时不发布事件；已配置 Publisher 但任次发布失败时，Loop 停止后续模型和工具调用并返回 `FAILED`。
+- 原因：复用 Core `EventPublisher` Protocol 使观察、持久化和 SSE 保持可替换；显式身份、时间和 ID 工厂使事件可确定测试；停止 Run 避免在调用方已要求可观察性却失去事件流时继续产生新的动作。
+- 影响：当前事件仅进程内发布，不保存、查询、重放或发送给 UI；若最后一次终态事件本身发布失败，不能保证额外记录失败事件。ToolCall 原始结果、审计详情、事件重试与持久化由后续独立任务实现。
+- 替代方案：由 CLI/UI 自行推断 Loop 状态、在事件中记录完整参数和结果、Publisher 缺失时抛错，或发布失败后继续执行；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

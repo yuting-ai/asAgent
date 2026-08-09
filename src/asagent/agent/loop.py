@@ -1,7 +1,12 @@
 import json
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 
 from asagent.agent.cancellation import RunCancellationToken
+from asagent.core.event_publisher import EventPublisher
+from asagent.core.ids import ConversationId, EventId, RunId
+from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
 from asagent.models.contracts import (
     ModelMessage,
@@ -33,6 +38,17 @@ class AgentLoopResult:
     error: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _ToolExecutionResult:
+    content: str
+    succeeded: bool
+    tool_id: str | None
+
+
+class _EventPublishError(RuntimeError):
+    pass
+
+
 class AgentLoop:
     def __init__(
         self,
@@ -43,6 +59,9 @@ class AgentLoop:
         max_steps: int = 8,
         max_calls_per_tool_input: int | None = None,
         max_tool_result_chars: int = 4_000,
+        event_publisher: EventPublisher | None = None,
+        event_id_factory: Callable[[], EventId] | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps must be positive")
@@ -59,6 +78,9 @@ class AgentLoop:
         self._max_steps = max_steps
         self._max_calls_per_tool_input = max_calls_per_tool_input
         self._max_tool_result_chars = max_tool_result_chars
+        self._event_publisher = event_publisher
+        self._event_id_factory = event_id_factory
+        self._clock = clock
 
     async def run(
         self,
@@ -67,137 +89,209 @@ class AgentLoop:
         system_prompt: str,
         messages: tuple[ModelMessage, ...],
         cancellation_token: RunCancellationToken | None = None,
+        run_id: RunId | None = None,
+        conversation_id: ConversationId | None = None,
     ) -> AgentLoopResult:
+        if self._event_publisher is not None and (
+            run_id is None
+            or conversation_id is None
+            or self._event_id_factory is None
+            or self._clock is None
+        ):
+            raise ValueError(
+                "event publishing requires run_id, conversation_id, "
+                "event_id_factory, and clock",
+            )
+
         history = list(messages)
         calls_by_tool_input: dict[tuple[str, str], int] = {}
+        event_sequence = 0
+        steps_used = 0
 
-        for next_step in range(1, self._max_steps + 1):
-            if self._is_cancelled(cancellation_token):
-                return self._cancelled_result(
-                    history,
-                    steps_used=next_step - 1,
-                )
+        async def publish(
+            event_type: str,
+            data: Mapping[str, object],
+        ) -> None:
+            nonlocal event_sequence
 
-            try:
-                response = await self._model.complete(
-                    ModelRequest(
-                        model=model_name,
-                        system_prompt=system_prompt,
-                        messages=tuple(history),
-                        tools=self._tool_snapshot.model_tools,
-                    ),
-                )
-            except ProviderTimeoutError:
-                if self._is_cancelled(cancellation_token):
-                    return self._cancelled_result(
-                        history,
-                        steps_used=next_step - 1,
-                    )
+            if self._event_publisher is None:
+                return
 
-                return AgentLoopResult(
-                    status=RunStatus.FAILED,
-                    text=None,
-                    messages=tuple(history),
-                    steps_used=next_step - 1,
-                    error="model call timed out",
-                )
+            assert run_id is not None
+            assert conversation_id is not None
+            assert self._event_id_factory is not None
+            assert self._clock is not None
 
-            steps_used = next_step
-
-            if self._is_cancelled(cancellation_token):
-                return self._cancelled_result(
-                    history,
-                    steps_used=steps_used,
-                )
-
-            invalid_error = self._invalid_tool_calls_error(response)
-            if invalid_error is not None:
-                return AgentLoopResult(
-                    status=RunStatus.FAILED,
-                    text=None,
-                    messages=tuple(history),
-                    steps_used=steps_used,
-                    error=invalid_error,
-                )
-
-            assistant_message = ModelMessage(
-                role=ModelMessageRole.ASSISTANT,
-                content=response.text,
-                tool_calls=response.tool_calls,
+            event_sequence += 1
+            event = RunEvent(
+                event_id=self._event_id_factory(),
+                run_id=run_id,
+                conversation_id=conversation_id,
+                sequence=event_sequence,
+                event_type=event_type,
+                created_at=self._clock(),
+                data=data,
             )
-            history.append(assistant_message)
+            try:
+                await self._event_publisher.publish(event)
+            except Exception as error:
+                raise _EventPublishError("run event publishing failed") from error
 
-            if not response.tool_calls:
-                if response.text is None:
-                    return AgentLoopResult(
-                        status=RunStatus.FAILED,
-                        text=None,
-                        messages=tuple(history),
-                        steps_used=steps_used,
-                        error="model response contained no text or tool calls",
-                    )
+        async def result(
+            status: RunStatus,
+            text: str | None,
+            error: str | None = None,
+        ) -> AgentLoopResult:
+            await publish(
+                {
+                    RunStatus.COMPLETED: "run.completed",
+                    RunStatus.FAILED: "run.failed",
+                    RunStatus.CANCELLED: "run.cancelled",
+                    RunStatus.LIMIT_REACHED: "run.limit_reached",
+                }[status],
+                {"steps_used": steps_used},
+            )
+            return AgentLoopResult(
+                status=status,
+                text=text,
+                messages=tuple(history),
+                steps_used=steps_used,
+                error=error,
+            )
 
-                return AgentLoopResult(
-                    status=RunStatus.COMPLETED,
-                    text=response.text,
-                    messages=tuple(history),
-                    steps_used=steps_used,
-                )
+        try:
+            await publish("run.started", {})
 
-            if steps_used == self._max_steps:
-                return AgentLoopResult(
-                    status=RunStatus.LIMIT_REACHED,
-                    text=response.text,
-                    messages=tuple(history),
-                    steps_used=steps_used,
-                )
-
-            for index, tool_call in enumerate(response.tool_calls):
+            for next_step in range(1, self._max_steps + 1):
                 if self._is_cancelled(cancellation_token):
-                    self._append_cancelled_tool_results(
-                        history,
-                        response.tool_calls[index:],
+                    return await result(RunStatus.CANCELLED, None)
+
+                await publish("model.requested", {"step": next_step})
+                try:
+                    response = await self._model.complete(
+                        ModelRequest(
+                            model=model_name,
+                            system_prompt=system_prompt,
+                            messages=tuple(history),
+                            tools=self._tool_snapshot.model_tools,
+                        ),
                     )
-                    return self._cancelled_result(
-                        history,
-                        steps_used=steps_used,
+                except ProviderTimeoutError:
+                    if self._is_cancelled(cancellation_token):
+                        return await result(RunStatus.CANCELLED, None)
+
+                    return await result(
+                        RunStatus.FAILED,
+                        None,
+                        "model call timed out",
                     )
 
-                result = self._truncate_tool_result(
-                    await self._execute_tool(
+                steps_used = next_step
+                await publish(
+                    "model.completed",
+                    {
+                        "step": steps_used,
+                        "tool_call_count": len(response.tool_calls),
+                    },
+                )
+
+                if self._is_cancelled(cancellation_token):
+                    return await result(RunStatus.CANCELLED, None)
+
+                invalid_error = self._invalid_tool_calls_error(response)
+                if invalid_error is not None:
+                    return await result(
+                        RunStatus.FAILED,
+                        None,
+                        invalid_error,
+                    )
+
+                assistant_message = ModelMessage(
+                    role=ModelMessageRole.ASSISTANT,
+                    content=response.text,
+                    tool_calls=response.tool_calls,
+                )
+                history.append(assistant_message)
+
+                if not response.tool_calls:
+                    if response.text is None:
+                        return await result(
+                            RunStatus.FAILED,
+                            None,
+                            "model response contained no text or tool calls",
+                        )
+
+                    return await result(RunStatus.COMPLETED, response.text)
+
+                if steps_used == self._max_steps:
+                    return await result(RunStatus.LIMIT_REACHED, response.text)
+
+                for index, tool_call in enumerate(response.tool_calls):
+                    if self._is_cancelled(cancellation_token):
+                        self._append_cancelled_tool_results(
+                            history,
+                            response.tool_calls[index:],
+                        )
+                        return await result(RunStatus.CANCELLED, None)
+
+                    await publish(
+                        "tool.requested",
+                        {
+                            "tool_call_id": tool_call.call_id,
+                            "provider_tool_name": tool_call.name,
+                        },
+                    )
+                    execution = await self._execute_tool(
                         tool_call,
                         calls_by_tool_input,
-                    ),
-                )
-                history.append(
-                    ModelMessage(
-                        role=ModelMessageRole.TOOL,
-                        content=result,
-                        tool_call_id=tool_call.call_id,
-                    ),
-                )
-
-                if self._is_cancelled(cancellation_token):
-                    self._append_cancelled_tool_results(
-                        history,
-                        response.tool_calls[index + 1 :],
                     )
-                    return self._cancelled_result(
-                        history,
-                        steps_used=steps_used,
+                    event_data: dict[str, object] = {
+                        "tool_call_id": tool_call.call_id,
+                    }
+                    if execution.tool_id is not None:
+                        event_data["tool_id"] = execution.tool_id
+                    await publish(
+                        ("tool.completed" if execution.succeeded else "tool.failed"),
+                        event_data,
+                    )
+                    history.append(
+                        ModelMessage(
+                            role=ModelMessageRole.TOOL,
+                            content=self._truncate_tool_result(execution.content),
+                            tool_call_id=tool_call.call_id,
+                        ),
                     )
 
-        raise AssertionError("agent loop exhausted unexpectedly")
+                    if self._is_cancelled(cancellation_token):
+                        self._append_cancelled_tool_results(
+                            history,
+                            response.tool_calls[index + 1 :],
+                        )
+                        return await result(RunStatus.CANCELLED, None)
+
+            raise AssertionError("agent loop exhausted unexpectedly")
+        except _EventPublishError:
+            return AgentLoopResult(
+                status=RunStatus.FAILED,
+                text=None,
+                messages=tuple(history),
+                steps_used=steps_used,
+                error="run event publishing failed",
+            )
 
     async def _execute_tool(
         self,
         tool_call: ModelToolCall,
         calls_by_tool_input: dict[tuple[str, str], int],
-    ) -> str:
+    ) -> _ToolExecutionResult:
         try:
             tool_id = self._tool_snapshot.tool_id_for(tool_call.name)
         except KeyError:
-            return "Error: requested tool is not in the run snapshot."
+            return _ToolExecutionResult(
+                content="Error: requested tool is not in the run snapshot.",
+                succeeded=False,
+                tool_id=None,
+            )
 
         try:
             canonical_arguments = json.dumps(
@@ -208,7 +302,11 @@ class AgentLoop:
                 allow_nan=False,
             )
         except (TypeError, ValueError):
-            return "Error: tool arguments are not JSON-compatible."
+            return _ToolExecutionResult(
+                content="Error: tool arguments are not JSON-compatible.",
+                succeeded=False,
+                tool_id=tool_id,
+            )
 
         call_key = (tool_id, canonical_arguments)
         calls = calls_by_tool_input.get(call_key, 0)
@@ -216,22 +314,50 @@ class AgentLoop:
             self._max_calls_per_tool_input is not None
             and calls >= self._max_calls_per_tool_input
         ):
-            return "Error: repeated tool call limit reached."
+            return _ToolExecutionResult(
+                content="Error: repeated tool call limit reached.",
+                succeeded=False,
+                tool_id=tool_id,
+            )
 
         calls_by_tool_input[call_key] = calls + 1
 
         try:
-            return await self._executor.execute(tool_id, tool_call.arguments)
+            return _ToolExecutionResult(
+                content=await self._executor.execute(tool_id, tool_call.arguments),
+                succeeded=True,
+                tool_id=tool_id,
+            )
         except ToolArgumentsValidationError:
-            return "Error: tool arguments are invalid."
+            return _ToolExecutionResult(
+                content="Error: tool arguments are invalid.",
+                succeeded=False,
+                tool_id=tool_id,
+            )
         except ToolApprovalDeniedError:
-            return "Error: tool approval denied."
+            return _ToolExecutionResult(
+                content="Error: tool approval denied.",
+                succeeded=False,
+                tool_id=tool_id,
+            )
         except ToolPermissionDeniedError:
-            return "Error: tool permission denied."
+            return _ToolExecutionResult(
+                content="Error: tool permission denied.",
+                succeeded=False,
+                tool_id=tool_id,
+            )
         except ToolTimeoutError:
-            return "Error: tool execution timed out."
+            return _ToolExecutionResult(
+                content="Error: tool execution timed out.",
+                succeeded=False,
+                tool_id=tool_id,
+            )
         except Exception:
-            return "Error: tool execution failed."
+            return _ToolExecutionResult(
+                content="Error: tool execution failed.",
+                succeeded=False,
+                tool_id=tool_id,
+            )
 
     @staticmethod
     def _is_cancelled(
@@ -252,19 +378,6 @@ class AgentLoop:
                     tool_call_id=tool_call.call_id,
                 ),
             )
-
-    @staticmethod
-    def _cancelled_result(
-        history: list[ModelMessage],
-        *,
-        steps_used: int,
-    ) -> AgentLoopResult:
-        return AgentLoopResult(
-            status=RunStatus.CANCELLED,
-            text=None,
-            messages=tuple(history),
-            steps_used=steps_used,
-        )
 
     def _truncate_tool_result(self, result: str) -> str:
         if len(result) <= self._max_tool_result_chars:
