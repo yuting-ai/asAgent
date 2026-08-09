@@ -38,6 +38,10 @@ class ProviderTransportError(ProviderError):
     pass
 
 
+class ProviderTimeoutError(ProviderTransportError):
+    pass
+
+
 class ProviderRateLimitError(ProviderError):
     retryable = True
 

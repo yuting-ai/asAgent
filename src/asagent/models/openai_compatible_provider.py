@@ -22,6 +22,7 @@ from asagent.models.errors import (
     ProviderRequestError,
     ProviderResponseError,
     ProviderServiceError,
+    ProviderTimeoutError,
     ProviderTransportError,
 )
 from asagent.models.secrets import SecretProvider
@@ -103,6 +104,10 @@ class OpenAICompatibleProvider:
                         yield event
         except httpx.HTTPStatusError as error:
             raise self._error_from_status(error.response.status_code) from error
+        except httpx.TimeoutException as error:
+            raise ProviderTimeoutError(
+                "model provider request timed out",
+            ) from error
         except httpx.RequestError as error:
             raise ProviderTransportError(
                 "model provider transport request failed",
@@ -125,6 +130,10 @@ class OpenAICompatibleProvider:
             return response
         except httpx.HTTPStatusError as error:
             raise self._error_from_status(error.response.status_code) from error
+        except httpx.TimeoutException as error:
+            raise ProviderTimeoutError(
+                "model provider request timed out",
+            ) from error
         except httpx.RequestError as error:
             raise ProviderTransportError(
                 "model provider transport request failed",

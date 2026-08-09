@@ -274,6 +274,16 @@
 - 影响：最小 Loop 可报告 `CANCELLED` 和已用决策步骤，但尚未持久化 Run 状态、发出 RunEvent 或提供按 `run_id` 查询 Token 的 API。未来 Runtime/Service 负责 Token 生命周期。
 - 替代方案：直接 `task.cancel()`、取消时删除 assistant tool calls、或继续下一次模型调用而不补齐工具结果；当前均不采用。
 
+### DEC-035：模型请求超时由 Provider Profile 管理
+
+- 日期：2026-08-09
+- 状态：已确认
+- 背景：复杂推理的单次模型请求可能明显超过短交互的等待时间；同时，一个长 Agent Run 由多次模型调用、工具执行和外部等待组成，不能以单个短阀值代替整体任务策略。
+- 决策：`ProviderConfig.timeout_seconds` 是单次模型 HTTP 请求的唯一当前超时配置，默认 180 秒，并允许每个命名 Provider Profile 覆盖。OpenAI-compatible Provider 将 HTTP 超时映射为 `ProviderTimeoutError`；非流式 AgentLoop 将该错误收敛为 `FAILED`，且不计入已完成的模型决策步骤。Loop 不再另设重复的模型等待阀值。
+- 原因：Provider 最了解实际传输并且 Profile 可按模型能力、服务商和网络环境配置；180 秒避免把复杂推理误判为故障，同时保留有限等待边界。超时结果具有不确定性，自动重试可能造成重复计费。
+- 影响：Provider 超时与一般传输错误可区分，但当前均不自动重试；工具超时、Run 总 deadline、后台长任务和用户界面中的等待/取消反馈仍是后续独立任务。
+- 替代方案：在 AgentLoop 以固定 30 秒 `asyncio.wait_for` 包裹所有 Provider、取消超时保护、或把数小时的 Run 总时长混入单次 HTTP 配置；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

@@ -1,4 +1,4 @@
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 
 import pytest
 
@@ -8,12 +8,16 @@ from asagent.core.ids import RunId
 from asagent.core.run_status import RunStatus
 from asagent.core.tool_definition import ToolDefinition
 from asagent.models.contracts import (
+    ModelEvent,
     ModelMessage,
     ModelMessageRole,
+    ModelRequest,
     ModelResponse,
     ModelToolCall,
 )
+from asagent.models.errors import ProviderTimeoutError
 from asagent.models.fake_provider import FakeModelProvider
+from asagent.models.provider import ModelProvider
 from asagent.models.tool_names import openai_compatible_tool_name
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.registry import ToolRegistry
@@ -61,6 +65,18 @@ class CountingEchoTool:
         return self._result
 
 
+class TimeoutModelProvider:
+    def __init__(self) -> None:
+        self.requests: list[ModelRequest] = []
+
+    async def complete(self, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        raise ProviderTimeoutError("model provider request timed out")
+
+    def stream(self, request: ModelRequest) -> AsyncIterator[ModelEvent]:
+        raise AssertionError("stream is not used by AgentLoop")
+
+
 def _snapshot(tool: CountingEchoTool) -> ToolSnapshot:
     return ToolSnapshot.from_definitions(
         (tool.definition,),
@@ -69,7 +85,7 @@ def _snapshot(tool: CountingEchoTool) -> ToolSnapshot:
 
 
 def _loop(
-    provider: FakeModelProvider,
+    provider: ModelProvider,
     tool: CountingEchoTool,
     *,
     max_steps: int = 8,
@@ -375,6 +391,26 @@ async def test_loop_stops_before_model_when_cancelled() -> None:
     assert result.steps_used == 0
     assert result.messages == (_user_message(),)
     assert provider.requests == ()
+    assert tool.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_loop_fails_when_model_provider_times_out() -> None:
+    provider = TimeoutModelProvider()
+    tool = CountingEchoTool()
+
+    result = await _loop(provider, tool).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+    )
+
+    assert result.status is RunStatus.FAILED
+    assert result.text is None
+    assert result.error == "model call timed out"
+    assert result.steps_used == 0
+    assert result.messages == (_user_message(),)
+    assert len(provider.requests) == 1
     assert tool.calls == 0
 
 

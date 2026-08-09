@@ -35,7 +35,7 @@ def test_provider_profiles_support_openai_compatible_and_anthropic_adapters() ->
     assert deepseek.adapter is ProviderAdapter.OPENAI_COMPATIBLE
     assert deepseek.model == "deepseek-chat"
     assert str(deepseek.base_url).startswith("https://api.example.test/")
-    assert deepseek.timeout_seconds == 30.0
+    assert deepseek.timeout_seconds == 180.0
 
     assert claude.adapter is ProviderAdapter.ANTHROPIC_MESSAGES
     assert claude.timeout_seconds == 45.0

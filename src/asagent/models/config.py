@@ -21,7 +21,7 @@ class ProviderConfig(BaseModel):
     model: str = Field(min_length=1)
     base_url: AnyHttpUrl
     secret_id: str = Field(min_length=1)
-    timeout_seconds: float = Field(default=30.0, gt=0)
+    timeout_seconds: float = Field(default=180.0, gt=0)
 
 
 class ProviderProfiles(BaseModel):

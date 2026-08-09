@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop、可配置重复调用检测、工具结果截断与基础 Run 取消令牌
+- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop、可配置重复调用检测、工具结果截断、基础 Run 取消令牌与模型调用超时
 - 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试、最小 ToolRegistry、最小 ToolExecutor、无副作用的 `builtin.echo`，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-09
-- 当前目标：最小非流式 Agent Loop、重复调用检测、结果截断与基础取消令牌已验证；下一步是实现模型调用超时
+- 当前目标：最小非流式 Agent Loop、重复调用检测、结果截断、基础取消令牌与模型调用超时已验证；下一步是实现工具执行超时
 
 ## 2. 已完成
 
@@ -1106,3 +1106,28 @@
 ### 下一步
 
 - 在用户确认后，实现模型调用超时；本次不开始该任务。
+
+## 2026-08-09 阶段 2 模型调用超时工作记录
+
+### 完成
+
+- `ProviderConfig.timeout_seconds` 的默认值调整为 180 秒；命名 Provider Profile 仍可按模型或服务商覆盖该单次 HTTP 请求的传输超时。
+- OpenAI-compatible Provider 将 `httpx.TimeoutException` 转换为明确的 `ProviderTimeoutError`，并沿用不自动重试的安全策略。
+- AgentLoop 捕获模型超时后返回 `FAILED`、安全错误文本和原有消息历史；未取得模型响应不会消耗决策步骤。
+
+### 验证
+
+- 检查：运行 Provider 配置、OpenAI-compatible Provider 与 AgentLoop 定向测试，随后运行 Ruff、strict mypy 与完整 `scripts/check.sh`。
+- 结果：通过；26 个定向测试、完整 104 个测试通过，75 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-035：模型请求超时由 Provider Profile 管理。
+
+### 风险或问题
+
+- 当前 180 秒只约束单次模型 HTTP 请求，不是整个 Run 的总 deadline；工具执行超时、后台长任务、RunEvent、审计与持久化仍未实现。
+
+### 下一步
+
+- 在用户确认后，实现工具执行超时；本次不开始该任务。

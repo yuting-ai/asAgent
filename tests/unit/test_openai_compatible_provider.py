@@ -16,6 +16,7 @@ from asagent.models.errors import (
     ProviderAuthenticationError,
     ProviderConfigurationError,
     ProviderResponseError,
+    ProviderTimeoutError,
     ProviderTransportError,
 )
 from asagent.models.openai_compatible_provider import OpenAICompatibleProvider
@@ -339,6 +340,33 @@ async def test_complete_does_not_retry_ambiguous_transport_error() -> None:
         )
 
         with pytest.raises(ProviderTransportError) as error:
+            await provider.complete(make_request())
+
+    assert error.value.retryable is False
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_complete_maps_http_timeout_to_provider_timeout_error() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise httpx.ReadTimeout("request timed out", request=request)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        provider = OpenAICompatibleProvider(
+            config=make_config(),
+            secrets=InMemorySecretProvider(
+                {"deepseek_api_key": "value-from-secret-store"},
+            ),
+            http_client=client,
+        )
+
+        with pytest.raises(ProviderTimeoutError) as error:
             await provider.complete(make_request())
 
     assert error.value.retryable is False

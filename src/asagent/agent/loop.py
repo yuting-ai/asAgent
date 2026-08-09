@@ -10,6 +10,7 @@ from asagent.models.contracts import (
     ModelResponse,
     ModelToolCall,
 )
+from asagent.models.errors import ProviderTimeoutError
 from asagent.models.provider import ModelProvider
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.snapshot import ToolSnapshot
@@ -71,14 +72,29 @@ class AgentLoop:
                     steps_used=next_step - 1,
                 )
 
-            response = await self._model.complete(
-                ModelRequest(
-                    model=model_name,
-                    system_prompt=system_prompt,
+            try:
+                response = await self._model.complete(
+                    ModelRequest(
+                        model=model_name,
+                        system_prompt=system_prompt,
+                        messages=tuple(history),
+                        tools=self._tool_snapshot.model_tools,
+                    ),
+                )
+            except ProviderTimeoutError:
+                if self._is_cancelled(cancellation_token):
+                    return self._cancelled_result(
+                        history,
+                        steps_used=next_step - 1,
+                    )
+
+                return AgentLoopResult(
+                    status=RunStatus.FAILED,
+                    text=None,
                     messages=tuple(history),
-                    tools=self._tool_snapshot.model_tools,
-                ),
-            )
+                    steps_used=next_step - 1,
+                    error="model call timed out",
+                )
 
             steps_used = next_step
 

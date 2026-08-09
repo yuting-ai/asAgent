@@ -187,7 +187,7 @@ Runtime 不直接：
 - 读取具体模型厂商环境变量。
 - 向某个渠道发送消息。
 
-阶段 2 当前的 `agent.loop.AgentLoop` 是尚未接入 Repository、RunEvent 或取消令牌的最小非流式编排器。它接收 `ModelProvider`、`ToolExecutor` 和本次 Run 的 `ToolSnapshot`，在内存中维护模型消息历史，并返回 `AgentLoopResult`。每次 `complete()` 响应消耗一个决策步骤，默认上限为 8；同一响应中的多个工具按稳定顺序执行但不额外消耗步骤。每次请求始终使用 Snapshot 导出的工具定义，工具结果再作为 TOOL message 进入下一次请求。
+阶段 2 当前的 `agent.loop.AgentLoop` 是尚未接入 Repository 或 RunEvent 的最小非流式编排器。它接收 `ModelProvider`、`ToolExecutor`、本次 Run 的 `ToolSnapshot` 和可选取消令牌，在内存中维护模型消息历史，并返回 `AgentLoopResult`。每次 `complete()` 响应消耗一个决策步骤，默认上限为 8；同一响应中的多个工具按稳定顺序执行但不额外消耗步骤。Provider 报告超时时，Loop 返回 `FAILED` 且不计入尚未取得响应的步骤。每次请求始终使用 Snapshot 导出的工具定义，工具结果再作为 TOOL message 进入下一次请求。
 
 ## 7. Agent Loop 状态机
 
@@ -310,7 +310,7 @@ Agent Loop 不是只调用 `ModelProvider.complete()` 的控制流；它会把�
 
 阶段 0 的 `FakeModelProvider` 只用于离线测试：构造时分别提供一次性 `ModelResponse` 脚本和每次流式调用对应的一组 `ModelEvent` 脚本；每次调用按顺序消费一项。脚本耗尽时抛出明确错误，而不是生成默认响应，从而避免测试意外通过。Fake 同时保留只读请求历史，供测试断言传入模型边界的请求内容。
 
-Provider 的代码实现与用户选择的配置 Profile 分开。`models.config.ProviderConfig` 是 Pydantic 的系统配置边界：它校验适配器类型、模型名、HTTP Base URL、`secret_id` 与正超时值，并拒绝未知字段；`ProviderProfiles` 保存多个非空命名 Profile。API Key 不进入 Profile、仓库、日志或测试夹具。`models.secrets.SecretProvider` 只声明按 `secret_id` 返回 Secret 或缺失值的能力，尚不绑定具体存储实现。阶段 1 使用 `config_dir/providers.toml` 管理多个命名 Profile，并由后续 Keychain/Secret Store 适配器实现该 Protocol；开发期环境变量只能作为入口层显式后备，业务代码不直接读取。
+Provider 的代码实现与用户选择的配置 Profile 分开。`models.config.ProviderConfig` 是 Pydantic 的系统配置边界：它校验适配器类型、模型名、HTTP Base URL、`secret_id` 与正超时值，并拒绝未知字段；`timeout_seconds` 默认 180 秒，且每个 Profile 可覆盖。它约束单次模型 HTTP 请求，不是整个 Agent Run 的总时长。`ProviderProfiles` 保存多个非空命名 Profile。API Key 不进入 Profile、仓库、日志或测试夹具。`models.secrets.SecretProvider` 只声明按 `secret_id` 返回 Secret 或缺失值的能力，尚不绑定具体存储实现。阶段 1 使用 `config_dir/providers.toml` 管理多个命名 Profile，并由后续 Keychain/Secret Store 适配器实现该 Protocol；开发期环境变量只能作为入口层显式后备，业务代码不直接读取。
 
 `models.profile_loader.load_provider_profiles(config_dir)` 是该文件进入系统的唯一当前加载路径：它只读取 `config_dir/providers.toml`，使用标准库 `tomllib` 解析后交给 `ProviderProfiles` 验证；文件不存在、TOML 语法错误和 Profile Schema 错误统一转换为脱敏 `ProviderConfigurationError`。加载过程不创建目录、不读取 Secret、环境变量或 Keychain，也不选择或实例化 Provider。
 
@@ -322,7 +322,7 @@ Provider 的代码实现与用户选择的配置 Profile 分开。`models.config
 
 首个真实 Profile 为 `deepseek`，使用 `openai_compatible` Adapter。阶段 1 的 `OpenAICompatibleProvider` 使用注入的 `httpx.AsyncClient`、`ProviderConfig` 和 `SecretProvider` 发起 `POST /chat/completions`；它将标准化的 system/user/assistant Message、工具定义、一次性响应的文本/推理/工具调用/usage，以及 SSE 的文本和推理增量在边缘处互相映射。HTTP Client 的生命周期由未来组合根管理，Provider 不创建或关闭它。当前非流式 Agent Loop 已使用 Tool Message；流式 ToolCall 仍明确未实现，避免静默生成不完整事件。
 
-Provider 边缘以 `ProviderError` 及其子类向上报告故障：配置/缺失 Secret、认证、余额、请求、响应格式、传输、限流和服务端错误彼此可区分；错误仅携带安全的类别与可选 HTTP 状态码，不保留响应正文、请求或 Secret。非流式 `complete()` 只对明确可重试的 HTTP 429 和 5xx 使用固定短延迟重试一次；401、402、400、422、响应格式错误、Secret 缺失及传输/超时均不重试。传输故障的结果可能不确定，自动重试会造成重复计费风险；流式调用一旦可能已产生增量，也绝不自动重试。后续入口可根据错误类别给用户可理解提示，后续可再评估 Provider 专用 backoff/Retry-After 支持。
+Provider 边缘以 `ProviderError` 及其子类向上报告故障：配置/缺失 Secret、认证、余额、请求、响应格式、传输、超时、限流和服务端错误彼此可区分；错误仅携带安全的类别与可选 HTTP 状态码，不保留响应正文、请求或 Secret。OpenAI-compatible Provider 将 `httpx.TimeoutException` 转换为 `ProviderTimeoutError`，让 Loop 和未来入口能够对它作出明确处理。非流式 `complete()` 只对明确可重试的 HTTP 429 和 5xx 使用固定短延迟重试一次；401、402、400、422、响应格式错误、Secret 缺失及传输/超时均不重试。传输故障的结果可能不确定，自动重试会造成重复计费风险；流式调用一旦可能已产生增量，也绝不自动重试。后续入口可根据错误类别给用户可理解提示，后续可再评估 Provider 专用 backoff/Retry-After 支持。
 
 未来 `openai` 或其他兼容 Chat Completions 服务只需增加 Profile，复用同一 Adapter；Claude 使用独立的 `anthropic_messages` Adapter，不能塞入 OpenAI-compatible Adapter 的条件分支。所有 Adapter 最终仍只向 Core 暴露 `ModelProvider`。
 
