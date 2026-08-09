@@ -5,13 +5,23 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
 from asagent.core.tool import Tool
-from asagent.tools.errors import ToolArgumentsValidationError, ToolTimeoutError
+from asagent.tools.errors import (
+    ToolArgumentsValidationError,
+    ToolPermissionDeniedError,
+    ToolTimeoutError,
+)
 from asagent.tools.registry import ToolRegistry
 
 
 class ToolExecutor:
-    def __init__(self, registry: ToolRegistry) -> None:
+    def __init__(
+        self,
+        registry: ToolRegistry,
+        *,
+        granted_permissions: frozenset[str] = frozenset(),
+    ) -> None:
         self._registry = registry
+        self._granted_permissions = granted_permissions
 
     async def execute(
         self,
@@ -28,6 +38,11 @@ class ToolExecutor:
             raise ToolArgumentsValidationError(
                 "tool arguments are invalid",
             ) from error
+
+        if not tool.definition.required_permissions.issubset(
+            self._granted_permissions,
+        ):
+            raise ToolPermissionDeniedError("tool permission denied")
 
         try:
             return await asyncio.wait_for(

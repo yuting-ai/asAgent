@@ -32,6 +32,7 @@ class CountingEchoTool:
         result: str = "Echo: hello",
         on_execute: Callable[[], None] | None = None,
         timeout_seconds: float = 1.0,
+        required_permissions: frozenset[str] = frozenset(),
     ) -> None:
         self.calls = 0
         self._error = error
@@ -51,7 +52,7 @@ class CountingEchoTool:
                 "additionalProperties": False,
             },
             risk_level="low",
-            required_permissions=frozenset(),
+            required_permissions=required_permissions,
             requires_approval=False,
             timeout_seconds=timeout_seconds,
         )
@@ -106,13 +107,17 @@ def _loop(
     max_steps: int = 8,
     max_calls_per_tool_input: int | None = None,
     max_tool_result_chars: int = 4_000,
+    granted_permissions: frozenset[str] = frozenset(),
 ) -> AgentLoop:
     registry = ToolRegistry()
     registry.register(tool)
 
     return AgentLoop(
         model=provider,
-        executor=ToolExecutor(registry),
+        executor=ToolExecutor(
+            registry,
+            granted_permissions=granted_permissions,
+        ),
         tool_snapshot=_snapshot(tool),
         max_steps=max_steps,
         max_calls_per_tool_input=max_calls_per_tool_input,
@@ -316,6 +321,41 @@ async def test_loop_appends_paired_tool_error_for_invalid_arguments() -> None:
     assert provider.requests[1].messages[-1] == ModelMessage(
         role=ModelMessageRole.TOOL,
         content="Error: tool arguments are invalid.",
+        tool_call_id="call_123",
+    )
+
+
+@pytest.mark.asyncio
+async def test_loop_appends_paired_tool_error_for_missing_permission() -> None:
+    tool_call = ModelToolCall(
+        call_id="call_123",
+        name="builtin_echo",
+        arguments={"text": "hello"},
+    )
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(text=None, tool_calls=(tool_call,)),
+            ModelResponse(
+                text="I do not have permission for that tool.", tool_calls=()
+            ),
+        ),
+    )
+    tool = CountingEchoTool(
+        required_permissions=frozenset({"tool.execute"}),
+    )
+
+    result = await _loop(provider, tool).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.text == "I do not have permission for that tool."
+    assert tool.calls == 0
+    assert provider.requests[1].messages[-1] == ModelMessage(
+        role=ModelMessageRole.TOOL,
+        content="Error: tool permission denied.",
         tool_call_id="call_123",
     )
 

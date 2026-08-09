@@ -381,7 +381,7 @@ ToolCall
 → 返回 ToolResult
 ```
 
-阶段 2 当前的最小 `ToolExecutor` 在查找内部 `tool_id` 后先使用 `jsonschema` 的 `Draft202012Validator` 校验 `ToolDefinition.input_schema`，再以该定义的 `timeout_seconds` 限制单次异步执行。参数无效时不会调用 Tool，并以 `ToolArgumentsValidationError` 返回至 Loop；超时会取消正在等待的工具协程并转换为 `ToolTimeoutError`。AgentLoop 将两者都写为与原调用配对的 TOOL 错误结果，交回模型继续决策。该取消不能回滚已经发出的外部副作用，因此后续 Tool/Policy 仍需按风险级别规定清理、幂等和审计策略。Schema 元校验、格式检查、权限、批准、结果清洗和持久化尚未由最小 Executor 实现。
+阶段 2 当前的最小 `ToolExecutor` 接受默认为空的不可变 `granted_permissions`；在查找内部 `tool_id` 后先使用 `jsonschema` 的 `Draft202012Validator` 校验 `ToolDefinition.input_schema`，再要求工具的 `required_permissions` 是已授予集合的子集，最后才以该定义的 `timeout_seconds` 限制单次异步执行。参数无效时不会调用 Tool，并以 `ToolArgumentsValidationError` 返回至 Loop；缺少权限时以 `ToolPermissionDeniedError` 返回；超时会取消正在等待的工具协程并转换为 `ToolTimeoutError`。AgentLoop 将三者都写为与原调用配对的 TOOL 错误结果，交回模型继续决策。该取消不能回滚已经发出的外部副作用，因此后续 Tool/Policy 仍需按风险级别规定清理、幂等和审计策略。Schema 元校验、格式检查、用户批准、结果清洗和持久化尚未由最小 Executor 实现。
 
 ### 10.3 Tool Snapshot
 

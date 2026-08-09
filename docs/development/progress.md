@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop、可配置重复调用检测、工具结果截断、基础 Run 取消令牌、模型调用超时、工具执行超时与工具参数校验
+- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop、可配置重复调用检测、工具结果截断、基础 Run 取消令牌、模型调用超时、工具执行超时、工具参数校验与最小工具权限策略
 - 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试、最小 ToolRegistry、最小 ToolExecutor、无副作用的 `builtin.echo`，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-09
-- 当前目标：最小非流式 Agent Loop、重复调用检测、结果截断、基础取消令牌、模型调用超时、工具执行超时与工具参数校验已验证；下一步是最小工具权限策略
+- 当前目标：最小非流式 Agent Loop、重复调用检测、结果截断、基础取消令牌、模型调用超时、工具执行超时、工具参数校验与最小工具权限策略已验证；下一步是用户批准机制
 
 ## 2. 已完成
 
@@ -1181,3 +1181,28 @@
 ### 下一步
 
 - 在用户确认后，实现最小工具权限策略；本次不开始该任务。
+
+## 2026-08-09 阶段 2 最小工具权限策略工作记录
+
+### 完成
+
+- `ToolExecutor` 新增默认为空的 `granted_permissions`；仅当工具的 `required_permissions` 全部已被显式授予时才进入执行。
+- 缺少授权时抛出 `ToolPermissionDeniedError`，不调用工具协程；AgentLoop 生成与原 `tool_call_id` 配对的权限拒绝结果，再让模型继续决策。
+- 增加测试，验证显式授权允许执行、默认拒绝阻止执行，以及模型能收到并处理配对的权限拒绝结果。
+
+### 验证
+
+- 检查：运行 ToolExecutor 与 AgentLoop 定向测试，随后运行 Ruff、strict mypy 与完整 `scripts/check.sh`。
+- 结果：通过；20 个定向测试、完整 110 个测试通过，76 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-038：最小工具权限策略默认拒绝并显式注入授权集合。
+
+### 风险或问题
+
+- 当前权限集合尚未按 `user_id`、Workspace 或 Run 持久化；用户批准、审计、Run 总 deadline、后台长任务、RunEvent 与持久化仍未实现。
+
+### 下一步
+
+- 在用户确认后，实现用户批准机制；本次不开始该任务。

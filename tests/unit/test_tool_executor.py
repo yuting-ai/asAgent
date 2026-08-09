@@ -4,14 +4,22 @@ from collections.abc import Mapping
 import pytest
 
 from asagent.core.tool_definition import ToolDefinition
-from asagent.tools.errors import ToolArgumentsValidationError, ToolTimeoutError
+from asagent.tools.errors import (
+    ToolArgumentsValidationError,
+    ToolPermissionDeniedError,
+    ToolTimeoutError,
+)
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.registry import ToolRegistry
 
 
 class RecordingTool:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        required_permissions: frozenset[str] = frozenset(),
+    ) -> None:
         self.arguments: Mapping[str, object] | None = None
+        self._required_permissions = required_permissions
 
     @property
     def definition(self) -> ToolDefinition:
@@ -26,7 +34,7 @@ class RecordingTool:
                 "additionalProperties": False,
             },
             risk_level="low",
-            required_permissions=frozenset(),
+            required_permissions=self._required_permissions,
             requires_approval=False,
             timeout_seconds=1.0,
         )
@@ -83,10 +91,13 @@ class HangingTool(RecordingTool):
 
 @pytest.mark.asyncio
 async def test_executor_delegates_to_registered_tool() -> None:
-    tool = RecordingTool()
+    tool = RecordingTool(frozenset({"tool.execute"}))
     registry = ToolRegistry()
     registry.register(tool)
-    executor = ToolExecutor(registry)
+    executor = ToolExecutor(
+        registry,
+        granted_permissions=frozenset({"tool.execute"}),
+    )
 
     result = await executor.execute("builtin.echo", {"text": "hello"})
 
@@ -124,6 +135,22 @@ async def test_executor_rejects_invalid_arguments_before_execution() -> None:
         match="tool arguments are invalid",
     ):
         await executor.execute("builtin.echo", {"text": 1})
+
+    assert tool.arguments is None
+
+
+@pytest.mark.asyncio
+async def test_executor_rejects_tools_without_required_permission() -> None:
+    tool = RecordingTool(frozenset({"tool.execute"}))
+    registry = ToolRegistry()
+    registry.register(tool)
+    executor = ToolExecutor(registry)
+
+    with pytest.raises(
+        ToolPermissionDeniedError,
+        match="tool permission denied",
+    ):
+        await executor.execute("builtin.echo", {"text": "hello"})
 
     assert tool.arguments is None
 
