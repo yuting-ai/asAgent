@@ -1276,6 +1276,8 @@
 - 结果：通过；5 个 CLI 定向测试、完整 119 个测试通过，78 个源码文件 Ruff 与 strict mypy 无问题。
 - 检查：运行 `printf 'calculate 2 * (3 + 4)\\nexit\\n' | uv run asagent`。
 - 结果：通过；离线 CLI 显示 8 个安全 RunEvent，并返回 `Tool result: 14`。
+- 检查：用户使用被忽略的本地 `.env` 和 `uv run --env-file .env asagent --profile deepseek --app-home .local-data`，分别要求真实模型调用 Calculator 与 Current time 工具。
+- 结果：通过；DeepSeek 在两个独立 Run 中均生成一次合法工具调用，Loop 分别执行 `builtin.calculator` 与 `builtin.current_time`，回填配对 TOOL 结果后由第二次模型调用完成回答。每个 Run 都按顺序发布 8 条安全 RunEvent；终端输出未包含 API Key。
 
 ### 决策变化
 
