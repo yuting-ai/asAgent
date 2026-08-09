@@ -187,6 +187,8 @@ Runtime 不直接：
 - 读取具体模型厂商环境变量。
 - 向某个渠道发送消息。
 
+阶段 2 当前的 `agent.loop.AgentLoop` 是尚未接入 Repository、RunEvent 或取消令牌的最小非流式编排器。它接收 `ModelProvider`、`ToolExecutor` 和本次 Run 的 `ToolSnapshot`，在内存中维护模型消息历史，并返回 `AgentLoopResult`。每次 `complete()` 响应消耗一个决策步骤，默认上限为 8；同一响应中的多个工具按稳定顺序执行但不额外消耗步骤。每次请求始终使用 Snapshot 导出的工具定义，工具结果再作为 TOOL message 进入下一次请求。
+
 ## 7. Agent Loop 状态机
 
 ```text
@@ -211,6 +213,8 @@ MODEL_RESPONDED                  │
 ```
 
 `LIMIT_REACHED` 是明确终态，不伪装成成功完成，也不自动进入尚未实现的摘要流程。UI 可以展示已产生的文本和“达到最大步骤”提示；以后若增加一次禁用工具的收尾模型调用，需要单独决策和测试。
+
+若最后一个允许的模型决策仍返回 tool calls，Loop 记录该 assistant 响应但不执行工具，并以 `LIMIT_REACHED` 返回。由于该终态不会再发出模型请求，这段未闭合的工具请求不能被当作可继续使用的模型历史；持久化和恢复策略留待后续 Run/Repository 任务定义。
 
 必须防止：
 
@@ -312,7 +316,7 @@ Provider 的代码实现与用户选择的配置 Profile 分开。`models.config
 
 仓库提供 `scripts/check_deepseek.py` 作为可选手动连通性检查入口：它从被忽略的 `.local-data/config/providers.toml` 加载 Profile，并由该脚本显式将当前进程环境的指定变量绑定为 Secret。该脚本不属于 pytest 或 CLI 默认路径；它只在用户主动设置临时环境变量后发出一次最小请求，并只输出响应与 usage，不输出 Secret。
 
-首个真实 Profile 为 `deepseek`，使用 `openai_compatible` Adapter。阶段 1 的 `OpenAICompatibleProvider` 使用注入的 `httpx.AsyncClient`、`ProviderConfig` 和 `SecretProvider` 发起 `POST /chat/completions`；它将标准化的 system/user/assistant Message、工具定义、一次性响应的文本/推理/工具调用/usage，以及 SSE 的文本和推理增量在边缘处互相映射。HTTP Client 的生命周期由未来组合根管理，Provider 不创建或关闭它。当前 Agent Loop 尚未存在，因此 Tool Message 和流式 ToolCall 明确拒绝而非静默生成不完整请求或事件。
+首个真实 Profile 为 `deepseek`，使用 `openai_compatible` Adapter。阶段 1 的 `OpenAICompatibleProvider` 使用注入的 `httpx.AsyncClient`、`ProviderConfig` 和 `SecretProvider` 发起 `POST /chat/completions`；它将标准化的 system/user/assistant Message、工具定义、一次性响应的文本/推理/工具调用/usage，以及 SSE 的文本和推理增量在边缘处互相映射。HTTP Client 的生命周期由未来组合根管理，Provider 不创建或关闭它。当前非流式 Agent Loop 已使用 Tool Message；流式 ToolCall 仍明确未实现，避免静默生成不完整事件。
 
 Provider 边缘以 `ProviderError` 及其子类向上报告故障：配置/缺失 Secret、认证、余额、请求、响应格式、传输、限流和服务端错误彼此可区分；错误仅携带安全的类别与可选 HTTP 状态码，不保留响应正文、请求或 Secret。非流式 `complete()` 只对明确可重试的 HTTP 429 和 5xx 使用固定短延迟重试一次；401、402、400、422、响应格式错误、Secret 缺失及传输/超时均不重试。传输故障的结果可能不确定，自动重试会造成重复计费风险；流式调用一旦可能已产生增量，也绝不自动重试。后续入口可根据错误类别给用户可理解提示，后续可再评估 Provider 专用 backoff/Retry-After 支持。
 

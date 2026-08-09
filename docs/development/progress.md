@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约与最小 Run Tool Snapshot
+- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot 与最小非流式 Agent Loop
 - 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试、最小 ToolRegistry、最小 ToolExecutor、无副作用的 `builtin.echo`，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
-- 当前日期：2026-08-08
-- 当前目标：已完成最小 Agent Loop 的上下文往返、名称映射与运行时 Snapshot 前置条件；下一步是实现最小非流式 Agent Loop
+- 当前日期：2026-08-09
+- 当前目标：最小非流式 Agent Loop 已验证；下一步是为 Loop 实现重复工具调用检测
 
 ## 2. 已完成
 
@@ -21,6 +21,7 @@
 - [x] 实现并验证阶段 2 的内置工具 `builtin.current_time`。
 - [x] 实现并验证阶段 2 的非流式工具消息契约与 OpenAI-compatible 映射。
 - [x] 实现并验证阶段 2 的内部/Provider 工具名称映射与最小 Run Tool Snapshot。
+- [x] 实现并验证阶段 2 的带 `max_steps` 最小非流式 Agent Loop。
 - [x] 确认本地私有个人助手定位。
 - [x] 确认默认单用户并预留 UserProvider。
 - [x] 确认当前只实现本地对话入口。
@@ -82,7 +83,7 @@
 - [x] 实现阶段 2 的内置工具 `builtin.current_time`。
 - [x] 实现阶段 2 的非流式工具消息契约与 OpenAI-compatible 映射。
 - [x] 实现阶段 2 的内部/Provider 工具名称映射与最小 Run Tool Snapshot。
-- [ ] 实现阶段 2 的最小 Agent Loop 与最大决策步数。
+- [x] 实现阶段 2 的最小 Agent Loop 与最大决策步数。
 
 ## 4. 阶段 0（已完成）
 
@@ -999,3 +1000,28 @@
 ### 下一步
 
 - 在用户确认后，实现带 `max_steps` 的最小非流式 Agent Loop；本次不开始该任务。
+
+## 2026-08-09 阶段 2 最小非流式 Agent Loop 工作记录
+
+### 完成
+
+- 新增 `AgentLoop` 与不可变 `AgentLoopResult`；Loop 在内存中协调 ModelProvider、ToolExecutor、Run Tool Snapshot 与标准化消息历史，尚未接入 Repository 或 RunEvent。
+- 每次模型响应消耗一个决策步骤，默认 `max_steps=8`；同一响应中的多个工具按顺序执行并将成功、未知工具或执行失败结果作为配对 TOOL message 回填。
+- 达到最后一个允许步骤且模型仍请求工具时，Loop 不执行工具并进入 `LIMIT_REACHED`；空文本/无工具、空调用 ID 和重复调用 ID 明确进入 `FAILED`。
+
+### 验证
+
+- 检查：运行 AgentLoop 定向测试、Ruff、strict mypy 与完整 `scripts/check.sh`。
+- 结果：通过；6 个定向测试覆盖文本完成、工具往返、步骤上限、未知工具、工具异常和无效上限；完整 98 个测试通过，74 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-031：最小 Agent Loop 以模型决策计数并在上限处停止工具执行。
+
+### 风险或问题
+
+- 取消、模型/工具超时、参数校验、重复调用检测、结果截断、RunEvent 和持久化仍未实现；`LIMIT_REACHED` 的未闭合工具请求不会被继续用于模型调用。
+
+### 下一步
+
+- 在用户确认后，实现基于内部 `tool_id` 与规范化参数的重复工具调用检测；本次不开始该任务。
