@@ -1,8 +1,10 @@
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 import pytest
 
+from asagent.agent.cancellation import RunCancellationToken
 from asagent.agent.loop import AgentLoop
+from asagent.core.ids import RunId
 from asagent.core.run_status import RunStatus
 from asagent.core.tool_definition import ToolDefinition
 from asagent.models.contracts import (
@@ -23,10 +25,12 @@ class CountingEchoTool:
         self,
         error: Exception | None = None,
         result: str = "Echo: hello",
+        on_execute: Callable[[], None] | None = None,
     ) -> None:
         self.calls = 0
         self._error = error
         self._result = result
+        self._on_execute = on_execute
         self._definition = ToolDefinition(
             tool_id="builtin.echo",
             display_name="Echo",
@@ -50,6 +54,8 @@ class CountingEchoTool:
     async def execute(self, arguments: Mapping[str, object]) -> str:
         self.calls += 1
         assert arguments["text"] == "hello"
+        if self._on_execute is not None:
+            self._on_execute()
         if self._error is not None:
             raise self._error
         return self._result
@@ -349,6 +355,73 @@ async def test_loop_truncates_tool_result_before_returning_to_model() -> None:
     assert tool_message.content == "x" * (40 - len(marker)) + marker
     assert len(tool_message.content) == 40
     assert tool.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_loop_stops_before_model_when_cancelled() -> None:
+    provider = FakeModelProvider()
+    tool = CountingEchoTool()
+    token = RunCancellationToken(RunId("run_123"))
+    token.cancel()
+
+    result = await _loop(provider, tool).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+        cancellation_token=token,
+    )
+
+    assert result.status is RunStatus.CANCELLED
+    assert result.steps_used == 0
+    assert result.messages == (_user_message(),)
+    assert provider.requests == ()
+    assert tool.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_loop_closes_pending_tool_calls_when_cancelled() -> None:
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="call_1",
+                        name="builtin_echo",
+                        arguments={"text": "hello"},
+                    ),
+                    ModelToolCall(
+                        call_id="call_2",
+                        name="builtin_echo",
+                        arguments={"text": "hello"},
+                    ),
+                ),
+            ),
+        ),
+    )
+    token = RunCancellationToken(RunId("run_123"))
+    tool = CountingEchoTool(on_execute=token.cancel)
+
+    result = await _loop(provider, tool).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+        cancellation_token=token,
+    )
+
+    assert result.status is RunStatus.CANCELLED
+    assert result.steps_used == 1
+    assert tool.calls == 1
+    assert result.messages[-2] == ModelMessage(
+        role=ModelMessageRole.TOOL,
+        content="Echo: hello",
+        tool_call_id="call_1",
+    )
+    assert result.messages[-1] == ModelMessage(
+        role=ModelMessageRole.TOOL,
+        content="Error: tool execution cancelled.",
+        tool_call_id="call_2",
+    )
 
 
 def test_loop_requires_a_positive_step_limit() -> None:

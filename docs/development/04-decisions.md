@@ -264,6 +264,16 @@
 - 影响：工具执行、错误、未知工具和重复限制产生的文本都经同一模型上下文边界；后续 Storage/审计必须在截断前捕获原始结果或记录其受控位置。
 - 替代方案：不限制结果、截断但让标记超出上限、或把截断文本当作审计主数据；当前均不采用。
 
+### DEC-034：基础 Run 取消采用协作式 Token 与安全检查点
+
+- 日期：2026-08-09
+- 状态：已确认
+- 背景：阶段 2 需要让用户停止 Run，但直接取消任意 await 中的 Provider 或工具协程可能破坏外部 I/O、丢失已完成工具结果，或留下不合法的 assistant tool calls/TOOL results 历史。
+- 决策：使用携带 `run_id` 的可变 `RunCancellationToken`，由调用方显式交给 AgentLoop。Loop 在模型调用前、模型响应返回后、每个工具前和每个工具返回后轮询 Token。若取消发生在已写入 assistant tool calls 后，保留已经完成的 TOOL result，并为剩余调用追加明确的取消结果后返回 `CANCELLED`。Token 本身不取消正在 await 的底层协程，也不使用全局注册表。
+- 原因：先以确定、离线可测的安全点维护消息完整性；随后再让超时和 Provider/Tool 原生取消缩短实际等待时间。
+- 影响：最小 Loop 可报告 `CANCELLED` 和已用决策步骤，但尚未持久化 Run 状态、发出 RunEvent 或提供按 `run_id` 查询 Token 的 API。未来 Runtime/Service 负责 Token 生命周期。
+- 替代方案：直接 `task.cancel()`、取消时删除 assistant tool calls、或继续下一次模型调用而不补齐工具结果；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

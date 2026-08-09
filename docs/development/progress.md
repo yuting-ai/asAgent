@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop、可配置重复调用检测与工具结果截断
+- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop、可配置重复调用检测、工具结果截断与基础 Run 取消令牌
 - 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试、最小 ToolRegistry、最小 ToolExecutor、无副作用的 `builtin.echo`，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-09
-- 当前目标：最小非流式 Agent Loop、重复调用检测与工具结果截断已验证；下一步是实现基础 Run 取消令牌
+- 当前目标：最小非流式 Agent Loop、重复调用检测、结果截断与基础取消令牌已验证；下一步是实现模型调用超时
 
 ## 2. 已完成
 
@@ -24,6 +24,7 @@
 - [x] 实现并验证阶段 2 的带 `max_steps` 最小非流式 Agent Loop。
 - [x] 实现并验证阶段 2 的可配置重复工具调用检测。
 - [x] 实现并验证阶段 2 的工具结果截断。
+- [x] 实现并验证阶段 2 的基础 Run 取消令牌。
 - [x] 确认本地私有个人助手定位。
 - [x] 确认默认单用户并预留 UserProvider。
 - [x] 确认当前只实现本地对话入口。
@@ -88,6 +89,7 @@
 - [x] 实现阶段 2 的最小 Agent Loop 与最大决策步数。
 - [x] 实现阶段 2 的可配置重复工具调用检测。
 - [x] 实现阶段 2 的工具结果截断。
+- [x] 实现阶段 2 的基础 Run 取消令牌。
 
 ## 4. 阶段 0（已完成）
 
@@ -1079,3 +1081,28 @@
 ### 下一步
 
 - 在用户确认后，实现基础 Run 取消令牌；本次不开始该任务。
+
+## 2026-08-09 阶段 2 基础 Run 取消令牌工作记录
+
+### 完成
+
+- 新增携带 `run_id` 的 `RunCancellationToken`；调用方可显式请求取消，并将 Token 传入 AgentLoop。
+- Loop 在模型调用前、模型响应返回后、每个工具执行前和执行返回后检查取消；取消前不发起模型调用。
+- 若工具批次中途取消，已完成工具结果保留，尚未执行调用追加配对的取消结果，Loop 返回 `CANCELLED`。
+
+### 验证
+
+- 检查：运行 AgentLoop 定向测试、Ruff、strict mypy 与完整 `scripts/check.sh`。
+- 结果：通过；10 个定向测试、完整 102 个测试通过，75 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-034：基础 Run 取消采用协作式 Token 与安全检查点。
+
+### 风险或问题
+
+- Token 不会强制中断已在 await 的 Provider 或 Tool；取消注册表、Run 状态/事件持久化、模型超时和工具超时仍未实现。
+
+### 下一步
+
+- 在用户确认后，实现模型调用超时；本次不开始该任务。

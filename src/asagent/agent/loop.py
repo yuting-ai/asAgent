@@ -1,6 +1,7 @@
 import json
 from dataclasses import dataclass
 
+from asagent.agent.cancellation import RunCancellationToken
 from asagent.core.run_status import RunStatus
 from asagent.models.contracts import (
     ModelMessage,
@@ -58,11 +59,18 @@ class AgentLoop:
         model_name: str,
         system_prompt: str,
         messages: tuple[ModelMessage, ...],
+        cancellation_token: RunCancellationToken | None = None,
     ) -> AgentLoopResult:
         history = list(messages)
         calls_by_tool_input: dict[tuple[str, str], int] = {}
 
-        for steps_used in range(1, self._max_steps + 1):
+        for next_step in range(1, self._max_steps + 1):
+            if self._is_cancelled(cancellation_token):
+                return self._cancelled_result(
+                    history,
+                    steps_used=next_step - 1,
+                )
+
             response = await self._model.complete(
                 ModelRequest(
                     model=model_name,
@@ -71,6 +79,14 @@ class AgentLoop:
                     tools=self._tool_snapshot.model_tools,
                 ),
             )
+
+            steps_used = next_step
+
+            if self._is_cancelled(cancellation_token):
+                return self._cancelled_result(
+                    history,
+                    steps_used=steps_used,
+                )
 
             invalid_error = self._invalid_tool_calls_error(response)
             if invalid_error is not None:
@@ -114,7 +130,17 @@ class AgentLoop:
                     steps_used=steps_used,
                 )
 
-            for tool_call in response.tool_calls:
+            for index, tool_call in enumerate(response.tool_calls):
+                if self._is_cancelled(cancellation_token):
+                    self._append_cancelled_tool_results(
+                        history,
+                        response.tool_calls[index:],
+                    )
+                    return self._cancelled_result(
+                        history,
+                        steps_used=steps_used,
+                    )
+
                 result = self._truncate_tool_result(
                     await self._execute_tool(
                         tool_call,
@@ -128,6 +154,16 @@ class AgentLoop:
                         tool_call_id=tool_call.call_id,
                     ),
                 )
+
+                if self._is_cancelled(cancellation_token):
+                    self._append_cancelled_tool_results(
+                        history,
+                        response.tool_calls[index + 1 :],
+                    )
+                    return self._cancelled_result(
+                        history,
+                        steps_used=steps_used,
+                    )
 
         raise AssertionError("agent loop exhausted unexpectedly")
 
@@ -166,6 +202,39 @@ class AgentLoop:
             return await self._executor.execute(tool_id, tool_call.arguments)
         except Exception:
             return "Error: tool execution failed."
+
+    @staticmethod
+    def _is_cancelled(
+        cancellation_token: RunCancellationToken | None,
+    ) -> bool:
+        return cancellation_token is not None and cancellation_token.is_cancelled
+
+    @staticmethod
+    def _append_cancelled_tool_results(
+        history: list[ModelMessage],
+        tool_calls: tuple[ModelToolCall, ...],
+    ) -> None:
+        for tool_call in tool_calls:
+            history.append(
+                ModelMessage(
+                    role=ModelMessageRole.TOOL,
+                    content="Error: tool execution cancelled.",
+                    tool_call_id=tool_call.call_id,
+                ),
+            )
+
+    @staticmethod
+    def _cancelled_result(
+        history: list[ModelMessage],
+        *,
+        steps_used: int,
+    ) -> AgentLoopResult:
+        return AgentLoopResult(
+            status=RunStatus.CANCELLED,
+            text=None,
+            messages=tuple(history),
+            steps_used=steps_used,
+        )
 
     def _truncate_tool_result(self, result: str) -> str:
         if len(result) <= self._max_tool_result_chars:
