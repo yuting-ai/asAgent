@@ -39,10 +39,18 @@ async def test_development_agent_cli_runs_tools_and_prints_events() -> None:
 
 def test_parse_args_supports_an_explicit_real_provider_profile() -> None:
     args = parse_args(
-        ("--profile", "deepseek", "--app-home", "custom-app-home"),
+        (
+            "--profile",
+            "deepseek",
+            "--secret-env",
+            "ASAGENT_DEEPSEEK_API_KEY",
+            "--app-home",
+            "custom-app-home",
+        ),
     )
 
     assert args.profile == "deepseek"
+    assert args.secret_env == "ASAGENT_DEEPSEEK_API_KEY"
     assert str(args.app_home) == "custom-app-home"
 
 

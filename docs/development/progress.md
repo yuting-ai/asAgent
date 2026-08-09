@@ -1266,8 +1266,8 @@
 ### 完成
 
 - 默认 `asagent` CLI 现在以确定性的离线 Development Provider 组合 AgentLoop、Echo/Calculator/CurrentTime 工具和终端 EventPublisher；用户可连续输入并观察完整工具回合。
-- 新增显式真实路径 `--profile deepseek --app-home .local-data`；它复用 Profile Loader、EnvironmentSecretProvider、Provider Factory 和 OpenAI-compatible Provider，不改变测试默认离线的规则。
-- 新增被忽略的 `.env.example`，并记录开发时由 `uv run --env-file .env` 在入口前加载 `ASAGENT_DEEPSEEK_API_KEY`；应用代码不读取 `.env`，正式 Secret Store 仍待后续实现。
+- 新增显式真实路径 `--profile <name> --secret-env <environment-name> --app-home .local-data`；它复用 Profile Loader、EnvironmentSecretProvider、Provider Factory 和已实现 Adapter，不改变测试默认离线的规则。
+- 新增被忽略的 `.env.example`，并记录开发时由 `uv run --env-file .env` 在入口前加载调用者选择的环境变量；应用代码不读取 `.env`，正式 Secret Store 仍待后续实现。
 - 保留 `run_chat()` 作为阶段 1 ChatService 的测试入口，不将无工具聊天服务与 AgentLoop 生命周期混合。
 
 ### 验证
@@ -1276,8 +1276,9 @@
 - 结果：通过；5 个 CLI 定向测试、完整 119 个测试通过，78 个源码文件 Ruff 与 strict mypy 无问题。
 - 检查：运行 `printf 'calculate 2 * (3 + 4)\\nexit\\n' | uv run asagent`。
 - 结果：通过；离线 CLI 显示 8 个安全 RunEvent，并返回 `Tool result: 14`。
-- 检查：用户使用被忽略的本地 `.env` 和 `uv run --env-file .env asagent --profile deepseek --app-home .local-data`，分别要求真实模型调用 Calculator 与 Current time 工具。
+- 检查：用户使用被忽略的本地 `.env` 和当时的 DeepSeek CLI 映射，分别要求真实模型调用 Calculator 与 Current time 工具。
 - 结果：通过；DeepSeek 在两个独立 Run 中均生成一次合法工具调用，Loop 分别执行 `builtin.calculator` 与 `builtin.current_time`，回填配对 TOOL 结果后由第二次模型调用完成回答。每个 Run 都按顺序发布 8 条安全 RunEvent；终端输出未包含 API Key。
+- 后续修正：真实 CLI 入口已去除硬编码的 `ASAGENT_DEEPSEEK_API_KEY` 和仅 DeepSeek 限制，改为 `--profile` 与 `--secret-env` 必须成对显式提供；该改动的定向与完整验证结果记录在下一工作项。
 
 ### 决策变化
 
@@ -1286,6 +1287,31 @@
 ### 风险或问题
 
 - 真实 DeepSeek 仍需用户主动设置 Key 并手动运行，会产生费用；当前 CLI 事件和 Conversation/Run 都不持久化。
+
+### 下一步
+
+- 在用户确认后，实现最小 ToolCall 记录；本次不开始该任务。
+
+## 2026-08-09 开发 CLI 通用 Secret 环境映射修正
+
+### 完成
+
+- 真实 Provider CLI 不再硬编码 `deepseek` Profile 或 `ASAGENT_DEEPSEEK_API_KEY`；任意已实现 Adapter 的 Profile 都可通过成对的 `--profile <name>` 与 `--secret-env <environment-name>` 显式启用。
+- 入口继续将所选 Profile 的逻辑 `secret_id` 映射到调用者给出的开发期环境变量；Provider、AgentLoop 和 Tool 仍不知道环境变量或 `.env`。
+- `.env.example` 改为通用的 `ASAGENT_MODEL_API_KEY` 示例，正式桌面端 Secret Store 仍以 `secret_id` 查询。
+
+### 验证
+
+- 检查：运行 CLI 定向测试、Ruff、strict mypy、完整 `scripts/check.sh` 和 `git diff --check`。
+- 结果：通过；5 个 CLI 定向测试、完整 119 个测试通过，78 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 更新 DEC-044 的实现细节：开发期 Secret 映射由显式 `--secret-env` 提供，不猜测 Provider 专属环境变量名。
+
+### 风险或问题
+
+- 本次没有再次发起真实网络请求；现有 DeepSeek 端到端验证仍适用，只需在启动命令中补充 `--secret-env`。
 
 ### 下一步
 

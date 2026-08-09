@@ -372,9 +372,9 @@
 - 日期：2026-08-09
 - 状态：已确认
 - 背景：阶段 2 需要尽早体验完整 Agent 链路，但让默认 CLI 或自动测试依赖 API Key、网络与付费模型会降低可重复性；反过来，只保留离线脚本又无法观察真实模型是否会遵守工具 Schema 与完整调用历史。
-- 决策：`asagent` 默认启动确定性的离线 Development Provider，并组合三个低风险内置工具、AgentLoop 与终端 EventPublisher。用户显式传入 `--profile deepseek --app-home <root>` 时，入口才加载本地 Profile 并通过现有 Provider 组合根创建真实 DeepSeek Provider；该 Profile 的 Secret 在开发期仅绑定 `ASAGENT_DEEPSEEK_API_KEY`。`uv run --env-file .env` 可在启动前加载被忽略的开发环境文件，应用代码不解析 `.env`；正式桌面端以后使用系统 Secret Store。真实模式配置或调用失败时不降级到离线模式。
+- 决策：`asagent` 默认启动确定性的离线 Development Provider，并组合三个低风险内置工具、AgentLoop 与终端 EventPublisher。真实模式要求同时显式传入 `--profile <name> --secret-env <environment-name> --app-home <root>`：入口加载本地 Profile，并将其 `secret_id` 映射到调用者指定的开发期环境变量后通过现有 Provider 组合根创建 Adapter。`uv run --env-file .env` 可在启动前加载被忽略的开发环境文件，应用代码不解析 `.env`；正式桌面端以后使用系统 Secret Store。真实模式配置或调用失败时不降级到离线模式。
 - 原因：离线默认保证测试与演示可重复；显式真实模式提供模型自主选择工具的实际体验；将 `.env` 限定在入口前的开发便利层，避免把文件式 Secret 误当成正式用户存储。
-- 影响：当前 CLI 仅为开发垂直切片，不持久化 Conversation/Run，也不承担 ChatService、SQLite、SSE 或 Electron 的正式入口职责。真实调用可能产生费用，且单次等待受 Profile 超时约束。未来支持其他 Profile 时，必须显式定义其 Secret 绑定，不能猜测环境变量名称。
+- 影响：当前 CLI 仅为开发垂直切片，不持久化 Conversation/Run，也不承担 ChatService、SQLite、SSE 或 Electron 的正式入口职责。真实调用可能产生费用，且单次等待受 Profile 超时约束。开发者为每次真实启动显式给出 Secret 环境变量名；正式 Secret Store 则按 `secret_id` 查询，不经过环境变量。
 - 替代方案：默认真实 Provider、让 CLI/Provider 自行读取 `.env`、真实模式失败后悄悄改用 Fake，或将 `.env` 作为正式桌面端 Secret Store；当前均不采用。
 
 ## 2. 技术选型

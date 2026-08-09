@@ -279,6 +279,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Use the named local Provider Profile instead of the offline provider.",
     )
     parser.add_argument(
+        "--secret-env",
+        help="Development-only environment variable bound to the selected Profile secret.",
+    )
+    parser.add_argument(
         "--app-home",
         type=Path,
         default=Path(".local-data"),
@@ -295,7 +299,7 @@ async def _run_main(args: argparse.Namespace) -> None:
         "they help answer the user."
     )
 
-    if args.profile is None:
+    if args.profile is None and args.secret_env is None:
         agent_loop = build_development_agent_loop(event_publisher=publisher)
         await run_agent_chat(
             agent_loop=agent_loop,
@@ -308,9 +312,9 @@ async def _run_main(args: argparse.Namespace) -> None:
         )
         return
 
-    if args.profile != "deepseek":
+    if args.profile is None or args.secret_env is None:
         raise ProviderConfigurationError(
-            "development agent CLI supports only the deepseek profile",
+            "--profile and --secret-env must be provided together",
         )
 
     profiles = load_provider_profiles(AppPaths.from_root(args.app_home).config_dir)
@@ -322,7 +326,7 @@ async def _run_main(args: argparse.Namespace) -> None:
         ) from error
     secrets = EnvironmentSecretProvider(
         environment=dict(os.environ),
-        bindings={profile.secret_id: "ASAGENT_DEEPSEEK_API_KEY"},
+        bindings={profile.secret_id: args.secret_env},
     )
     async with httpx.AsyncClient() as client:
         provider = create_model_provider(
