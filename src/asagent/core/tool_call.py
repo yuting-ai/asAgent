@@ -10,6 +10,7 @@ from asagent.core.ids import RunId, ToolCallId
 class ToolCall:
     tool_call_id: ToolCallId
     run_id: RunId
+    model_call_id: str
     tool_id: str
     arguments: Mapping[str, object]
     result: str | None

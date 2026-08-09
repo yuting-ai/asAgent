@@ -7,9 +7,11 @@ import pytest
 from asagent.agent.cancellation import RunCancellationToken
 from asagent.agent.loop import AgentLoop
 from asagent.core.event_publisher import EventPublisher
-from asagent.core.ids import ConversationId, EventId, RunId
+from asagent.core.ids import ConversationId, EventId, RunId, ToolCallId
 from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
+from asagent.core.tool_call import ToolCall
+from asagent.core.tool_call_recorder import ToolCallRecorder
 from asagent.core.tool_definition import ToolDefinition
 from asagent.models.contracts import (
     ModelEvent,
@@ -129,6 +131,14 @@ class FailingEventPublisher:
             raise RuntimeError("event publisher failed")
 
 
+class CollectingToolCallRecorder:
+    def __init__(self) -> None:
+        self.recorded: list[ToolCall] = []
+
+    async def record(self, tool_call: ToolCall) -> None:
+        self.recorded.append(tool_call)
+
+
 def _snapshot(tool: CountingEchoTool) -> ToolSnapshot:
     return ToolSnapshot.from_definitions(
         (tool.definition,),
@@ -148,6 +158,8 @@ def _loop(
     event_publisher: EventPublisher | None = None,
     event_id_factory: Callable[[], EventId] | None = None,
     clock: Callable[[], datetime] | None = None,
+    tool_call_recorder: ToolCallRecorder | None = None,
+    tool_call_id_factory: Callable[[], ToolCallId] | None = None,
 ) -> AgentLoop:
     registry = ToolRegistry()
     registry.register(tool)
@@ -166,6 +178,8 @@ def _loop(
         event_publisher=event_publisher,
         event_id_factory=event_id_factory,
         clock=clock,
+        tool_call_recorder=tool_call_recorder,
+        tool_call_id_factory=tool_call_id_factory,
     )
 
 
@@ -842,6 +856,49 @@ async def test_loop_stops_when_event_publishing_fails() -> None:
         "run.started",
         "model.requested",
         "model.completed",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_loop_records_raw_tool_results_with_an_internal_identity() -> None:
+    tool_call = ModelToolCall(
+        call_id="provider_call_123",
+        name="builtin_echo",
+        arguments={"text": "hello"},
+    )
+    recorder = CollectingToolCallRecorder()
+    result = await _loop(
+        FakeModelProvider(
+            responses=(
+                ModelResponse(text=None, tool_calls=(tool_call,)),
+                ModelResponse(text="Done.", tool_calls=()),
+            ),
+        ),
+        CountingEchoTool(result="x" * 100),
+        max_tool_result_chars=40,
+        tool_call_recorder=recorder,
+        tool_call_id_factory=lambda: ToolCallId("tool_123"),
+        clock=lambda: datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+        run_id=RunId("run_123"),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert recorder.recorded == [
+        ToolCall(
+            tool_call_id=ToolCallId("tool_123"),
+            run_id=RunId("run_123"),
+            model_call_id="provider_call_123",
+            tool_id="builtin.echo",
+            arguments={"text": "hello"},
+            result="x" * 100,
+            error=None,
+            created_at=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+            completed_at=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+        ),
     ]
 
 

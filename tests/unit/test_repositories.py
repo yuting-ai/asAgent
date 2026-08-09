@@ -140,6 +140,7 @@ class ExampleRunRepository:
             ToolCall(
                 tool_call_id=ToolCallId("tool_123"),
                 run_id=run_id,
+                model_call_id="call_123",
                 tool_id="builtin.echo",
                 arguments={"text": "Hello, asAgent."},
                 result=None,

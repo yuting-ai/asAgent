@@ -15,6 +15,7 @@ def test_tool_call_preserves_request_and_result() -> None:
     tool_call = ToolCall(
         tool_call_id=ToolCallId("tool_123"),
         run_id=RunId("run_123"),
+        model_call_id="call_123",
         tool_id="builtin.calculator",
         arguments=arguments,
         result="4",
@@ -25,6 +26,7 @@ def test_tool_call_preserves_request_and_result() -> None:
 
     assert tool_call.tool_call_id == "tool_123"
     assert tool_call.run_id == "run_123"
+    assert tool_call.model_call_id == "call_123"
     assert tool_call.tool_id == "builtin.calculator"
     assert tool_call.arguments == {"expression": "2 + 2"}
     assert tool_call.result == "4"
@@ -40,6 +42,7 @@ def test_tool_call_can_be_pending() -> None:
     tool_call = ToolCall(
         tool_call_id=ToolCallId("tool_123"),
         run_id=RunId("run_123"),
+        model_call_id="call_123",
         tool_id="builtin.calculator",
         arguments={"expression": "2 + 2"},
         result=None,
@@ -58,6 +61,7 @@ def test_tool_call_rejects_result_and_error_together() -> None:
         ToolCall(
             tool_call_id=ToolCallId("tool_123"),
             run_id=RunId("run_123"),
+            model_call_id="call_123",
             tool_id="builtin.calculator",
             arguments={},
             result="4",
@@ -71,6 +75,7 @@ def test_tool_call_is_immutable() -> None:
     tool_call = ToolCall(
         tool_call_id=ToolCallId("tool_123"),
         run_id=RunId("run_123"),
+        model_call_id="call_123",
         tool_id="builtin.calculator",
         arguments={},
         result=None,

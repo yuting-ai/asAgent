@@ -377,6 +377,14 @@
 - 影响：当前 CLI 仅为开发垂直切片，不持久化 Conversation/Run，也不承担 ChatService、SQLite、SSE 或 Electron 的正式入口职责。真实调用可能产生费用，且单次等待受 Profile 超时约束。开发者为每次真实启动显式给出 Secret 环境变量名；正式 Secret Store 则按 `secret_id` 查询，不经过环境变量。
 - 替代方案：默认真实 Provider、让 CLI/Provider 自行读取 `.env`、真实模式失败后悄悄改用 Fake，或将 `.env` 作为正式桌面端 Secret Store；当前均不采用。
 
+### DEC-045：ToolCall 分离内部身份与模型调用身份
+
+- 日期：2026-08-09
+- 状态：已确认
+- 决策：最小 Loop 可选注入异步 `ToolCallRecorder`。每个已解析内部工具的调用完成后记录不可变 ToolCall：内部 `tool_call_id` 由注入工厂生成，模型返回的 `call_id` 保存为 `model_call_id`；成功保存未截断原始结果，失败保存错误文本。未知 Provider 工具名没有内部 `tool_id`，本阶段仅保留配对 TOOL 错误与 RunEvent。Recorder 写入失败时停止 Run。
+- 原因：模型协议 ID 只能负责本次请求历史配对，不能充当稳定的内部审计身份；同时不能让模型上下文的截断副本取代可追溯的执行事实。
+- 影响：当前只进程内记录，SQLite Repository 后续适配该 Protocol；不实现审计 UI、重试或持久化 pending 状态。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

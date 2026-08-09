@@ -5,9 +5,11 @@ from datetime import datetime
 
 from asagent.agent.cancellation import RunCancellationToken
 from asagent.core.event_publisher import EventPublisher
-from asagent.core.ids import ConversationId, EventId, RunId
+from asagent.core.ids import ConversationId, EventId, RunId, ToolCallId
 from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
+from asagent.core.tool_call import ToolCall
+from asagent.core.tool_call_recorder import ToolCallRecorder
 from asagent.models.contracts import (
     ModelMessage,
     ModelMessageRole,
@@ -49,6 +51,10 @@ class _EventPublishError(RuntimeError):
     pass
 
 
+class _ToolCallRecordError(RuntimeError):
+    pass
+
+
 class AgentLoop:
     def __init__(
         self,
@@ -62,6 +68,8 @@ class AgentLoop:
         event_publisher: EventPublisher | None = None,
         event_id_factory: Callable[[], EventId] | None = None,
         clock: Callable[[], datetime] | None = None,
+        tool_call_recorder: ToolCallRecorder | None = None,
+        tool_call_id_factory: Callable[[], ToolCallId] | None = None,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps must be positive")
@@ -81,6 +89,8 @@ class AgentLoop:
         self._event_publisher = event_publisher
         self._event_id_factory = event_id_factory
         self._clock = clock
+        self._tool_call_recorder = tool_call_recorder
+        self._tool_call_id_factory = tool_call_id_factory
 
     async def run(
         self,
@@ -101,6 +111,13 @@ class AgentLoop:
             raise ValueError(
                 "event publishing requires run_id, conversation_id, "
                 "event_id_factory, and clock",
+            )
+
+        if self._tool_call_recorder is not None and (
+            run_id is None or self._tool_call_id_factory is None or self._clock is None
+        ):
+            raise ValueError(
+                "tool call recording requires run_id, tool_call_id_factory, and clock",
             )
 
         history = list(messages)
@@ -254,6 +271,11 @@ class AgentLoop:
                         ("tool.completed" if execution.succeeded else "tool.failed"),
                         event_data,
                     )
+                    await self._record_tool_call(
+                        run_id=run_id,
+                        model_call=tool_call,
+                        execution=execution,
+                    )
                     history.append(
                         ModelMessage(
                             role=ModelMessageRole.TOOL,
@@ -278,6 +300,44 @@ class AgentLoop:
                 steps_used=steps_used,
                 error="run event publishing failed",
             )
+        except _ToolCallRecordError:
+            return AgentLoopResult(
+                status=RunStatus.FAILED,
+                text=None,
+                messages=tuple(history),
+                steps_used=steps_used,
+                error="tool call recording failed",
+            )
+
+    async def _record_tool_call(
+        self,
+        *,
+        run_id: RunId | None,
+        model_call: ModelToolCall,
+        execution: _ToolExecutionResult,
+    ) -> None:
+        if self._tool_call_recorder is None or execution.tool_id is None:
+            return
+
+        assert run_id is not None
+        assert self._tool_call_id_factory is not None
+        assert self._clock is not None
+        completed_at = self._clock()
+        tool_call = ToolCall(
+            tool_call_id=self._tool_call_id_factory(),
+            run_id=run_id,
+            model_call_id=model_call.call_id,
+            tool_id=execution.tool_id,
+            arguments=model_call.arguments,
+            result=execution.content if execution.succeeded else None,
+            error=None if execution.succeeded else execution.content,
+            created_at=completed_at,
+            completed_at=completed_at,
+        )
+        try:
+            await self._tool_call_recorder.record(tool_call)
+        except Exception as error:
+            raise _ToolCallRecordError("tool call recording failed") from error
 
     async def _execute_tool(
         self,
