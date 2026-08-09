@@ -232,6 +232,8 @@ Loop 对一组 tool calls 按稳定顺序逐个执行。未知工具、参数错
 
 取消检查点至少位于每次模型调用前、同一批工具的相邻执行之间，以及工具执行结束、结果追加前。重复调用检测以内部 `tool_id` 和规范化 JSON 参数的组合为键，避免 Mapping 键顺序造成漏检。最小 Loop 默认只记录该计数而不阻断；调用方可显式设置每个组合允许的最大执行次数，超过时返回配对的 TOOL 错误结果。未来 Tool Policy 再按工具副作用和时效性选择不同阈值，不能只依赖向模型追加提示词。
 
+最小 Loop 在将工具结果写入 TOOL message 前按字符数截断，默认最多 4,000 个字符；截断标记计入上限，因此单条模型可见结果绝不超过该配置。当前这只是阶段 2 防止单一输出挤满上下文的保护，未来阶段 4 以 token 预算统一管理。截断只影响发给模型的副本；后续 Run/ToolCall 持久化与审计必须保存原始结果或独立的受控产物，不得把截断副本当作唯一事实。
+
 ## 8. Chat 与 Channel 边界
 
 阶段 1 先实现不依赖入口的最小 `ChatService`：调用方提供已创建的 `Conversation`、用户文本、模型名称和系统提示词；Service 保存 Conversation 与 UserMessage，读取该 Conversation 的可见历史并构造无工具的 `ModelRequest`，调用 `ModelProvider.complete()` 后保存并返回 AssistantMessage。时间和 Message ID 由构造函数注入，使 Service 不隐式依赖系统时间或随机数。当前不创建 Run、不处理流式或工具调用；Provider 异常时已保存的用户消息保留，工具调用响应会明确失败，等待阶段 2 的 Agent Loop。

@@ -19,9 +19,14 @@ from asagent.tools.snapshot import ToolSnapshot
 
 
 class CountingEchoTool:
-    def __init__(self, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        error: Exception | None = None,
+        result: str = "Echo: hello",
+    ) -> None:
         self.calls = 0
         self._error = error
+        self._result = result
         self._definition = ToolDefinition(
             tool_id="builtin.echo",
             display_name="Echo",
@@ -47,7 +52,7 @@ class CountingEchoTool:
         assert arguments["text"] == "hello"
         if self._error is not None:
             raise self._error
-        return "Echo: hello"
+        return self._result
 
 
 def _snapshot(tool: CountingEchoTool) -> ToolSnapshot:
@@ -63,6 +68,7 @@ def _loop(
     *,
     max_steps: int = 8,
     max_calls_per_tool_input: int | None = None,
+    max_tool_result_chars: int = 4_000,
 ) -> AgentLoop:
     registry = ToolRegistry()
     registry.register(tool)
@@ -73,6 +79,7 @@ def _loop(
         tool_snapshot=_snapshot(tool),
         max_steps=max_steps,
         max_calls_per_tool_input=max_calls_per_tool_input,
+        max_tool_result_chars=max_tool_result_chars,
     )
 
 
@@ -307,6 +314,43 @@ async def test_loop_blocks_the_third_call_with_equivalent_arguments() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_loop_truncates_tool_result_before_returning_to_model() -> None:
+    original_result = "x" * 100
+    marker = "\n\n[Tool result truncated]"
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="call_123",
+                        name="builtin_echo",
+                        arguments={"text": "hello"},
+                    ),
+                ),
+            ),
+            ModelResponse(text="I received the shortened result.", tool_calls=()),
+        ),
+    )
+    tool = CountingEchoTool(result=original_result)
+
+    await _loop(
+        provider,
+        tool,
+        max_tool_result_chars=40,
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+    )
+
+    tool_message = provider.requests[1].messages[-1]
+    assert tool_message.content == "x" * (40 - len(marker)) + marker
+    assert len(tool_message.content) == 40
+    assert tool.calls == 1
+
+
 def test_loop_requires_a_positive_step_limit() -> None:
     provider = FakeModelProvider()
     tool = CountingEchoTool()
@@ -330,4 +374,15 @@ def test_loop_requires_a_positive_step_limit() -> None:
             executor=ToolExecutor(registry),
             tool_snapshot=_snapshot(tool),
             max_calls_per_tool_input=0,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="max_tool_result_chars must fit the truncation marker",
+    ):
+        AgentLoop(
+            model=provider,
+            executor=ToolExecutor(registry),
+            tool_snapshot=_snapshot(tool),
+            max_tool_result_chars=1,
         )

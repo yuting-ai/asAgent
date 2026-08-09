@@ -13,6 +13,8 @@ from asagent.models.provider import ModelProvider
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.snapshot import ToolSnapshot
 
+_TOOL_RESULT_TRUNCATION_MARKER = "\n\n[Tool result truncated]"
+
 
 @dataclass(frozen=True, slots=True)
 class AgentLoopResult:
@@ -32,17 +34,23 @@ class AgentLoop:
         tool_snapshot: ToolSnapshot,
         max_steps: int = 8,
         max_calls_per_tool_input: int | None = None,
+        max_tool_result_chars: int = 4_000,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps must be positive")
         if max_calls_per_tool_input is not None and max_calls_per_tool_input < 1:
             raise ValueError("max_calls_per_tool_input must be positive")
+        if max_tool_result_chars < len(_TOOL_RESULT_TRUNCATION_MARKER):
+            raise ValueError(
+                "max_tool_result_chars must fit the truncation marker",
+            )
 
         self._model = model
         self._executor = executor
         self._tool_snapshot = tool_snapshot
         self._max_steps = max_steps
         self._max_calls_per_tool_input = max_calls_per_tool_input
+        self._max_tool_result_chars = max_tool_result_chars
 
     async def run(
         self,
@@ -107,9 +115,11 @@ class AgentLoop:
                 )
 
             for tool_call in response.tool_calls:
-                result = await self._execute_tool(
-                    tool_call,
-                    calls_by_tool_input,
+                result = self._truncate_tool_result(
+                    await self._execute_tool(
+                        tool_call,
+                        calls_by_tool_input,
+                    ),
                 )
                 history.append(
                     ModelMessage(
@@ -156,6 +166,15 @@ class AgentLoop:
             return await self._executor.execute(tool_id, tool_call.arguments)
         except Exception:
             return "Error: tool execution failed."
+
+    def _truncate_tool_result(self, result: str) -> str:
+        if len(result) <= self._max_tool_result_chars:
+            return result
+
+        prefix_length = self._max_tool_result_chars - len(
+            _TOOL_RESULT_TRUNCATION_MARKER
+        )
+        return result[:prefix_length] + _TOOL_RESULT_TRUNCATION_MARKER
 
     @staticmethod
     def _invalid_tool_calls_error(response: ModelResponse) -> str | None:

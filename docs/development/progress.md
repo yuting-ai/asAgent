@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop 与可配置的重复调用检测
+- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop、可配置重复调用检测与工具结果截断
 - 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试、最小 ToolRegistry、最小 ToolExecutor、无副作用的 `builtin.echo`，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-09
-- 当前目标：最小非流式 Agent Loop 与重复调用检测已验证；下一步是实现工具结果截断
+- 当前目标：最小非流式 Agent Loop、重复调用检测与工具结果截断已验证；下一步是实现基础 Run 取消令牌
 
 ## 2. 已完成
 
@@ -23,6 +23,7 @@
 - [x] 实现并验证阶段 2 的内部/Provider 工具名称映射与最小 Run Tool Snapshot。
 - [x] 实现并验证阶段 2 的带 `max_steps` 最小非流式 Agent Loop。
 - [x] 实现并验证阶段 2 的可配置重复工具调用检测。
+- [x] 实现并验证阶段 2 的工具结果截断。
 - [x] 确认本地私有个人助手定位。
 - [x] 确认默认单用户并预留 UserProvider。
 - [x] 确认当前只实现本地对话入口。
@@ -86,6 +87,7 @@
 - [x] 实现阶段 2 的内部/Provider 工具名称映射与最小 Run Tool Snapshot。
 - [x] 实现阶段 2 的最小 Agent Loop 与最大决策步数。
 - [x] 实现阶段 2 的可配置重复工具调用检测。
+- [x] 实现阶段 2 的工具结果截断。
 
 ## 4. 阶段 0（已完成）
 
@@ -1052,3 +1054,28 @@
 ### 下一步
 
 - 在用户确认后，实现工具结果截断；本次不开始该任务。
+
+## 2026-08-09 阶段 2 工具结果截断工作记录
+
+### 完成
+
+- AgentLoop 新增 `max_tool_result_chars`，默认将单条模型可见工具结果限制为 4,000 个字符；截断标记计入总上限。
+- 截断在工具执行返回后、生成 TOOL message 前发生，仅影响下一次模型请求看到的副本；未提前定义或改变未来原始 ToolCall 审计记录。
+- 增加长工具结果测试与截断上限配置校验。
+
+### 验证
+
+- 检查：运行 AgentLoop 定向测试、Ruff、strict mypy 与完整 `scripts/check.sh`。
+- 结果：通过；8 个定向测试、完整 100 个测试通过，74 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-033：工具结果截断仅限制模型上下文副本。
+
+### 风险或问题
+
+- 当前使用字符数而非 token 预算；工具超时、取消、参数校验、RunEvent、审计与持久化仍未实现。
+
+### 下一步
+
+- 在用户确认后，实现基础 Run 取消令牌；本次不开始该任务。
