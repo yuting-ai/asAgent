@@ -395,6 +395,16 @@
 - 影响：初始迁移固定 Conversation 内 Message 顺序、Run 内 Event 顺序、外键及 ToolCall 结果/错误互斥约束；SQLite 专有连接设置、Repository、事务服务与 PostgreSQL 实现仍是后续独立任务。
 - 替代方案：使用 Alembic 默认 `alembic_version`、额外维护自定义迁移表、或提前实现通用数据库/同步 Adapter；当前均不采用。
 
+### DEC-047：SQLite Conversation Repository 在存储边界规范化 UTC 时间
+
+- 日期：2026-08-09
+- 状态：已确认
+- 背景：SQLite 的日期时间存储不保留 `tzinfo`，直接回读会把原本 UTC-aware 的领域时间变成 naive datetime；非 UTC 输入还可能被错误解释为 UTC 墙上时间。
+- 决策：`SqliteConversationRepository` 在写入前将 aware datetime 转换为 UTC，在读取时将 SQLite 的 naive datetime 解释为 UTC 并返回 UTC-aware 值。异步 SQLAlchemy 使用 `sqlalchemy[asyncio]` extra，显式包含其所需的 `greenlet` 运行时依赖；仍只使用 SQLAlchemy Core，不使用 ORM。
+- 原因：时间规范化属于 SQLite/持久化边缘，Core Conversation 与 Message 模型不应知道具体数据库的时区限制；显式异步 extra 避免部署环境缺失运行所需依赖。
+- 影响：持久化 Conversation 和 Message 可在重启后保持 UTC 时间语义；未来 PostgreSQL 适配器仍必须遵守同一 UTC 领域约定，但可使用原生时区类型。
+- 替代方案：让各调用方自行处理时区、回读 naive datetime、或将 SQLite 原始字符串直接暴露给 Core；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：
@@ -406,7 +416,7 @@
 | 数据验证 | Pydantic `>=2,<3`，主要用于系统边界 | 已确认 |
 | API | FastAPI | 推荐，待锁定 |
 | 数据库 | SQLite | 已确认 |
-| 数据库访问 | SQLAlchemy `>=2.0,<2.1` Core，不使用 ORM | 已确认 |
+| 数据库访问 | SQLAlchemy `[asyncio]` extra、`>=2.0,<2.1` Core，不使用 ORM | 已确认 |
 | 异步 SQLite Driver | aiosqlite `>=0.20,<1` | 已确认，阶段 3 引入 |
 | 迁移 | Alembic `>=1.18,<2` | 已确认，阶段 3 引入 |
 | 测试 | pytest + pytest-asyncio | 已确认 |

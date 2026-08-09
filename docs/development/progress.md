@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 3 已开始；阶段 2 的最小 ToolRegistry、ToolExecutor、三个内置工具、Agent Loop、安全边界、RunEvent、ToolCall 记录与内存态开发 CLI 垂直切片已完成；阶段 3 已完成 SQLite 初始 Schema 与迁移基线
-- 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、开发 Agent CLI、OpenAI-compatible Provider、工具与 Agent Loop 能力，以及使用 SQLAlchemy Core、Alembic 与 SQLite 集成测试验证的初始持久化 Schema
+- 项目阶段：阶段 3 已开始；阶段 2 的最小 ToolRegistry、ToolExecutor、三个内置工具、Agent Loop、安全边界、RunEvent、ToolCall 记录与内存态开发 CLI 垂直切片已完成；阶段 3 已完成 SQLite 初始 Schema、迁移基线与 Conversation Repository
+- 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版与 SQLite Conversation Repository、最小 `ChatService`、开发 Agent CLI、OpenAI-compatible Provider、工具与 Agent Loop 能力，以及使用 SQLAlchemy Core、Alembic 与 SQLite 集成测试验证的初始持久化 Schema
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-09
-- 当前目标：SQLite 初始 Schema 与 Alembic 迁移已验证；下一步实现使用 `AppPaths.data_dir` 和 `aiosqlite` 的 SQLite Conversation Repository，不改变既有 Core Repository Protocol
+- 当前目标：SQLite Conversation Repository 已验证；下一步独立确定 SQLite 运行时连接设置与并发/事务测试边界，再实现 SQLite Run Repository
 
 ## 2. 已完成
 
@@ -44,6 +44,7 @@
 - [x] 锁定阶段 0 技术选型：Python 3.13、uv、Pydantic 2、pytest/pytest-asyncio、Ruff 和 strict mypy。
 - [x] 确认阶段 3 使用 SQLAlchemy 2.0 Core + aiosqlite + Alembic，不使用 ORM。
 - [x] 实现并验证阶段 3 SQLite 初始 Schema、Alembic 迁移与约束集成测试。
+- [x] 实现并验证阶段 3 SQLite Conversation Repository。
 - [x] 初始化 Git 仓库。
 - [x] 更新文档中的产品名、Python 包名、命令名和桌面资源名。
 - [x] 将项目物理目录从 `AsAgent` 重命名为 `Ragent`。
@@ -1343,3 +1344,29 @@
 ### 下一步
 
 - 在用户确认后，实现最小 SQLite Conversation Repository；本次不开始该任务。
+
+## 2026-08-09 阶段 3 SQLite Conversation Repository 工作记录
+
+### 完成
+
+- 新增 `storage.sqlite.conversation_repository.SqliteConversationRepository`，作为既有异步 `ConversationRepository` Protocol 的 SQLite 适配器；Repository 接收已迁移数据库路径并提供显式 `aclose()`，不推导或创建个人数据目录。
+- Conversation 保存时自动确保所属 User 存在；同一稳定 Conversation ID 可覆盖保存。Message 只可追加到已存在 Conversation，并由单条 SQL 语句分配该 Conversation 内的递增 `sequence`，读取时按该顺序返回。
+- SQLAlchemy 使用 `[asyncio]` extra 和 aiosqlite 方言；每个 SQLite 连接开启 foreign keys。SQLite 读写边界将时间统一规范化为 UTC-aware datetime。
+- 集成测试覆盖跨 Repository 实例持久化、用户隔离、覆盖保存、Message 顺序、孤儿 Message 拒绝和非 UTC 时间的 UTC 规范化。
+
+### 验证
+
+- 检查：运行 SQLite Conversation Repository 定向集成测试、Ruff、strict mypy、完整 `scripts/check.sh` 和 `git diff --check`。
+- 结果：通过；4 个定向集成测试通过，完整 126 个测试通过，88 个文件格式正确，84 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-047：SQLite Conversation Repository 在存储边界规范化 UTC 时间，并显式使用 SQLAlchemy asyncio extra。
+
+### 风险或问题
+
+- 尚未固定 WAL、busy timeout、synchronous、跨进程锁等待和多写者事务策略；Run、RunEvent、ToolCall 的 SQLite Repository、原子创建 Message 与 Run、重启恢复入口和回放查询仍未实现。
+
+### 下一步
+
+- 在用户确认后，先确定 SQLite 运行时连接设置与并发/事务集成测试边界；本次不开始该任务。
