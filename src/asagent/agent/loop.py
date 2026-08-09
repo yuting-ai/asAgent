@@ -12,7 +12,7 @@ from asagent.models.contracts import (
 )
 from asagent.models.errors import ProviderTimeoutError
 from asagent.models.provider import ModelProvider
-from asagent.tools.errors import ToolTimeoutError
+from asagent.tools.errors import ToolArgumentsValidationError, ToolTimeoutError
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.snapshot import ToolSnapshot
 
@@ -217,6 +217,8 @@ class AgentLoop:
 
         try:
             return await self._executor.execute(tool_id, tool_call.arguments)
+        except ToolArgumentsValidationError:
+            return "Error: tool arguments are invalid."
         except ToolTimeoutError:
             return "Error: tool execution timed out."
         except Exception:

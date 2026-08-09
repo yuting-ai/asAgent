@@ -1,8 +1,11 @@
 import asyncio
 from collections.abc import Mapping
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
+
 from asagent.core.tool import Tool
-from asagent.tools.errors import ToolTimeoutError
+from asagent.tools.errors import ToolArgumentsValidationError, ToolTimeoutError
 from asagent.tools.registry import ToolRegistry
 
 
@@ -16,6 +19,15 @@ class ToolExecutor:
         arguments: Mapping[str, object],
     ) -> str:
         tool: Tool = self._registry.get(tool_id)
+
+        try:
+            Draft202012Validator(tool.definition.input_schema).validate(
+                dict(arguments),
+            )
+        except ValidationError as error:
+            raise ToolArgumentsValidationError(
+                "tool arguments are invalid",
+            ) from error
 
         try:
             return await asyncio.wait_for(

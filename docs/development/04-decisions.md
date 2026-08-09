@@ -294,6 +294,16 @@
 - 影响：超时会向工具协程请求取消，但对已经发送给外部系统的副作用不提供回滚保证；工具实现应正确处理取消和清理资源。最后允许决策步骤的工具仍不会执行；参数校验、权限、批准、审计、Run 总 deadline 与后台长任务仍待实现。
 - 替代方案：工具超时后直接让整个 Run `FAILED`、让每个 Tool 自行实现不一致的超时、或吞掉超时而不向模型写入结果；当前均不采用。
 
+### DEC-037：工具参数在 Executor 以固定 JSON Schema Draft 校验
+
+- 日期：2026-08-09
+- 状态：已确认
+- 背景：模型返回的工具参数是运行时数据，不能假设与每个 Tool 的输入 Schema 一致；若让各工具自行解析，会导致校验语义、错误处理和安全边界不一致。
+- 决策：`ToolExecutor` 在调用 Tool 前使用 `jsonschema` 的 `Draft202012Validator` 校验 `ToolDefinition.input_schema`。校验失败时抛出 `ToolArgumentsValidationError`，不调用 Tool；AgentLoop 将其转换为与原 `tool_call_id` 配对的通用 TOOL 错误文本，再交回模型继续决策。`jsonschema` 是运行时依赖，`types-jsonschema` 仅为 strict mypy 提供开发期类型信息。
+- 原因：固定 JSON Schema Draft 避免未声明 `$schema` 时随验证器版本漂移；集中在 Executor 能使内置工具与未来 MCP 工具共享同一入口。通用错误文本避免将原始参数、Schema 或验证器内部细节写入模型上下文。
+- 影响：当前校验覆盖实例参数；ToolDefinition 的 Schema 元校验、格式检查、参数归一化与更细的模型纠错提示仍待后续策略完善。无效参数不会进入工具协程，但仍会形成可恢复的模型上下文事实。
+- 替代方案：由每个 Tool 手写检查、仅在 Prompt 中要求模型遵守 Schema、使用动态 Pydantic 模型，或把详细验证错误原样发给模型；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

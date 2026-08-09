@@ -4,7 +4,7 @@ from collections.abc import Mapping
 import pytest
 
 from asagent.core.tool_definition import ToolDefinition
-from asagent.tools.errors import ToolTimeoutError
+from asagent.tools.errors import ToolArgumentsValidationError, ToolTimeoutError
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.registry import ToolRegistry
 
@@ -19,7 +19,12 @@ class RecordingTool:
             tool_id="builtin.echo",
             display_name="Echo",
             description="Returns supplied text.",
-            input_schema={"type": "object"},
+            input_schema={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+                "additionalProperties": False,
+            },
             risk_level="low",
             required_permissions=frozenset(),
             requires_approval=False,
@@ -105,6 +110,22 @@ async def test_executor_does_not_hide_tool_failure() -> None:
 
     with pytest.raises(RuntimeError, match="tool failed"):
         await executor.execute("builtin.fail", {})
+
+
+@pytest.mark.asyncio
+async def test_executor_rejects_invalid_arguments_before_execution() -> None:
+    tool = RecordingTool()
+    registry = ToolRegistry()
+    registry.register(tool)
+    executor = ToolExecutor(registry)
+
+    with pytest.raises(
+        ToolArgumentsValidationError,
+        match="tool arguments are invalid",
+    ):
+        await executor.execute("builtin.echo", {"text": 1})
+
+    assert tool.arguments is None
 
 
 @pytest.mark.asyncio

@@ -43,7 +43,10 @@ class CountingEchoTool:
             description="Returns supplied text.",
             input_schema={
                 "type": "object",
-                "properties": {"text": {"type": "string"}},
+                "properties": {
+                    "text": {"type": "string"},
+                    "attempt": {"type": "integer"},
+                },
                 "required": ["text"],
                 "additionalProperties": False,
             },
@@ -282,6 +285,37 @@ async def test_loop_returns_error_result_when_tool_execution_fails() -> None:
     assert provider.requests[1].messages[-1] == ModelMessage(
         role=ModelMessageRole.TOOL,
         content="Error: tool execution failed.",
+        tool_call_id="call_123",
+    )
+
+
+@pytest.mark.asyncio
+async def test_loop_appends_paired_tool_error_for_invalid_arguments() -> None:
+    tool_call = ModelToolCall(
+        call_id="call_123",
+        name="builtin_echo",
+        arguments={"text": 1},
+    )
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(text=None, tool_calls=(tool_call,)),
+            ModelResponse(text="I need text, not a number.", tool_calls=()),
+        ),
+    )
+    tool = CountingEchoTool()
+
+    result = await _loop(provider, tool).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.text == "I need text, not a number."
+    assert tool.calls == 0
+    assert provider.requests[1].messages[-1] == ModelMessage(
+        role=ModelMessageRole.TOOL,
+        content="Error: tool arguments are invalid.",
         tool_call_id="call_123",
     )
 
