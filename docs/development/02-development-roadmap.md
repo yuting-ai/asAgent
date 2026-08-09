@@ -118,7 +118,8 @@ asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不
   5. 在上述条件成立后实现最小非流式 Agent Loop。
 - 添加最大步骤、重复调用检测和结果截断。
 - 实现基础 Run 取消令牌、模型超时和工具超时；取消定位到 `run_id`。
-- 记录 ToolCall 和 RunEvent。
+- 记录最小 RunEvent；随后插入内存态开发 CLI 的 Agent 垂直切片，手动体验“输入 → Loop → Provider → 工具 → 最终回答/事件”。
+- 再记录 ToolCall；SQLite 持久化、SSE 和 Electron 仍留在后续阶段。
 
 ### 验收
 
