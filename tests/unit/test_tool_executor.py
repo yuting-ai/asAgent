@@ -1,8 +1,10 @@
+import asyncio
 from collections.abc import Mapping
 
 import pytest
 
 from asagent.core.tool_definition import ToolDefinition
+from asagent.tools.errors import ToolTimeoutError
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.registry import ToolRegistry
 
@@ -47,6 +49,33 @@ class FailingTool(RecordingTool):
         raise RuntimeError("tool failed")
 
 
+class HangingTool(RecordingTool):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancelled = False
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            tool_id="builtin.hanging",
+            display_name="Hanging",
+            description="Never completes.",
+            input_schema={"type": "object"},
+            risk_level="low",
+            required_permissions=frozenset(),
+            requires_approval=False,
+            timeout_seconds=0.01,
+        )
+
+    async def execute(self, arguments: Mapping[str, object]) -> str:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        raise AssertionError("unreachable")
+
+
 @pytest.mark.asyncio
 async def test_executor_delegates_to_registered_tool() -> None:
     tool = RecordingTool()
@@ -76,3 +105,16 @@ async def test_executor_does_not_hide_tool_failure() -> None:
 
     with pytest.raises(RuntimeError, match="tool failed"):
         await executor.execute("builtin.fail", {})
+
+
+@pytest.mark.asyncio
+async def test_executor_cancels_tool_when_execution_times_out() -> None:
+    tool = HangingTool()
+    registry = ToolRegistry()
+    registry.register(tool)
+    executor = ToolExecutor(registry)
+
+    with pytest.raises(ToolTimeoutError, match="tool execution timed out"):
+        await executor.execute("builtin.hanging", {})
+
+    assert tool.cancelled is True

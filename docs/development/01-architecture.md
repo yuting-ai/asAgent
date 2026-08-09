@@ -381,6 +381,8 @@ ToolCall
 → 返回 ToolResult
 ```
 
+阶段 2 当前的最小 `ToolExecutor` 已在查找内部 `tool_id` 后使用该工具 `ToolDefinition.timeout_seconds` 限制单次异步执行。超时会取消正在等待的工具协程并转换为 `ToolTimeoutError`；AgentLoop 再将它写为与原调用配对的 TOOL 错误结果，交回模型继续决策。该取消不能回滚已经发出的外部副作用，因此后续 Tool/Policy 仍需按风险级别规定清理、幂等和审计策略。参数校验、权限、批准、结果清洗和持久化尚未由最小 Executor 实现。
+
 ### 10.3 Tool Snapshot
 
 每个 Run 开始时确定一个工具快照，包含内部工具定义、Schema Hash 和 Provider 名称映射。即使 MCP Server 在运行中热更新，本次 Run 的 Schema 和名称映射保持稳定，下一个 Run 再使用新版本。

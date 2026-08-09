@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator, Callable, Mapping
 
 import pytest
@@ -30,6 +31,7 @@ class CountingEchoTool:
         error: Exception | None = None,
         result: str = "Echo: hello",
         on_execute: Callable[[], None] | None = None,
+        timeout_seconds: float = 1.0,
     ) -> None:
         self.calls = 0
         self._error = error
@@ -48,7 +50,7 @@ class CountingEchoTool:
             risk_level="low",
             required_permissions=frozenset(),
             requires_approval=False,
-            timeout_seconds=1.0,
+            timeout_seconds=timeout_seconds,
         )
 
     @property
@@ -75,6 +77,16 @@ class TimeoutModelProvider:
 
     def stream(self, request: ModelRequest) -> AsyncIterator[ModelEvent]:
         raise AssertionError("stream is not used by AgentLoop")
+
+
+class HangingEchoTool(CountingEchoTool):
+    def __init__(self) -> None:
+        super().__init__(timeout_seconds=0.01)
+
+    async def execute(self, arguments: Mapping[str, object]) -> str:
+        self.calls += 1
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
 
 
 def _snapshot(tool: CountingEchoTool) -> ToolSnapshot:
@@ -270,6 +282,37 @@ async def test_loop_returns_error_result_when_tool_execution_fails() -> None:
     assert provider.requests[1].messages[-1] == ModelMessage(
         role=ModelMessageRole.TOOL,
         content="Error: tool execution failed.",
+        tool_call_id="call_123",
+    )
+
+
+@pytest.mark.asyncio
+async def test_loop_appends_paired_tool_error_when_execution_times_out() -> None:
+    tool_call = ModelToolCall(
+        call_id="call_123",
+        name="builtin_echo",
+        arguments={"text": "hello"},
+    )
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(text=None, tool_calls=(tool_call,)),
+            ModelResponse(text="I could not complete the tool call.", tool_calls=()),
+        ),
+    )
+    tool = HangingEchoTool()
+
+    result = await _loop(provider, tool).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.text == "I could not complete the tool call."
+    assert tool.calls == 1
+    assert provider.requests[1].messages[-1] == ModelMessage(
+        role=ModelMessageRole.TOOL,
+        content="Error: tool execution timed out.",
         tool_call_id="call_123",
     )
 

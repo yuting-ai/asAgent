@@ -1,6 +1,8 @@
+import asyncio
 from collections.abc import Mapping
 
 from asagent.core.tool import Tool
+from asagent.tools.errors import ToolTimeoutError
 from asagent.tools.registry import ToolRegistry
 
 
@@ -14,4 +16,11 @@ class ToolExecutor:
         arguments: Mapping[str, object],
     ) -> str:
         tool: Tool = self._registry.get(tool_id)
-        return await tool.execute(arguments)
+
+        try:
+            return await asyncio.wait_for(
+                tool.execute(arguments),
+                timeout=tool.definition.timeout_seconds,
+            )
+        except TimeoutError as error:
+            raise ToolTimeoutError("tool execution timed out") from error
