@@ -383,6 +383,8 @@ ToolCall
 
 阶段 2 当前的最小 `ToolExecutor` 接受默认为空的不可变 `granted_permissions`；在查找内部 `tool_id` 后先使用 `jsonschema` 的 `Draft202012Validator` 校验 `ToolDefinition.input_schema`，再要求工具的 `required_permissions` 是已授予集合的子集，最后才以该定义的 `timeout_seconds` 限制单次异步执行。参数无效时不会调用 Tool，并以 `ToolArgumentsValidationError` 返回至 Loop；缺少权限时以 `ToolPermissionDeniedError` 返回；超时会取消正在等待的工具协程并转换为 `ToolTimeoutError`。AgentLoop 将三者都写为与原调用配对的 TOOL 错误结果，交回模型继续决策。该取消不能回滚已经发出的外部副作用，因此后续 Tool/Policy 仍需按风险级别规定清理、幂等和审计策略。Schema 元校验、格式检查、用户批准、结果清洗和持久化尚未由最小 Executor 实现。
 
+后续统一授权模型由三个独立维度组成：工具能力、资源范围和单次操作批准。文件根、浏览器 Profile/站点、OAuth scope、MCP Server 是不同资源范围，彼此不继承；因此全盘文件范围不授予浏览器、Gmail 或 MCP 能力，OAuth Token 也不授予本地文件权限。任何 `allow_all` 等通用开关都不得跨资源使用；Policy、Approval、Settings 和审计都必须携带资源类型与实际范围。
+
 ### 10.3 Tool Snapshot
 
 每个 Run 开始时确定一个工具快照，包含内部工具定义、Schema Hash 和 Provider 名称映射。即使 MCP Server 在运行中热更新，本次 Run 的 Schema 和名称映射保持稳定，下一个 Run 再使用新版本。
@@ -405,6 +407,8 @@ config_dir/mcp.json
 ```
 
 第一版只支持 stdio。稳定后再支持 Streamable HTTP、OAuth 和工具检索。
+
+MCP Server 的权限独立于宿主工具权限：stdio Server 使用显式工作目录、最小环境变量和自身配置；远程 Server 仅使用为该 Server 配置的 Token 与能力。它们不继承 asAgent 的文件范围、浏览器 Profile 或其他账户 Token。
 
 MCP 工具内部 ID：
 

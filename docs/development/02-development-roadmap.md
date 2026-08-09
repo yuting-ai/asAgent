@@ -198,6 +198,7 @@ asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不
 - 实现只读工具 `filesystem.read_file`、`filesystem.list`。
 - 再实现受控写入工具。
 - 建立 Tool Policy 和 Approval 接口；批准请求展示操作、规范化路径/根、权限、递归范围、影响摘要和有效期限。写入、删除、执行命令、敏感位置读取和 Agent 提议的范围扩大始终单独批准。
+- Policy 与 Approval 数据模型区分工具能力、文件范围和单次操作批准，为后续浏览器、OAuth 与 MCP 复用，但不让文件范围跨资源继承。
 - 将阶段 2 的取消/超时机制接入文件操作、审批等待和受控阻塞任务。
 - Shell 工具只设计接口，是否实现由后续决策确认。
 
@@ -280,6 +281,7 @@ asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不
 - 实现测试 MCP Server。
 - 实现 stdio McpClient。
 - 实现 Server Manager 和名称空间。
+- 为每个 MCP Server 配置独立的资源范围、工作目录、最小环境变量和 Secret 引用；不得继承 asAgent 的文件范围、浏览器 Profile 或其他账户 Token。
 - 实现版本/能力协商、tools/list 分页和超时取消。
 - 将 MCP 工具映射到统一 Tool Registry。
 - 实现 Tool Snapshot 和错误隔离。
