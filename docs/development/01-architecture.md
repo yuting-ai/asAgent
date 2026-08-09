@@ -240,7 +240,9 @@ Loop 对一组 tool calls 按稳定顺序逐个执行。未知工具、参数错
 
 阶段 1 先实现不依赖入口的最小 `ChatService`：调用方提供已创建的 `Conversation`、用户文本、模型名称和系统提示词；Service 保存 Conversation 与 UserMessage，读取该 Conversation 的可见历史并构造无工具的 `ModelRequest`，调用 `ModelProvider.complete()` 后保存并返回 AssistantMessage。时间和 Message ID 由构造函数注入，使 Service 不隐式依赖系统时间或随机数。当前不创建 Run、不处理流式或工具调用；Provider 异常时已保存的用户消息保留，工具调用响应会明确失败，等待阶段 2 的 Agent Loop。
 
-阶段 1 的 `asagent` CLI 是薄的开发入口：它创建进程内 Conversation、`InMemoryConversationRepository` 和开发用 Echo Provider，再将终端的连续输入交给 `ChatService`。输入 `exit` 或 `quit` 时退出，Provider 异常显示为错误后返回输入循环。它不读取 API Key、不持久化历史，也不是正式产品界面；后续真实 Provider 与 Electron 入口复用同一 ChatService 边界。
+阶段 1 的 `asagent` CLI 保留 `run_chat()` 作为无工具 ChatService 的离线测试入口。阶段 2 的默认命令则是独立的开发 Agent 垂直切片：它在进程内组合确定性的 `DevelopmentToolModelProvider`、三个内置工具、`AgentLoop` 和终端 `EventPublisher`，使用户可离线体验连续输入、工具回合与安全 RunEvent。每条输入创建新的内存态 Run，Conversation 上下文只在该进程存活；输入 `exit` 或 `quit` 时退出。
+
+CLI 以显式 `--profile deepseek --app-home <root>` 启用真实 DeepSeek 路径：入口通过 `AppPaths` 加载 `<root>/config/providers.toml`，将该 Profile 的 `secret_id` 显式绑定到 `ASAGENT_DEEPSEEK_API_KEY`，并拥有 `httpx.AsyncClient` 生命周期。源码开发可使用 `uv run --env-file .env asagent ...` 在进程启动前注入该变量；`.env` 仅是被忽略的开发便利文件，正式桌面端仍应使用系统 Secret Store。Profile、Key 或网络错误不会静默降级为离线 Provider。CLI 不持久化历史，也不是正式产品界面；SQLite、SSE 和 Electron 继续复用 Core 边界并在后续阶段实现。
 
 CLI、Local API 与未来渠道将通过同一个更完整的入口接口进入：
 

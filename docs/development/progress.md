@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop、可配置重复调用检测、工具结果截断、基础 Run 取消令牌、模型调用超时、工具执行超时、工具参数校验、最小工具权限策略、最小用户批准 Gate 与最小 RunEvent 记录
+- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop、可配置重复调用检测、工具结果截断、基础 Run 取消令牌、模型调用超时、工具执行超时、工具参数校验、最小工具权限策略、最小用户批准 Gate、最小 RunEvent 记录与内存态开发 CLI Agent 垂直切片
 - 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试、最小 ToolRegistry、最小 ToolExecutor、无副作用的 `builtin.echo`，以及 Docker 干净环境测试入口
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-09
-- 当前目标：最小非流式 Agent Loop、重复调用检测、结果截断、基础取消令牌、模型调用超时、工具执行超时、工具参数校验、最小工具权限策略、最小用户批准 Gate 与最小 RunEvent 记录已验证；下一步是内存态开发 CLI 的 Agent 垂直切片
+- 当前目标：最小非流式 Agent Loop、重复调用检测、结果截断、基础取消令牌、模型调用超时、工具执行超时、工具参数校验、最小工具权限策略、最小用户批准 Gate、最小 RunEvent 记录与内存态开发 CLI Agent 垂直切片已验证；下一步是最小 ToolCall 记录
 
 ## 2. 已完成
 
@@ -26,6 +26,7 @@
 - [x] 实现并验证阶段 2 的工具结果截断。
 - [x] 实现并验证阶段 2 的基础 Run 取消令牌。
 - [x] 实现并验证阶段 2 的最小 RunEvent 记录。
+- [x] 实现并验证阶段 2 的内存态开发 CLI Agent 垂直切片。
 - [x] 确认本地私有个人助手定位。
 - [x] 确认默认单用户并预留 UserProvider。
 - [x] 确认当前只实现本地对话入口。
@@ -1259,3 +1260,31 @@
 ### 下一步
 
 - 在用户确认后，实现内存态开发 CLI 的 Agent 垂直切片；本次不开始该任务。
+
+## 2026-08-09 阶段 2 开发 CLI Agent 垂直切片工作记录
+
+### 完成
+
+- 默认 `asagent` CLI 现在以确定性的离线 Development Provider 组合 AgentLoop、Echo/Calculator/CurrentTime 工具和终端 EventPublisher；用户可连续输入并观察完整工具回合。
+- 新增显式真实路径 `--profile deepseek --app-home .local-data`；它复用 Profile Loader、EnvironmentSecretProvider、Provider Factory 和 OpenAI-compatible Provider，不改变测试默认离线的规则。
+- 新增被忽略的 `.env.example`，并记录开发时由 `uv run --env-file .env` 在入口前加载 `ASAGENT_DEEPSEEK_API_KEY`；应用代码不读取 `.env`，正式 Secret Store 仍待后续实现。
+- 保留 `run_chat()` 作为阶段 1 ChatService 的测试入口，不将无工具聊天服务与 AgentLoop 生命周期混合。
+
+### 验证
+
+- 检查：运行 CLI 定向测试、Ruff、strict mypy、完整 `scripts/check.sh` 与 `git diff --check`。
+- 结果：通过；5 个 CLI 定向测试、完整 119 个测试通过，78 个源码文件 Ruff 与 strict mypy 无问题。
+- 检查：运行 `printf 'calculate 2 * (3 + 4)\\nexit\\n' | uv run asagent`。
+- 结果：通过；离线 CLI 显示 8 个安全 RunEvent，并返回 `Tool result: 14`。
+
+### 决策变化
+
+- 新增 DEC-044：开发 CLI 默认离线，真实 DeepSeek 仅由显式 Profile 启用。
+
+### 风险或问题
+
+- 真实 DeepSeek 仍需用户主动设置 Key 并手动运行，会产生费用；当前 CLI 事件和 Conversation/Run 都不持久化。
+
+### 下一步
+
+- 在用户确认后，实现最小 ToolCall 记录；本次不开始该任务。

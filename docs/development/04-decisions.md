@@ -367,6 +367,16 @@
 - 影响：当前事件仅进程内发布，不保存、查询、重放或发送给 UI；若最后一次终态事件本身发布失败，不能保证额外记录失败事件。ToolCall 原始结果、审计详情、事件重试与持久化由后续独立任务实现。
 - 替代方案：由 CLI/UI 自行推断 Loop 状态、在事件中记录完整参数和结果、Publisher 缺失时抛错，或发布失败后继续执行；当前均不采用。
 
+### DEC-044：开发 CLI 默认离线，真实 DeepSeek 仅由显式 Profile 启用
+
+- 日期：2026-08-09
+- 状态：已确认
+- 背景：阶段 2 需要尽早体验完整 Agent 链路，但让默认 CLI 或自动测试依赖 API Key、网络与付费模型会降低可重复性；反过来，只保留离线脚本又无法观察真实模型是否会遵守工具 Schema 与完整调用历史。
+- 决策：`asagent` 默认启动确定性的离线 Development Provider，并组合三个低风险内置工具、AgentLoop 与终端 EventPublisher。用户显式传入 `--profile deepseek --app-home <root>` 时，入口才加载本地 Profile 并通过现有 Provider 组合根创建真实 DeepSeek Provider；该 Profile 的 Secret 在开发期仅绑定 `ASAGENT_DEEPSEEK_API_KEY`。`uv run --env-file .env` 可在启动前加载被忽略的开发环境文件，应用代码不解析 `.env`；正式桌面端以后使用系统 Secret Store。真实模式配置或调用失败时不降级到离线模式。
+- 原因：离线默认保证测试与演示可重复；显式真实模式提供模型自主选择工具的实际体验；将 `.env` 限定在入口前的开发便利层，避免把文件式 Secret 误当成正式用户存储。
+- 影响：当前 CLI 仅为开发垂直切片，不持久化 Conversation/Run，也不承担 ChatService、SQLite、SSE 或 Electron 的正式入口职责。真实调用可能产生费用，且单次等待受 Profile 超时约束。未来支持其他 Profile 时，必须显式定义其 Secret 绑定，不能猜测环境变量名称。
+- 替代方案：默认真实 Provider、让 CLI/Provider 自行读取 `.env`、真实模式失败后悄悄改用 Fake，或将 `.env` 作为正式桌面端 Secret Store；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：
