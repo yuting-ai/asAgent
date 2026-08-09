@@ -5,7 +5,9 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
 from asagent.core.tool import Tool
+from asagent.tools.approval import ToolApprovalPolicy
 from asagent.tools.errors import (
+    ToolApprovalDeniedError,
     ToolArgumentsValidationError,
     ToolPermissionDeniedError,
     ToolTimeoutError,
@@ -19,9 +21,11 @@ class ToolExecutor:
         registry: ToolRegistry,
         *,
         granted_permissions: frozenset[str] = frozenset(),
+        approval_policy: ToolApprovalPolicy | None = None,
     ) -> None:
         self._registry = registry
         self._granted_permissions = granted_permissions
+        self._approval_policy = approval_policy
 
     async def execute(
         self,
@@ -43,6 +47,15 @@ class ToolExecutor:
             self._granted_permissions,
         ):
             raise ToolPermissionDeniedError("tool permission denied")
+
+        if tool.definition.requires_approval and (
+            self._approval_policy is None
+            or not await self._approval_policy.approve(
+                tool.definition,
+                arguments,
+            )
+        ):
+            raise ToolApprovalDeniedError("tool approval denied")
 
         try:
             return await asyncio.wait_for(

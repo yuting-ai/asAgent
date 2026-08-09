@@ -13,6 +13,7 @@ from asagent.models.contracts import (
 from asagent.models.errors import ProviderTimeoutError
 from asagent.models.provider import ModelProvider
 from asagent.tools.errors import (
+    ToolApprovalDeniedError,
     ToolArgumentsValidationError,
     ToolPermissionDeniedError,
     ToolTimeoutError,
@@ -223,6 +224,8 @@ class AgentLoop:
             return await self._executor.execute(tool_id, tool_call.arguments)
         except ToolArgumentsValidationError:
             return "Error: tool arguments are invalid."
+        except ToolApprovalDeniedError:
+            return "Error: tool approval denied."
         except ToolPermissionDeniedError:
             return "Error: tool permission denied."
         except ToolTimeoutError:

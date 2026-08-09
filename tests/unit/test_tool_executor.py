@@ -5,6 +5,7 @@ import pytest
 
 from asagent.core.tool_definition import ToolDefinition
 from asagent.tools.errors import (
+    ToolApprovalDeniedError,
     ToolArgumentsValidationError,
     ToolPermissionDeniedError,
     ToolTimeoutError,
@@ -17,9 +18,11 @@ class RecordingTool:
     def __init__(
         self,
         required_permissions: frozenset[str] = frozenset(),
+        requires_approval: bool = False,
     ) -> None:
         self.arguments: Mapping[str, object] | None = None
         self._required_permissions = required_permissions
+        self._requires_approval = requires_approval
 
     @property
     def definition(self) -> ToolDefinition:
@@ -35,7 +38,7 @@ class RecordingTool:
             },
             risk_level="low",
             required_permissions=self._required_permissions,
-            requires_approval=False,
+            requires_approval=self._requires_approval,
             timeout_seconds=1.0,
         )
 
@@ -87,6 +90,20 @@ class HangingTool(RecordingTool):
             self.cancelled = True
             raise
         raise AssertionError("unreachable")
+
+
+class RecordingApprovalPolicy:
+    def __init__(self, approved: bool) -> None:
+        self._approved = approved
+        self.requests: list[tuple[ToolDefinition, Mapping[str, object]]] = []
+
+    async def approve(
+        self,
+        definition: ToolDefinition,
+        arguments: Mapping[str, object],
+    ) -> bool:
+        self.requests.append((definition, arguments))
+        return self._approved
 
 
 @pytest.mark.asyncio
@@ -149,6 +166,37 @@ async def test_executor_rejects_tools_without_required_permission() -> None:
     with pytest.raises(
         ToolPermissionDeniedError,
         match="tool permission denied",
+    ):
+        await executor.execute("builtin.echo", {"text": "hello"})
+
+    assert tool.arguments is None
+
+
+@pytest.mark.asyncio
+async def test_executor_executes_approved_tools() -> None:
+    tool = RecordingTool(requires_approval=True)
+    registry = ToolRegistry()
+    registry.register(tool)
+    policy = RecordingApprovalPolicy(True)
+    executor = ToolExecutor(registry, approval_policy=policy)
+
+    result = await executor.execute("builtin.echo", {"text": "hello"})
+
+    assert result == "Echo: hello"
+    assert tool.arguments == {"text": "hello"}
+    assert policy.requests[0][0] == tool.definition
+
+
+@pytest.mark.asyncio
+async def test_executor_rejects_tools_without_approval_policy() -> None:
+    tool = RecordingTool(requires_approval=True)
+    registry = ToolRegistry()
+    registry.register(tool)
+    executor = ToolExecutor(registry)
+
+    with pytest.raises(
+        ToolApprovalDeniedError,
+        match="tool approval denied",
     ):
         await executor.execute("builtin.echo", {"text": "hello"})
 

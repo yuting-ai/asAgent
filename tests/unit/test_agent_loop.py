@@ -20,6 +20,7 @@ from asagent.models.errors import ProviderTimeoutError
 from asagent.models.fake_provider import FakeModelProvider
 from asagent.models.provider import ModelProvider
 from asagent.models.tool_names import openai_compatible_tool_name
+from asagent.tools.approval import ToolApprovalPolicy
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.registry import ToolRegistry
 from asagent.tools.snapshot import ToolSnapshot
@@ -33,6 +34,7 @@ class CountingEchoTool:
         on_execute: Callable[[], None] | None = None,
         timeout_seconds: float = 1.0,
         required_permissions: frozenset[str] = frozenset(),
+        requires_approval: bool = False,
     ) -> None:
         self.calls = 0
         self._error = error
@@ -53,7 +55,7 @@ class CountingEchoTool:
             },
             risk_level="low",
             required_permissions=required_permissions,
-            requires_approval=False,
+            requires_approval=requires_approval,
             timeout_seconds=timeout_seconds,
         )
 
@@ -93,6 +95,18 @@ class HangingEchoTool(CountingEchoTool):
         raise AssertionError("unreachable")
 
 
+class FixedApprovalPolicy:
+    def __init__(self, approved: bool) -> None:
+        self._approved = approved
+
+    async def approve(
+        self,
+        definition: ToolDefinition,
+        arguments: Mapping[str, object],
+    ) -> bool:
+        return self._approved
+
+
 def _snapshot(tool: CountingEchoTool) -> ToolSnapshot:
     return ToolSnapshot.from_definitions(
         (tool.definition,),
@@ -108,6 +122,7 @@ def _loop(
     max_calls_per_tool_input: int | None = None,
     max_tool_result_chars: int = 4_000,
     granted_permissions: frozenset[str] = frozenset(),
+    approval_policy: ToolApprovalPolicy | None = None,
 ) -> AgentLoop:
     registry = ToolRegistry()
     registry.register(tool)
@@ -117,6 +132,7 @@ def _loop(
         executor=ToolExecutor(
             registry,
             granted_permissions=granted_permissions,
+            approval_policy=approval_policy,
         ),
         tool_snapshot=_snapshot(tool),
         max_steps=max_steps,
@@ -356,6 +372,41 @@ async def test_loop_appends_paired_tool_error_for_missing_permission() -> None:
     assert provider.requests[1].messages[-1] == ModelMessage(
         role=ModelMessageRole.TOOL,
         content="Error: tool permission denied.",
+        tool_call_id="call_123",
+    )
+
+
+@pytest.mark.asyncio
+async def test_loop_appends_paired_tool_error_for_rejected_approval() -> None:
+    tool_call = ModelToolCall(
+        call_id="call_123",
+        name="builtin_echo",
+        arguments={"text": "hello"},
+    )
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(text=None, tool_calls=(tool_call,)),
+            ModelResponse(text="I will not run that without approval.", tool_calls=()),
+        ),
+    )
+    tool = CountingEchoTool(requires_approval=True)
+
+    result = await _loop(
+        provider,
+        tool,
+        approval_policy=FixedApprovalPolicy(False),
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.text == "I will not run that without approval."
+    assert tool.calls == 0
+    assert provider.requests[1].messages[-1] == ModelMessage(
+        role=ModelMessageRole.TOOL,
+        content="Error: tool approval denied.",
         tool_call_id="call_123",
     )
 

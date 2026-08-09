@@ -337,6 +337,16 @@
 - 影响：未来 Policy、Approval、Settings、Secret Store、Browser Adapter 和 MCP Server Manager 必须携带资源类型与范围，不得只传一个通用 `allow_all` 标志；审计记录资源类型、范围与操作，但不记录正文、Cookie、Token 或 Secret。
 - 替代方案：以全局“全权限”开关覆盖所有工具、让 OAuth/浏览器/MCP 自动继承文件范围、共享浏览器登录态与 Secret，或只依赖模型提示词区分权限；当前均不采用。
 
+### DEC-041：最小用户批准以异步 Policy Gate 默认拒绝
+
+- 日期：2026-08-09
+- 状态：已确认
+- 背景：工具的 `requires_approval` 元数据必须在执行前生效，但当前尚无 Electron/API 审批窗口、持久化请求或 RunEvent 通道；直接把 UI 细节放入 Executor 会破坏核心工具边界。
+- 决策：`ToolExecutor` 接受可选异步 `ToolApprovalPolicy`，其输入为 `ToolDefinition` 与已校验参数，输出为允许或拒绝。仅对 `requires_approval=True` 的工具调用该 Policy；缺少 Policy 或 Policy 拒绝均抛出 `ToolApprovalDeniedError`，默认拒绝。AgentLoop 将拒绝写为与原 `tool_call_id` 配对的通用 TOOL 结果并继续让模型决策。审批检查位于权限检查后、超时和工具执行前。
+- 原因：异步 Protocol 可由当前离线测试替身立即实现，也可在未来由 Electron/API 的用户交互实现，不必重塑 Executor 接口；默认拒绝避免尚未接入 UI 时意外放行高风险工具。
+- 影响：当前没有审批窗口、审批请求 ID、持久化审计、过期时间或用户等待期间的取消处理。未来审批实现必须遵守 DEC-039/DEC-040 的资源范围和操作显示要求，并把等待中的取消作为独立任务处理。
+- 替代方案：没有 Policy 时默认批准、让 AgentLoop 直接调用 UI、仅靠 `requires_approval` 提示词、或在每个 Tool 内自行弹窗；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：
