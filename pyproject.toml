@@ -3,9 +3,12 @@ name = "asagent"
 version = "0.1.0"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    "aiosqlite>=0.20,<1",
+    "alembic>=1.18,<2",
     "httpx>=0.28,<0.29",
     "jsonschema>=4.26,<5",
     "pydantic>=2,<3",
+    "sqlalchemy>=2.0,<2.1",
 ]
 
 [project.scripts]

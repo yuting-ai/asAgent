@@ -385,6 +385,16 @@
 - 原因：模型协议 ID 只能负责本次请求历史配对，不能充当稳定的内部审计身份；同时不能让模型上下文的截断副本取代可追溯的执行事实。
 - 影响：当前只进程内记录，SQLite Repository 后续适配该 Protocol；不实现审计 UI、重试或持久化 pending 状态。
 
+### DEC-046：阶段 3 以 SQLAlchemy Core Schema 与 Alembic 管理本地 SQLite 迁移
+
+- 日期：2026-08-09
+- 状态：已确认
+- 背景：阶段 3 需要先固定持久化表、约束和迁移基线，同时不让 Core 或未来 Repository 绑定 SQLite 连接实现。架构文档已使用 `schema_migrations` 这一名称，而 Alembic 默认版本表名称不同。
+- 决策：使用 SQLAlchemy 2.0 Core `MetaData` 定义 `users`、`conversations`、`messages`、`runs`、`run_events` 与 `tool_calls`；使用 Alembic 管理迁移，并显式配置版本表为 `schema_migrations`。迁移命令使用同步 SQLite URL；未来运行时 SQLite Repository 使用 `aiosqlite`，并从 `AppPaths.data_dir` 接收数据库路径。Repository Protocol 仍是未来 PostgreSQL 等存储实现的替换边界。
+- 原因：Core Schema 和迁移可独立验证，`schema_migrations` 与既有架构术语一致；同步迁移避免把运行时异步连接生命周期混入 Alembic。现在不创建泛化 DatabaseAdapter 或远程同步层，避免为尚未实现的场景增加抽象。
+- 影响：初始迁移固定 Conversation 内 Message 顺序、Run 内 Event 顺序、外键及 ToolCall 结果/错误互斥约束；SQLite 专有连接设置、Repository、事务服务与 PostgreSQL 实现仍是后续独立任务。
+- 替代方案：使用 Alembic 默认 `alembic_version`、额外维护自定义迁移表、或提前实现通用数据库/同步 Adapter；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

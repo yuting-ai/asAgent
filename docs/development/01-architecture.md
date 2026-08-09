@@ -493,6 +493,8 @@ tool_calls
 schema_migrations
 ```
 
+阶段 3 的初始实现将上述六张业务表定义在 `storage.sqlite.schema` 的 SQLAlchemy Core `MetaData` 中；Alembic 使用同名的 `schema_migrations` 作为版本表，而非额外创建业务迁移表。迁移脚本可使用同步 SQLite 连接，未来运行时 Repository 则通过 `aiosqlite` 管理异步连接；两者共享 Schema，不共享连接生命周期或 SQLite 专有运行参数。
+
 后续增加：
 
 ```text

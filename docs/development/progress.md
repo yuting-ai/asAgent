@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 2 已开始；已完成最小 ToolRegistry、ToolExecutor、三个内置工具、非流式工具消息契约、最小 Run Tool Snapshot、最小非流式 Agent Loop、可配置重复调用检测、工具结果截断、基础 Run 取消令牌、模型调用超时、工具执行超时、工具参数校验、最小工具权限策略、最小用户批准 Gate、最小 RunEvent 记录与内存态开发 CLI Agent 垂直切片
-- 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、使用开发 Echo Provider 的 `asagent` CLI、经过 Pydantic 校验的 Provider Profile 配置模型、使用 `httpx` 的 OpenAI-compatible Provider、脱敏 ProviderError 分类与保守重试、最小 ToolRegistry、最小 ToolExecutor、无副作用的 `builtin.echo`，以及 Docker 干净环境测试入口
+- 项目阶段：阶段 3 已开始；阶段 2 的最小 ToolRegistry、ToolExecutor、三个内置工具、Agent Loop、安全边界、RunEvent、ToolCall 记录与内存态开发 CLI 垂直切片已完成；阶段 3 已完成 SQLite 初始 Schema 与迁移基线
+- 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版 Conversation Repository、最小 `ChatService`、开发 Agent CLI、OpenAI-compatible Provider、工具与 Agent Loop 能力，以及使用 SQLAlchemy Core、Alembic 与 SQLite 集成测试验证的初始持久化 Schema
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-09
-- 当前目标：最小非流式 Agent Loop、重复调用检测、结果截断、基础取消令牌、模型调用超时、工具执行超时、工具参数校验、最小工具权限策略、最小用户批准 Gate、最小 RunEvent、ToolCall 记录与内存态开发 CLI Agent 垂直切片已验证；下一步由路线图继续阶段 3 的 SQLite 与可恢复状态准备
+- 当前目标：SQLite 初始 Schema 与 Alembic 迁移已验证；下一步实现使用 `AppPaths.data_dir` 和 `aiosqlite` 的 SQLite Conversation Repository，不改变既有 Core Repository Protocol
 
 ## 2. 已完成
 
@@ -43,6 +43,7 @@
 - [x] 明确 Backend 动态端口握手、SSE 认证/续传、RunEvent 顺序、Tool 名称映射和主数据边界。
 - [x] 锁定阶段 0 技术选型：Python 3.13、uv、Pydantic 2、pytest/pytest-asyncio、Ruff 和 strict mypy。
 - [x] 确认阶段 3 使用 SQLAlchemy 2.0 Core + aiosqlite + Alembic，不使用 ORM。
+- [x] 实现并验证阶段 3 SQLite 初始 Schema、Alembic 迁移与约束集成测试。
 - [x] 初始化 Git 仓库。
 - [x] 更新文档中的产品名、Python 包名、命令名和桌面资源名。
 - [x] 将项目物理目录从 `AsAgent` 重命名为 `Ragent`。
@@ -1316,3 +1317,29 @@
 ### 下一步
 
 - 在用户确认后，实现最小 ToolCall 记录；本次不开始该任务。
+
+## 2026-08-09 阶段 3 SQLite Schema 与迁移基线工作记录
+
+### 完成
+
+- 引入 SQLAlchemy 2.0 Core、aiosqlite 与 Alembic；初始 Schema 保持在 `storage.sqlite.schema`，不引入 ORM。
+- 新增首个 Alembic 迁移，创建 `users`、`conversations`、`messages`、`runs`、`run_events` 与 `tool_calls`；Alembic 版本表显式命名为 `schema_migrations`。
+- 固定数据库不变量：Conversation 内 `messages.sequence` 唯一、Run 内 `run_events.sequence` 唯一、外键完整性、正序号、Message 角色范围及 ToolCall 的结果/错误互斥。
+- 集成测试仅使用临时 SQLite 文件；本次未创建真实应用数据目录、SQLite Repository、远程 PostgreSQL 或同步功能。
+
+### 验证
+
+- 检查：运行 SQLite Schema 定向迁移集成测试、Ruff、strict mypy、完整 `scripts/check.sh` 和 `git diff --check`。
+- 结果：通过；空数据库升级与重复升级、表存在性、外键、顺序唯一性和 ToolCall 约束均通过；完整 122 个测试通过，86 个文件格式正确，82 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-046：以 SQLAlchemy Core Schema 与 Alembic 管理本地 SQLite 迁移，版本表使用 `schema_migrations`。
+
+### 风险或问题
+
+- 当前只有 Schema 和迁移，尚无 SQLite Repository、运行时 PRAGMA、事务服务、重启恢复或事件回放；远程 PostgreSQL 与同步仍不在当前范围。
+
+### 下一步
+
+- 在用户确认后，实现最小 SQLite Conversation Repository；本次不开始该任务。
