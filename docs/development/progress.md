@@ -1600,3 +1600,24 @@
 ### 下一步
 
 - 在用户确认后，手动运行持久化离线 CLI，验证跨进程 Conversation 续接与 SQLite RunEvent/ToolCall 审计；本次不开始该任务。
+
+## 2026-08-10 阶段 3 持久化开发 CLI 手动验收记录
+
+### 完成
+
+- 用户以 `uv run asagent --persistent --app-home .local-data` 创建 Conversation，并完成 Calculator 与 Echo 两个离线工具 Run；随后在新进程中使用同一 `--conversation-id` 完成 CurrentTime Run。
+- SQLite 查询确认同一 Conversation 产生的三个 Run 均为 `completed`；抽样 Calculator Run 的 RunEvent 严格按 sequence 记录 `run.started`、模型请求/完成、工具请求/完成及 `run.completed` 共八条事件。
+- ToolCall 审计查询确认 Calculator 调用保存内部 `tool_id = builtin.calculator`、原始结果 `56088` 且无错误。
+
+### 验证
+
+- 检查：两次独立持久化 CLI 进程、SQLite `runs`、`run_events` 和 `tool_calls` 查询。
+- 结果：通过；Conversation 身份可跨进程续接，事件顺序和工具审计与持久化 Runtime 契约一致。
+
+### 风险或问题
+
+- 仍没有事件终端多播/SSE、真实 Provider 持久化模式、请求幂等、Conversation 锁、取消注册或未完成 Run 恢复。
+
+### 下一步
+
+- 在用户确认后，设计真实 Provider 与持久化 Runtime 的显式开发组合，或开始阶段 4 的上下文预算与摘要基础；本次不开始该任务。
