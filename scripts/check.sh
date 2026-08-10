@@ -7,4 +7,4 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy
 uv lock --check
-git diff --check
+git --no-pager diff --check
