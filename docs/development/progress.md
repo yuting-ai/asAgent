@@ -1774,3 +1774,30 @@
 ### 下一步
 
 - 在用户确认后，实现阶段 4 的下一最小任务：最小不可变 `ContextSnapshot` 与 Context Builder，组合固定成本、完整历史选择和 `ModelRequest`；本次不开始该任务。
+
+## 2026-08-10 阶段 4 最小 ContextSnapshot 与 Context Builder 工作记录
+
+### 完成
+
+- 新增不可变 `ContextSnapshot`，以单一 `ModelRequest` 保存本次实际可见的 model、system prompt、完整历史消息和工具定义，并关联有效预算、分项使用量与历史选择结果。
+- 新增 `ContextBuilder`：先计算 system prompt 与工具 Schema 的固定成本，再把剩余消息预算交给完整历史选择器，最后生成与 `ContextUsage` 一致的请求快照。
+- 固定成本超出输入预算、或最新完整历史单元无法装入预算时，明确抛出 `ContextBudgetExceededError`；不构造遗漏当前用户问题的空请求。
+- 单元测试覆盖固定成本扣除、完整工具链保留、两种超限路径、空历史快照和不可变性。
+- 本任务不接入 AgentLoop、Provider、SQLite 或摘要；现有 CLI 的实际模型请求仍不变。
+
+### 验证
+
+- 检查：运行 Context Builder 定向单元测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 179 个测试通过，114 个文件格式正确，110 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 无；本次落实 DEC-058 的不可变快照与确定性降级边界，未改变摘要、记忆或运行时组合策略。
+
+### 风险或问题
+
+- Snapshot 尚未包含摘要、用户记忆、来源 sequence、裁剪原因枚举或默认脱敏调试导出；当前 Loop 仍直接自行构造 `ModelRequest`。
+
+### 下一步
+
+- 在用户确认后，实现阶段 4 的下一最小任务：让 AgentLoop 通过 Context Builder 在每次模型调用前创建并消费 ContextSnapshot；本次不开始该任务。
