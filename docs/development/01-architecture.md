@@ -517,6 +517,8 @@ Repository 接口属于 Core，SQLite 实现属于 Storage。事务边界由 Cha
 
 阶段 3 的 `storage.sqlite.conversation_repository.SqliteConversationRepository` 是首个持久化 `ConversationRepository` 实现。它只接收已经迁移的 SQLite 文件路径，不推导或创建用户目录；未来组合根负责由 `AppPaths.data_dir` 传入实际路径并管理迁移。`storage.sqlite.connection.create_sqlite_async_engine()` 是运行时连接的唯一工厂：每个连接启用 foreign keys、WAL、5 秒 busy timeout 与 `synchronous = FULL`。Conversation 按 `created_at`、稳定 ID 排序，Message 由数据库分配 Conversation 内 `sequence` 后读取。SQLite 不能保留时区信息，因此该适配器在写入和读取边界统一将时间规范化为 UTC-aware `datetime`。运行时连接的集成测试固定了这些 PRAGMA，以及异常事务回滚和短暂写锁下等待后提交的行为。
 
+阶段 3 的 `storage.sqlite.run_repository.SqliteRunRepository` 完整实现 `RunRepository`：Run 按稳定 ID 覆盖保存并按创建时间、稳定 ID 列举；RunEvent 仅追加、按 `sequence` 回放并以 `after_sequence` 续传；ToolCall 按稳定 ID 覆盖保存并保留原始结果或错误。RunEvent 表不重复保存 `conversation_id`，写入时 Repository 校验其与 Run 一致，读取时从关联 Run 恢复。事件 `data` 与工具参数只在 Storage 边界转为普通 JSON object；领域对象保持不可变 Mapping 语义。ToolCall 在没有显式序号的当前 Schema 中以 `created_at`、`tool_call_id` 稳定排序。该 Repository 不承担 EventPublisher 适配、AgentRuntime 接入、业务级“创建 Message 与 Run”原子事务或 SSE。
+
 `run_events` 至少对 `(run_id, sequence)` 建立唯一约束。创建用户消息与 Run 时需要一个明确事务边界，避免 API 重试后产生孤立消息或重复 Run。
 
 ## 15. 并发与取消

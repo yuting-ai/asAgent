@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 3 已开始；阶段 2 的最小 ToolRegistry、ToolExecutor、三个内置工具、Agent Loop、安全边界、RunEvent、ToolCall 记录与内存态开发 CLI 垂直切片已完成；阶段 3 已完成 SQLite 初始 Schema、迁移基线、Conversation Repository 与运行时连接/事务基线
-- 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版与 SQLite Conversation Repository、最小 `ChatService`、开发 Agent CLI、OpenAI-compatible Provider、工具与 Agent Loop 能力，以及使用 SQLAlchemy Core、Alembic 与 SQLite 集成测试验证的初始持久化 Schema、连接 PRAGMA 与事务行为
+- 项目阶段：阶段 3 已开始；阶段 2 的最小 ToolRegistry、ToolExecutor、三个内置工具、Agent Loop、安全边界、RunEvent、ToolCall 记录与内存态开发 CLI 垂直切片已完成；阶段 3 已完成 SQLite 初始 Schema、迁移基线、Conversation/Run Repository 与运行时连接/事务基线
+- 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版与 SQLite Conversation/Run Repository、最小 `ChatService`、开发 Agent CLI、OpenAI-compatible Provider、工具与 Agent Loop 能力，以及使用 SQLAlchemy Core、Alembic 与 SQLite 集成测试验证的初始持久化 Schema、连接 PRAGMA、事务行为与 Run 回放查询
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
-- 当前日期：2026-08-09
-- 当前目标：SQLite 运行时连接设置与事务基线已验证；下一步独立实现 SQLite Run Repository
+- 当前日期：2026-08-10
+- 当前目标：SQLite Run Repository 已验证；下一步独立定义创建用户消息与 Run 的原子事务边界
 
 ## 2. 已完成
 
@@ -46,6 +46,7 @@
 - [x] 实现并验证阶段 3 SQLite 初始 Schema、Alembic 迁移与约束集成测试。
 - [x] 实现并验证阶段 3 SQLite Conversation Repository。
 - [x] 实现并验证阶段 3 SQLite 运行时连接设置与事务基线。
+- [x] 实现并验证阶段 3 SQLite Run Repository、RunEvent 回放与 ToolCall 持久化。
 - [x] 初始化 Git 仓库。
 - [x] 更新文档中的产品名、Python 包名、命令名和桌面资源名。
 - [x] 将项目物理目录从 `AsAgent` 重命名为 `Ragent`。
@@ -1396,3 +1397,29 @@
 ### 下一步
 
 - 在用户确认后，实现最小 SQLite Run Repository；本次不开始该任务。
+
+## 2026-08-10 阶段 3 SQLite Run Repository 工作记录
+
+### 完成
+
+- 新增 `SqliteRunRepository`，完整实现既有异步 `RunRepository` Protocol；Run 可跨 Repository 实例保存、读取、按 Conversation 列举与更新。
+- RunEvent 以 JSON 保存安全数据，保持仅追加语义，按 `sequence` 回放并支持 `after_sequence`；写入时拒绝未知 Run 及与 Run 不一致的 Conversation 身份。
+- ToolCall 保存完整未截断的参数、结果或错误，并在没有业务序号的当前 Schema 中按创建时间与稳定 ID 返回。
+- 修复不可变 `mappingproxy` 不能被标准 JSON 编码器直接序列化的问题：仅在 Storage 边界复制为普通字典，领域对象保持不可变。
+
+### 验证
+
+- 检查：运行 SQLite RunRepository 定向集成测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；3 个定向集成测试通过，完整质量门禁通过。
+
+### 决策变化
+
+- 新增 DEC-049：SQLite Run Repository 以 Run 关联回放事件并保存原始 ToolCall。
+
+### 风险或问题
+
+- 尚未实现将 `EventPublisher` 与 `ToolCallRecorder` 接到该 Repository，也未定义“创建用户消息与 Run”的业务级原子事务、幂等键及锁超时的入口错误映射。
+
+### 下一步
+
+- 在用户确认后，先定义并实现创建用户消息与 Run 的最小原子事务服务；本次不开始该任务。

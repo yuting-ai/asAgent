@@ -415,6 +415,16 @@
 - 影响：SQLite Repository 只依赖该工厂，不自行注册 PRAGMA；运行时集成测试验证连接参数、异常回滚与锁等待后的写入。更长时间的锁冲突仍在 5 秒后报错，未来入口负责将其转换为可理解的 Run/API 失败；跨进程策略、业务级重试与 Run 的原子事务边界仍是后续任务。
 - 替代方案：默认 rollback journal、连接遇锁立即失败、无限等待、`synchronous = NORMAL`，或让各 Repository 单独配置 PRAGMA；当前均不采用。
 
+### DEC-049：SQLite Run Repository 以 Run 关联回放事件并保存原始 ToolCall
+
+- 日期：2026-08-10
+- 状态：已确认
+- 背景：RunEvent 的领域对象需要 `conversation_id`，但数据库为避免冗余仅通过 `run_id` 关联 Run；ToolCall 则需要保存模型上下文之外的原始结果与参数。若允许二者的存储语义分散在 Loop、Publisher 或 API 中，回放与审计事实会不一致。
+- 决策：`SqliteRunRepository` 完整实现既有 `RunRepository` Protocol。Run 按稳定 ID覆盖保存；RunEvent 保持仅追加语义，写入时校验其 `conversation_id` 与已存 Run 一致，读取时经 Run 关联恢复并严格按 `sequence` 与 `after_sequence` 回放。ToolCall 按稳定 ID覆盖保存，保存未截断的 `result` 或 `error` 和 JSON 参数；当前没有 ToolCall sequence 时，读取固定按 `created_at`、`tool_call_id` 排序。不可变 Mapping 在 Storage 边界复制为普通 JSON object，读取后再由领域对象冻结。
+- 原因：不重复保存可由 Run 导出的 Conversation 身份，减少漂移；RunEvent sequence 保持 SSE 与回放的同一顺序契约；保存 ToolCall 原始内容兑现模型上下文截断不等于审计事实的边界；稳定排序让测试和未来 API 不依赖 SQLite 未定义的自然行序。
+- 影响：Repository 接收已迁移数据库路径并复用统一 SQLite Engine 工厂，不推导 AppPaths 或执行迁移。它尚不是 `EventPublisher`/`ToolCallRecorder` 适配器，Runtime 组合、创建用户消息与 Run 的原子事务、重试、SSE 和审计 UI 仍由后续独立任务实现。
+- 替代方案：在 `run_events` 重复保存 `conversation_id`、按插入/自然行序读取 ToolCall、把截断后的 TOOL message 当作唯一记录，或让 Loop 直接访问 SQLite；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：
