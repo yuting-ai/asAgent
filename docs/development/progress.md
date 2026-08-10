@@ -1931,3 +1931,30 @@
 ### 下一步
 
 - 在用户确认后，实现最小只读 `filesystem.read_file` 工具，并复用 WorkspaceResolver、明确文件大小/文本编码限制；本次不开始该任务。
+
+## 2026-08-10 阶段 5 最小文本文件读取工具工作记录
+
+### 完成
+
+- 新增只读 `filesystem.read_file` Tool，要求 `filesystem.read`，并在读取前通过 `WorkspaceResolver` 验证目标。
+- 工具只读取单个存在的 UTF-8 文本文件；目录、缺失文件、Workspace 越界、非 UTF-8 内容和超过 64 KiB 的文件均以明确错误拒绝。
+- 读取以固定字节上限完成，避免将大文件完整载入内存或交给模型；空文本文件保留为空字符串这一真实内容。
+- 工具尚未注册到 CLI 或真实 Provider 路径，未新增文件写入、文档解析、OCR、审批或审计行为。
+
+### 验证
+
+- 检查：运行 FilesystemReadFileTool 定向单元测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 209 个测试通过，121 个文件格式正确，117 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 无；本次继续落实 DEC-039 的低风险只读能力与范围检查。DOCX/PDF 文本提取和 OCR 的分层计划已写入阶段 5 路线图，尚未开始实现。
+
+### 风险或问题
+
+- 当前只支持 UTF-8 纯文本（例如 Markdown、TXT、代码与常见文本配置）；DOCX、带文本层 PDF、扫描 PDF、图片、表格和其他二进制格式都不应交给本工具。
+- `filesystem.read` 尚未由实际 CLI/Runtime 授予，工具尚未接入 Registry；用户授权根、写入、文档提取、OCR、审计、审批与 Scheduler 仍是独立后续任务。
+
+### 下一步
+
+- 在用户确认后，选择阶段 5 的下一项受控文件能力；DOCX/PDF 正文提取与 OCR 只在基础文件边界、依赖和产品体验准备好后，以独立任务推进。
