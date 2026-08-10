@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 3 已开始；阶段 2 的最小 ToolRegistry、ToolExecutor、三个内置工具、Agent Loop、安全边界、RunEvent、ToolCall 记录与内存态开发 CLI 垂直切片已完成；阶段 3 已完成 SQLite 初始 Schema、迁移基线、Conversation/Run Repository 与运行时连接/事务基线
-- 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版与 SQLite Conversation/Run Repository、最小 `ChatService`、开发 Agent CLI、OpenAI-compatible Provider、工具与 Agent Loop 能力，以及使用 SQLAlchemy Core、Alembic 与 SQLite 集成测试验证的初始持久化 Schema、连接 PRAGMA、事务行为与 Run 回放查询
+- 项目阶段：阶段 3 已开始；阶段 2 的最小 ToolRegistry、ToolExecutor、三个内置工具、Agent Loop、安全边界、RunEvent、ToolCall 记录与内存态开发 CLI 垂直切片已完成；阶段 3 已完成 SQLite 初始 Schema、迁移基线、Conversation/Run Repository、Run 启动原子事务与运行时连接/事务基线
+- 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版与 SQLite Conversation/Run Repository、最小 `ChatService`、开发 Agent CLI、OpenAI-compatible Provider、工具与 Agent Loop 能力，以及使用 SQLAlchemy Core、Alembic 与 SQLite 集成测试验证的初始持久化 Schema、连接 PRAGMA、事务行为、Run 回放查询和用户消息/初始 Run 的原子写入
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-10
-- 当前目标：SQLite Run Repository 已验证；下一步独立定义创建用户消息与 Run 的原子事务边界
+- 当前目标：SQLite Run 启动原子事务已验证；下一步独立确定持久化 RunEvent 的 EventPublisher 适配边界
 
 ## 2. 已完成
 
@@ -47,6 +47,7 @@
 - [x] 实现并验证阶段 3 SQLite Conversation Repository。
 - [x] 实现并验证阶段 3 SQLite 运行时连接设置与事务基线。
 - [x] 实现并验证阶段 3 SQLite Run Repository、RunEvent 回放与 ToolCall 持久化。
+- [x] 实现并验证阶段 3 用户消息与初始 Run 的 SQLite 原子事务。
 - [x] 初始化 Git 仓库。
 - [x] 更新文档中的产品名、Python 包名、命令名和桌面资源名。
 - [x] 将项目物理目录从 `AsAgent` 重命名为 `Ragent`。
@@ -1423,3 +1424,28 @@
 ### 下一步
 
 - 在用户确认后，先定义并实现创建用户消息与 Run 的最小原子事务服务；本次不开始该任务。
+
+## 2026-08-10 阶段 3 SQLite Run 启动原子事务工作记录
+
+### 完成
+
+- 新增 `SqliteRunStarter`，在同一 SQLite 事务内创建用户 Message 与初始 Run；它只接收调用方已构造的领域对象，不生成 ID、时间或事件。
+- 写入前拒绝 Message/Run Conversation 不一致和未知 Conversation；Run 插入失败会回滚已经尝试插入的 Message，不留下孤儿用户消息。
+- 集成测试覆盖成功写入、不一致/未知 Conversation 的无副作用拒绝，以及重复 Run ID 触发的跨表回滚。
+
+### 验证
+
+- 检查：运行 SQLite RunStarter 定向集成测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整质量门禁通过，136 个测试通过，94 个文件格式正确，90 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-050：用户消息与初始 Run 由 SQLite 单一事务创建。
+
+### 风险或问题
+
+- 当前没有 API 幂等键、每 Conversation 的异步锁、RunEvent Publisher 持久化适配、ToolCall Recorder 持久化适配或锁超时的用户可见错误映射。
+
+### 下一步
+
+- 在用户确认后，实现持久化 RunEvent 的最小 EventPublisher 适配；本次不开始该任务。

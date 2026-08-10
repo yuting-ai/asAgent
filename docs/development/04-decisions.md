@@ -425,6 +425,16 @@
 - 影响：Repository 接收已迁移数据库路径并复用统一 SQLite Engine 工厂，不推导 AppPaths 或执行迁移。它尚不是 `EventPublisher`/`ToolCallRecorder` 适配器，Runtime 组合、创建用户消息与 Run 的原子事务、重试、SSE 和审计 UI 仍由后续独立任务实现。
 - 替代方案：在 `run_events` 重复保存 `conversation_id`、按插入/自然行序读取 ToolCall、把截断后的 TOOL message 当作唯一记录，或让 Loop 直接访问 SQLite；当前均不采用。
 
+### DEC-050：用户消息与初始 Run 由 SQLite 单一事务创建
+
+- 日期：2026-08-10
+- 状态：已确认
+- 背景：分别调用 ConversationRepository 追加用户消息、再调用 RunRepository 保存 Run 会产生两个独立事务。后一写入失败时，数据库会留下没有对应执行的用户消息，破坏请求与执行的最小一致性。
+- 决策：使用 `SqliteRunStarter.start(user_message, run)` 作为阶段 3 的 SQLite 专属跨表写入协调器。它在同一 `AsyncEngine.begin()` 事务中校验 Message 与 Run 的 Conversation 身份相同且 Conversation 已存在，再插入用户 Message（数据库分配该 Conversation 的 sequence）与初始 Run。Run 主键或任何后续插入失败时，整个事务回滚；未知或不一致 Conversation 在写入前明确拒绝。
+- 原因：跨 Repository 的原子性必须由共享连接和明确事务边界提供，不能由两个成功的异步方法调用“看起来连续”来保证。输入保持为已构造的领域对象，使 ID、时间、状态与未来入口策略不被 SQLite 存储层隐式生成。
+- 影响：该协调器不替代 ConversationRepository 或 RunRepository，不生成 `run.started` Event，也不实现 API 重试幂等键、每 Conversation 锁、Runtime 组合、Publisher/Recorder 适配或锁超时的用户提示。这些仍需要在后续服务/API 任务中设计。
+- 替代方案：让入口依次调用两个 Repository、在各 Repository 中嵌套事务、由 SQLite Trigger 自动创建 Run，或现在提前引入通用 Unit of Work/分布式事务抽象；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：
