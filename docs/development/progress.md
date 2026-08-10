@@ -1985,3 +1985,30 @@
 ### 下一步
 
 - 在用户确认后，选择阶段 5 的下一项受控文件能力；覆盖、追加或删除必须以前置的持久化且可冲突检测 `FileChange`/撤回机制为条件。create-only 的撤回记录可在该机制中一并设计；本次不开始该任务。
+
+## 2026-08-11 阶段 5 FileChange 与撤回边界设计记录
+
+### 完成
+
+- 确认覆盖、追加和删除不会直接实现；它们必须先满足 DEC-060 的持久化 FileChange、私有快照与哈希冲突检测前置条件。
+- 固定 FileChange 的来源 Run、规范化根路径与相对路径、变更种类、变更前后哈希、可选快照引用及 `PREPARED`/`APPLIED`/`REVERTED`/`CONFLICTED` 生命周期。
+- 固定撤回规则：仅处理 asAgent 自己记录且未被后续修改的变更；CREATE 删除未变化的新文件，REPLACE 原子恢复快照，DELETE 仅在目标仍不存在时独占恢复。任何状态不匹配均拒绝而不覆盖用户数据。
+- 快照正文位于 `AppPaths.data_dir` 私有目录，不进入 SQLite、RunEvent、ToolCall、日志、模型上下文或 Git；初版配额为单项 5 MiB、总量 100 MiB、默认保留 30 天。
+
+### 验证
+
+- 检查：复核阶段 5 既有 WorkspaceResolver、create-only 文件写入、SQLite/AppPaths 边界及 DEC-009、DEC-038、DEC-039。
+- 结果：通过；设计与现有“默认拒绝、显式批准、文件根隔离、用户正文不进入运行审计”的边界一致，未改变运行时代码。
+
+### 决策变化
+
+- 新增 DEC-060：可撤回文件变更先于覆盖、追加和删除，并以持久化 FileChange、私有快照和哈希冲突检测保证安全恢复。
+
+### 风险或问题
+
+- 当前 Tool Protocol 没有传入 Run 身份，SQLite Schema 也没有 FileChange 表或快照管理；因此上述设计尚未接入 create-only Tool，不能宣称当前已经可撤回。
+- 根移动后的恢复不会搜索猜测；快照加密与系统 Keychain 的结合要等正式设置/桌面存储设计再决定。
+
+### 下一步
+
+- 在用户确认后，实现 DEC-060 的第一个代码任务：Core FileChange 不可变数据模型与 FileChangeRepository Protocol；本次不开始该任务。

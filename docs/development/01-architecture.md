@@ -473,7 +473,7 @@ workspace/
 
 `tools.builtin.filesystem_write_file.FilesystemWriteFileTool` 是最小的受控副作用能力：它只在允许根内以独占创建方式写入一个新的 UTF-8 文件，要求 `filesystem.write`、标记为高风险且始终需要批准。它不创建父目录，64 KiB 以上的正文、目录目标和任何已存在文件都会被拒绝；因此它不能覆盖、追加或删除用户文件。当前通用 Approval Protocol 仅保证没有已授予权限或批准时不会进入工具协程；真正展示规范化路径、影响摘要和有效期限的批准请求仍待独立实现。
 
-`filesystem.write` 目前是“写类操作”的能力门槛，不会扩大已注册 Tool 的实际语义；当前唯一写入 Tool 仍只允许 create-only。未来在引入覆盖、追加或删除前，必须先实现持久化 `FileChange` 记录：保存 asAgent 自己执行的变更前快照、规范化路径、变更前后哈希与来源 Run。撤回前必须确认当前哈希仍等于该次变更后的哈希；若用户或其他程序已修改文件，则拒绝自动恢复而不是覆盖新内容。该机制也可随后记录 create-only 操作，以便删除仍未被后续修改的 Agent 新建文件；其备份位置、加密/隐私、容量与保留期、审计和逐次批准均属于后续独立设计，不能由 create-only 工具隐式承担。
+`filesystem.write` 目前是“写类操作”的能力门槛，不会扩大已注册 Tool 的实际语义；当前唯一写入 Tool 仍只允许 create-only。按 DEC-060，未来在引入覆盖、追加或删除前，必须先实现持久化 `FileChange`：每次操作先在 `AppPaths.data_dir` 私有快照目录保存必要的变更前正文，再写入 SQLite 元数据 `PREPARED`，完成文件操作并校验 SHA-256 后才成为 `APPLIED`。记录包含来源 Run、规范化根路径与相对路径、CREATE/REPLACE/DELETE 种类、变更前后哈希及相对快照引用；SQLite、RunEvent、ToolCall、日志和模型上下文均不保存快照正文。撤回只处理 asAgent 自己记录且仍处于预期磁盘状态的 APPLIED 变更：CREATE 删除 after hash 未变化的文件，REPLACE 原子恢复快照，DELETE 以独占创建恢复快照；任何不匹配均拒绝并报告冲突。初版快照单项最多 5 MiB、总量 100 MiB、默认保留 30 天，超限时拒绝新变更而不静默清理可撤回快照。create-only 可在该机制完成后纳入记录，以便删除仍未被后续修改的 Agent 新建文件；在此之前它不获得覆盖、追加、删除或撤回能力。
 
 多格式文档能力将独立于基础 File Tool 演进：未来的 `document.extract_text` 负责 DOCX、带文本层 PDF 等格式的确定性正文提取；扫描型 PDF 与图片仅在显式 OCR 工具中处理。两者都必须在 Workspace 范围、文件/页数/输出大小、超时、权限和审计边界内执行，不能以“读取文件”为名自动扫描或上传用户文档。
 
