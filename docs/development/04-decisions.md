@@ -555,6 +555,7 @@
 | Python 包管理 | uv，提交 `uv.lock` | 已确认 |
 | 数据验证 | Pydantic `>=2,<3`，主要用于系统边界 | 已确认 |
 | API | FastAPI | 已确认，阶段 6 引入 |
+| ASGI Server | Uvicorn，`Config` / `Server` 生命周期 | 已确认，阶段 6 引入 |
 | 数据库 | SQLite | 已确认 |
 | 数据库访问 | SQLAlchemy `[asyncio]` extra、`>=2.0,<2.1` Core，不使用 ORM | 已确认 |
 | 异步 SQLite Driver | aiosqlite `>=0.20,<1` | 已确认，阶段 3 引入 |

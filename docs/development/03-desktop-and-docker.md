@@ -120,6 +120,8 @@ Token 不作为命令行参数。首选由 Main 通过仅连接到该子进程�
 uv run asagent serve ...
 ```
 
+阶段 6 当前已实现最小开发入口：`uv run asagent serve --port 0`。Backend 仅接受 `127.0.0.1`，自己绑定端口并在 Uvicorn 启动后向 stdout 输出一次 `ASAGENT_READY ` 前缀的 JSON，其中包含 `host`、实际 `port`、`pid` 和 `protocol_version`。该记录尚不携带 Token、AppPaths、Workspace、Runtime 状态或认证结论；Electron Main 的 Bootstrap 管道、PID/协议校验与 Health 轮询仍待阶段 7 组合。
+
 发布环境命令为：
 
 ```text

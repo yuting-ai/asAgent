@@ -2089,3 +2089,30 @@
 ### 下一步
 
 - 在用户确认后，设计并实现阶段 6 的 Server 启动边界：显式 host/port 配置、仅绑定 `127.0.0.1`、Uvicorn 生命周期与可测试的实际端口报告；本次不开始该任务。
+
+## 2026-08-11 阶段 6 Local API Server 启动边界工作记录
+
+### 完成
+
+- 新增 Uvicorn 运行依赖与 `api.server.LocalApiServer`，封装单次 Local API 服务生命周期。
+- Server 仅接受 `127.0.0.1`；端口只允许 `0` 或 `1–65535`。Backend 先自行绑定 TCP listener，再交给 Uvicorn，因此端口 `0` 的实际分配不依赖“先探测、后绑定”。
+- 服务启动后生成不可变 `ServerReady`，包含 host、实际 port、当前 PID 与协议版本；开发 CLI 新增兼容原有聊天参数的 `serve` 命令，并以 `ASAGENT_READY ` 前缀输出单条 JSON ready 记录。
+- 集成测试在真实 TCP 端口调用 `/api/v1/health`，并受控关闭 Server；同时覆盖非回环 host、越界端口与布尔端口拒绝。
+
+### 验证
+
+- 检查：运行 LocalApiServer 与 CLI 参数定向测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 225 个测试通过，128 个文件格式正确，124 个源码文件 Ruff 与 strict mypy 无问题，锁定依赖解析为 42 个包。
+
+### 决策变化
+
+- 无；本次实现 DEC-018 的 Backend 自主回环绑定与动态端口要求，并沿用 DEC-061 的 App Factory 边界。
+
+### 风险或问题
+
+- ready 记录只证明 HTTP Server 已启动，不证明认证、SQLite、Runtime、Workspace 或真实模型可用；当前 Health 仍无认证。
+- Server 尚未接收 Token/AppPaths/Workspace 参数，也没有 Origin/CORS、业务 API、SSE、生产日志配置、Electron 子进程握手或重启策略。
+
+### 下一步
+
+- 在用户确认后，设计阶段 6 的本地 API Token Bootstrap 与业务端点认证边界；本次不开始该任务。

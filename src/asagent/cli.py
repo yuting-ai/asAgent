@@ -11,6 +11,8 @@ import httpx
 
 from asagent.agent.loop import AgentLoop
 from asagent.agent.persistent_runtime import PersistentAgentRuntime
+from asagent.api.app import create_app
+from asagent.api.server import READY_PREFIX, LocalApiServer
 from asagent.bootstrap.environment_secret_provider import (
     EnvironmentSecretProvider,
 )
@@ -420,6 +422,24 @@ async def run_persistent_agent_chat(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the asAgent development CLI.")
     parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("chat", "serve"),
+        default="chat",
+        help="Run the development chat (default) or local API server.",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Local API host. Only 127.0.0.1 is accepted.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="Local API port. Defaults to 0 for a system-assigned port.",
+    )
+    parser.add_argument(
         "--profile",
         help="Use the named local Provider Profile instead of the offline provider.",
     )
@@ -446,6 +466,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 async def _run_main(args: argparse.Namespace) -> None:
+    if args.command == "serve":
+        server = LocalApiServer(
+            create_app(),
+            host=args.host,
+            port=args.port,
+        )
+        ready = await server.start()
+        print(f"{READY_PREFIX}{ready.to_json()}")
+        await server.wait_closed()
+        return
+
     system_prompt = (
         "You are asAgent's development assistant. Use the supplied tools when "
         "they help answer the user."
@@ -593,7 +624,7 @@ async def _run_main(args: argparse.Namespace) -> None:
 def main(argv: Sequence[str] | None = None) -> None:
     try:
         asyncio.run(_run_main(parse_args(argv)))
-    except ProviderConfigurationError as error:
+    except (ProviderConfigurationError, ValueError) as error:
         print(f"Error: {error}")
 
 

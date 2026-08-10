@@ -59,6 +59,14 @@ def test_parse_args_supports_an_explicit_persistent_real_provider() -> None:
     assert str(args.app_home) == "custom-app-home"
 
 
+def test_parse_args_supports_local_api_server_command() -> None:
+    args = parse_args(("serve", "--port", "0"))
+
+    assert args.command == "serve"
+    assert args.host == "127.0.0.1"
+    assert args.port == 0
+
+
 def _next_input(inputs: Iterator[str], prompt: str) -> str:
     assert prompt == "You: "
     return next(inputs)
