@@ -488,12 +488,22 @@
 ### DEC-056：持久化开发 CLI 以显式模式组合 SQLite Runtime
 
 - 日期：2026-08-10
-- 状态：已确认
+- 状态：已被 DEC-057 扩展
 - 背景：持久化 Runtime、SQLite 生命周期协调器和审计适配器已经独立验证，但此前没有入口将它们组合成可跨进程手动体验的完整链路；直接改变默认 CLI 又会破坏已有离线、无副作用的开发行为。
 - 决策：新增 `--persistent` 开关。启用后 CLI 从 `AppPaths.data_dir / "asagent.sqlite3"` 计算数据库路径、执行启动迁移，组合 SQLite Repository/Starter/Finisher、Repository EventPublisher/ToolCallRecorder 与 PersistentAgentRuntime。它仅使用离线 DevelopmentToolModelProvider；可选 `--conversation-id` 用于复用既有 Conversation，省略时创建新的本地用户 Conversation。
 - 原因：显式模式使持久化行为可体验、可测试且不意外改变默认 CLI；离线 Provider 保持零网络、零费用的可重复演示。对话 ID 显式输出与输入提供最小跨进程续接，不提前构建对话列表 UI 或 API。
-- 影响：`--persistent` 不能与真实 Provider 的 `--profile`/`--secret-env` 组合；不存在 Conversation 在模型调用前拒绝。该模式只打印最终回答、错误或终态，事件已持久化但尚不做终端多播/SSE。正式 Secret Store、真实 Provider 持久化模式、API 与 Electron 仍为后续任务。
+- 影响：最初实现仅使用离线 Provider；真实 Provider 与持久化 Runtime 的组合已由 DEC-057 扩展。不存在 Conversation 在模型调用前拒绝。该模式只打印最终回答、错误或终态，事件已持久化但尚不做终端多播/SSE。正式 Secret Store、API 与 Electron 仍为后续任务。
 - 替代方案：把默认 CLI 改为持久化、让每次启动新建不可续接 Conversation、持久化模式默认调用真实模型、或现在引入 EventPublisher fan-out/SSE；当前均不采用。
+
+### DEC-057：真实 Provider 可显式组合到持久化开发 Runtime
+
+- 日期：2026-08-10
+- 状态：已确认
+- 背景：持久化开发 CLI 起初只使用确定性的离线 Provider，真实 `--profile` 路径则只运行内存态 Agent Loop，导致真实模型的 Conversation、Run、RunEvent 与 ToolCall 无法进入已验证的 SQLite 生命周期。
+- 决策：`--persistent` 只表示使用 SQLite 持久化 Runtime，不再排斥真实 Provider。调用者同时提供成对的 `--profile` 与 `--secret-env` 时，CLI 从 Profile 创建 `ModelProvider`，将其与 SQLite 生命周期协调器、EventPublisher 和 ToolCallRecorder 组合到同一个 `PersistentAgentRuntime`；没有该参数对时，继续注入离线 DevelopmentToolModelProvider。真实 HTTP Client 覆盖整个交互会话并在退出时关闭。
+- 原因：持久化语义属于 Runtime/Storage 组合，模型厂商选择属于入口层；二者通过 `ModelProvider` Protocol 正交组合，避免为真实模型复制另一套 Run 或审计流程。显式参数对保持密钥来源可审计，并避免网络、配置或密钥错误静默回退到离线模式。
+- 影响：CLI 现在支持离线/真实 Provider 与内存态/持久化的四种明确组合；真实持久化模式会产生费用，仍仅是开发入口，不引入 API、SSE、桌面 UI、取消注册或未完成 Run 恢复。测试用 FakeModelProvider 验证通用 Provider 注入路径，不在自动化测试访问真实网络或 Secret。
+- 替代方案：保持真实 Provider 只能内存态运行、为真实模式复制 PersistentAgentRuntime、让 Runtime 自行读取 Profile/环境变量，或在持久化模式失败时回退到离线 Provider；当前均不采用。
 
 ## 2. 技术选型
 

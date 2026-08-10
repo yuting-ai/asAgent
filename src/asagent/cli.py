@@ -146,6 +146,7 @@ def build_agent_loop(
     *,
     model: ModelProvider,
     event_publisher: EventPublisher,
+    tool_call_recorder: ToolCallRecorder | None = None,
 ) -> AgentLoop:
     registry = _register_builtin_tools()
     snapshot = ToolSnapshot.from_definitions(
@@ -162,6 +163,10 @@ def build_agent_loop(
         event_publisher=event_publisher,
         event_id_factory=new_event_id,
         clock=now,
+        tool_call_recorder=tool_call_recorder,
+        tool_call_id_factory=(
+            new_tool_call_id if tool_call_recorder is not None else None
+        ),
     )
 
 
@@ -302,6 +307,29 @@ def _alembic_config_path() -> Path:
     return Path(__file__).resolve().parents[2] / "alembic.ini"
 
 
+def build_persistent_agent_runtime(
+    *,
+    model: ModelProvider,
+    conversations: SqliteConversationRepository,
+    runs: SqliteRunRepository,
+    starter: SqliteRunStarter,
+    finisher: SqliteRunFinisher,
+) -> PersistentAgentRuntime:
+    return PersistentAgentRuntime(
+        conversations=conversations,
+        run_starter=starter,
+        run_finisher=finisher,
+        loop=build_agent_loop(
+            model=model,
+            event_publisher=RepositoryEventPublisher(runs),
+            tool_call_recorder=RepositoryToolCallRecorder(runs),
+        ),
+        now=now,
+        new_run_id=new_run_id,
+        new_message_id=new_message_id,
+    )
+
+
 def build_persistent_development_runtime(
     *,
     conversations: SqliteConversationRepository,
@@ -355,7 +383,7 @@ async def run_persistent_agent_chat(
     write_line: Callable[[str], None],
 ) -> None:
     write_line(
-        "asAgent persistent development agent. "
+        "asAgent persistent agent. "
         f"Conversation: {conversation_id}. Type 'exit' to quit.",
     )
 
@@ -408,7 +436,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--persistent",
         action="store_true",
-        help="Use the SQLite-backed offline development Agent.",
+        help="Persist conversations and Runs in SQLite.",
     )
     parser.add_argument(
         "--conversation-id",
@@ -423,12 +451,17 @@ async def _run_main(args: argparse.Namespace) -> None:
         "they help answer the user."
     )
 
-    if args.persistent:
-        if args.profile is not None or args.secret_env is not None:
-            raise ProviderConfigurationError(
-                "--persistent cannot be combined with --profile or --secret-env",
-            )
+    if (args.profile is None) != (args.secret_env is None):
+        raise ProviderConfigurationError(
+            "--profile and --secret-env must be provided together",
+        )
 
+    if args.conversation_id is not None and not args.persistent:
+        raise ProviderConfigurationError(
+            "--conversation-id requires --persistent",
+        )
+
+    if args.persistent:
         paths = AppPaths.from_root(args.app_home)
         database_path = paths.data_dir / "asagent.sqlite3"
         upgrade_sqlite_database(
@@ -450,30 +483,64 @@ async def _run_main(args: argparse.Namespace) -> None:
                     else None
                 ),
             )
-            await run_persistent_agent_chat(
-                runtime=build_persistent_development_runtime(
+
+            if args.profile is None:
+                runtime = build_persistent_development_runtime(
                     conversations=conversations,
                     runs=runs,
                     starter=starter,
                     finisher=finisher,
-                ),
-                conversation_id=conversation.conversation_id,
-                model_name="development-tools",
-                system_prompt=system_prompt,
-                read_line=input,
-                write_line=print,
+                )
+                model_name = "development-tools"
+                await run_persistent_agent_chat(
+                    runtime=runtime,
+                    conversation_id=conversation.conversation_id,
+                    model_name=model_name,
+                    system_prompt=system_prompt,
+                    read_line=input,
+                    write_line=print,
+                )
+                return
+
+            profiles = load_provider_profiles(paths.config_dir)
+            try:
+                profile = profiles.providers[args.profile]
+            except KeyError as error:
+                raise ProviderConfigurationError(
+                    "requested provider profile is unavailable",
+                ) from error
+
+            secrets = EnvironmentSecretProvider(
+                environment=dict(os.environ),
+                bindings={profile.secret_id: args.secret_env},
             )
+            async with httpx.AsyncClient() as client:
+                provider = create_model_provider(
+                    profiles=profiles,
+                    profile_name=args.profile,
+                    secrets=secrets,
+                    http_client=client,
+                )
+                await run_persistent_agent_chat(
+                    runtime=build_persistent_agent_runtime(
+                        model=provider,
+                        conversations=conversations,
+                        runs=runs,
+                        starter=starter,
+                        finisher=finisher,
+                    ),
+                    conversation_id=conversation.conversation_id,
+                    model_name=profile.model,
+                    system_prompt=system_prompt,
+                    read_line=input,
+                    write_line=print,
+                )
         finally:
             await finisher.aclose()
             await starter.aclose()
             await runs.aclose()
             await conversations.aclose()
         return
-
-    if args.conversation_id is not None:
-        raise ProviderConfigurationError(
-            "--conversation-id requires --persistent",
-        )
 
     publisher = ConsoleEventPublisher(print)
     conversation_id = new_conversation_id()
@@ -490,11 +557,6 @@ async def _run_main(args: argparse.Namespace) -> None:
             new_run_id=new_run_id,
         )
         return
-
-    if args.profile is None or args.secret_env is None:
-        raise ProviderConfigurationError(
-            "--profile and --secret-env must be provided together",
-        )
 
     profiles = load_provider_profiles(AppPaths.from_root(args.app_home).config_dir)
     try:

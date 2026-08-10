@@ -37,20 +37,25 @@ async def test_development_agent_cli_runs_tools_and_prints_events() -> None:
     assert output.count('[event 8] run.completed {"steps_used": 2}') == 2
 
 
-def test_parse_args_supports_an_explicit_real_provider_profile() -> None:
+def test_parse_args_supports_an_explicit_persistent_real_provider() -> None:
     args = parse_args(
         (
+            "--persistent",
             "--profile",
             "deepseek",
             "--secret-env",
-            "ASAGENT_DEEPSEEK_API_KEY",
+            "ASAGENT_MODEL_API_KEY",
+            "--conversation-id",
+            "conv_existing",
             "--app-home",
             "custom-app-home",
         ),
     )
 
+    assert args.persistent is True
     assert args.profile == "deepseek"
-    assert args.secret_env == "ASAGENT_DEEPSEEK_API_KEY"
+    assert args.secret_env == "ASAGENT_MODEL_API_KEY"
+    assert args.conversation_id == "conv_existing"
     assert str(args.app_home) == "custom-app-home"
 
 

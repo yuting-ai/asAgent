@@ -1621,3 +1621,29 @@
 ### 下一步
 
 - 在用户确认后，设计真实 Provider 与持久化 Runtime 的显式开发组合，或开始阶段 4 的上下文预算与摘要基础；本次不开始该任务。
+
+## 2026-08-10 阶段 3 真实 Provider 持久化开发组合工作记录
+
+### 完成
+
+- `--persistent` 现可与成对的 `--profile`、`--secret-env` 显式组合；真实模型的 Conversation、Run、RunEvent 和 ToolCall 与离线持久化模式走同一 SQLite Runtime 生命周期。
+- 新增通用 `build_persistent_agent_runtime(model=...)` 组合函数；它只依赖 `ModelProvider` Protocol，负责为任意模型注入既有 SQLite EventPublisher 与 ToolCallRecorder。离线开发模式继续使用其专用确定性 Provider，默认非持久化 CLI 行为不变。
+- CLI 在真实持久化会话期间拥有 `httpx.AsyncClient`，退出时关闭；Profile 与 secret-env 仍必须成对提供，错误不会降级为离线模型。
+- 集成测试以 FakeModelProvider 覆盖通用 Provider 组合路径，确认最终回答和 completed Run 被持久化；自动化测试不读取真实 Secret 或发起网络请求。
+
+### 验证
+
+- 检查：运行真实 Provider 持久化 CLI 的 unit/integration 定向测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 153 个测试通过，108 个文件格式正确，104 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-057：真实 Provider 可显式组合到持久化开发 Runtime。
+
+### 风险或问题
+
+- 真实 Provider 持久化入口尚未进行人工网络验收，调用会产生模型费用；它仍没有请求幂等、每 Conversation 锁、取消注册、SSE/流式输出或未完成 Run 恢复。
+
+### 下一步
+
+- 在用户确认后，先手动验收一次真实 Provider 的持久化 Conversation 与 SQLite 审计，或开始阶段 4 的上下文预算与摘要基础；本次不开始该任务。
