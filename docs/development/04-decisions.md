@@ -455,6 +455,16 @@
 - 影响：适配器不创建 Engine、不截断或重写 ToolCall、不重试也不吞掉异常；写入失败向 Loop 传播并触发其既有 FAILED 路径。本任务不改变工具执行、事件发布、Run 状态更新或 SSE。
 - 替代方案：让 Agent Loop 直接调用 SQLite、让 Recorder 硬编码 SqliteRunRepository、在 Recorder 内增加重试或吞错；当前均不采用。
 
+### DEC-053：终态 Run 与可见 AssistantMessage 由 SQLite 单一事务完成
+
+- 日期：2026-08-10
+- 状态：已确认
+- 背景：Run 已能在启动时与用户消息原子创建。若 Agent Loop 结束后由 Runtime 分别追加 AssistantMessage 和更新 Run 终态，任一失败会留下“有回答但 Run 仍未完成”或“Run 已完成但回答缺失”的不一致记录。
+- 决策：使用 `SqliteRunFinisher.finish(run, assistant_message)` 作为阶段 3 的 SQLite 专属结束协调器。它要求 Run 是终态，校验可选 AssistantMessage 与已存 Run 属于同一 Conversation，并在同一事务中追加消息（如有）和更新 Run 的 status、updated_at；任一写入失败则整体回滚。
+- 原因：启动与结束是一次 Run 生命周期中两个跨表一致性边界。显式 SQLite 协调器避免把事务控制泄漏到 Runtime，也不为尚未实现的多数据库场景提前引入 Unit of Work。
+- 影响：失败、取消或达到步骤上限时可不写 AssistantMessage，但仍原子更新终态 Run；由未来 Runtime 决定何时传入用户可见文本。该组件不生成领域对象、不更新 Conversation 元数据、不做幂等、重试、SSE 或工具审计。
+- 替代方案：Runtime 依次调用两个 Repository、用 SQLite Trigger 自动创建消息、让 RunRepository 直接依赖 Conversation 表，或提前引入通用事务抽象；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

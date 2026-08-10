@@ -1499,3 +1499,28 @@
 ### 下一步
 
 - 在用户确认后，设计并实现最小持久化 Runtime 组合或 API 入口；本次不开始该任务。
+
+## 2026-08-10 阶段 3 SQLite Run 结束原子事务工作记录
+
+### 完成
+
+- 新增 `SqliteRunFinisher`，要求输入为终态 Run，并在单一 SQLite 事务中更新 Run 状态与时间，以及可选地追加同一 Conversation 的 AssistantMessage。
+- 拒绝非终态 Run、未知或身份不匹配的 Run/Message；AssistantMessage 插入失败时 Run 更新一并回滚，不产生“完成状态与可见回答脱节”的记录。
+- 集成测试覆盖成功完成、失败 Run 无可见消息、身份不匹配的无副作用拒绝和消息主键冲突导致的跨表回滚。
+
+### 验证
+
+- 检查：运行 RunFinisher 定向集成测试、Ruff 格式化与检查、strict mypy、完整 `scripts/check.sh` 和 `git diff --check`。
+- 结果：通过；102 个文件格式正确，98 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-053：终态 Run 与可见 AssistantMessage 由 SQLite 单一事务完成。
+
+### 风险或问题
+
+- 仍未将 Starter、Loop、Finisher 与两个持久化适配器组合成正式 Runtime；没有请求幂等、Conversation 锁、SSE 或 API 入口。
+
+### 下一步
+
+- 在用户确认后，实现最小持久化 Agent Runtime 服务，组合已有生命周期协调器和持久化适配器；本次不开始该任务。
