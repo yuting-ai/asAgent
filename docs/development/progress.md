@@ -2062,3 +2062,30 @@
 ### 下一步
 
 - 在用户确认后，开始阶段 6 的第一个独立任务：最小 Local API 组合边界与 `/api/v1/health` 健康检查设计。本次不开始该任务。
+
+## 2026-08-11 阶段 6 最小 Local API 健康检查工作记录
+
+### 完成
+
+- 新增 FastAPI 运行依赖，并以 `api.app.create_app()` 建立 Local API 的唯一 App Factory。
+- 新增 `GET /api/v1/health`，固定返回 HTTP 200 与最小 liveness JSON `{"status": "ok"}`。
+- 集成测试通过 HTTPX ASGITransport 验证版本化 HTTP 契约，不绑定真实网络端口。
+- Health 不访问 SQLite、Agent Runtime、Provider、Secret、文件工具或后台任务；本次不引入 Uvicorn、认证、CORS、Conversation/Run 路由或 SSE。
+
+### 验证
+
+- 检查：运行 API Health 定向集成测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 219 个测试通过，126 个文件格式正确，122 个源码文件 Ruff 与 strict mypy 无问题，锁定依赖解析为 40 个包。
+
+### 决策变化
+
+- 新增 DEC-061：阶段 6 使用 FastAPI App Factory 建立最小 Local API，先以无副作用 Health 契约验证 HTTP 边界。
+
+### 风险或问题
+
+- 当前 Health 只表示 ASGI 应用可响应，不代表 SQLite 已迁移、Runtime 已构造或真实模型可用；它也尚未成为监听 `127.0.0.1` 的实际 Backend 进程。
+- 未实现 Token、Origin/CORS、启动握手、端口配置、业务 API 或 SSE，不能被 Electron 或外部客户端当作正式连接入口。
+
+### 下一步
+
+- 在用户确认后，设计并实现阶段 6 的 Server 启动边界：显式 host/port 配置、仅绑定 `127.0.0.1`、Uvicorn 生命周期与可测试的实际端口报告；本次不开始该任务。

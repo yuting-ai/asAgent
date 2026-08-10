@@ -73,6 +73,8 @@ asAgent/
 
 `core` 不依赖 FastAPI、Electron、SQLite SDK 或任何模型厂商 SDK。依赖方向由外向内，具体实现通过构造函数注入。
 
+阶段 6 的 Local API 从 `api.app.create_app()` 开始。该 App Factory 目前只暴露无需认证的 `GET /api/v1/health` liveness 契约，返回最小 JSON 状态；它不创建数据库连接、Agent Runtime、模型 Client、文件工具或后台任务。端口绑定、`127.0.0.1` 监听、Bearer Token、Origin/CORS、依赖注入、Conversation/Run 路由与 SSE 都保留给后续独立任务，因此 API 模块尚未成为 CLI 或 Electron 的启动入口。
+
 ## 4. 核心身份模型
 
 ### 4.1 ID 层级

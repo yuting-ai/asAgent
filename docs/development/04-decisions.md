@@ -535,6 +535,16 @@
 - 影响：初版单快照最多 5 MiB、总快照预算 100 MiB、默认保留 30 天。超过预算时拒绝需要新快照的变更，不静默删除仍可撤回的备份；清理只处理过期且已完成或已撤回记录。撤回本身仍需 `filesystem.write` 与逐次批准。create-only 可在该机制完成后纳入 FileChange，支持删除仍未被后续修改的 Agent 新建文件；当前 create-only Tool 不因此获得覆盖、追加、删除或撤回能力。快照加密与系统 Keychain 的结合留待正式设置/桌面存储设计。
 - 替代方案：直接覆盖后依赖用户手动备份、将完整正文存入 SQLite/RunEvent、无条件恢复旧文件、按路径搜索移动后的 Workspace、或静默删除旧快照腾出空间；当前均不采用。
 
+### DEC-061：阶段 6 使用 FastAPI App Factory 建立最小 Local API
+
+- 日期：2026-08-11
+- 状态：已确认
+- 背景：桌面 Renderer 和未来本地 API 客户端需要稳定 HTTP 边界，但直接在 CLI 或 Runtime 中绑定端口会使测试、认证、启动生命周期和 Electron 集成纠缠在一起。阶段 6 的第一步应先验证版本化 HTTP 契约，而不启动完整服务。
+- 决策：锁定 FastAPI 为 Local API 框架，并以 `api.app.create_app()` 创建应用。首个端点为无需认证的 `GET /api/v1/health`，固定返回最小 liveness 状态；使用 HTTPX ASGITransport 进行进程内契约测试。App Factory 不创建 SQLite、Runtime、模型 Client、工具或后台任务，也不自行绑定 socket。
+- 原因：App Factory 让 API 路由可在不打开端口的测试中验证，并为后续显式依赖注入、认证、中间件与 Server 生命周期留下单一组合边界；最小健康检查可供未来 Electron 启动握手使用，又不会把业务状态误报为就绪。
+- 影响：`fastapi` 成为运行依赖，Pydantic 继续只用于系统边界。后续独立任务再引入 Uvicorn、host/port 参数、仅监听 `127.0.0.1`、Token Bootstrap、Origin/CORS、Conversation/Run API 与 fetch-based SSE；Health 是否最终免认证由 Bootstrap 设计确认。
+- 替代方案：在 CLI 中手写 HTTP Server、先绑定固定端口再补路由、让 Health 启动完整 Runtime/真实 Provider，或第一步就引入认证/SSE；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：
@@ -544,7 +554,7 @@
 | Python | `>=3.13,<3.14`，`.python-version` 使用 `3.13` | 已确认 |
 | Python 包管理 | uv，提交 `uv.lock` | 已确认 |
 | 数据验证 | Pydantic `>=2,<3`，主要用于系统边界 | 已确认 |
-| API | FastAPI | 推荐，待锁定 |
+| API | FastAPI | 已确认，阶段 6 引入 |
 | 数据库 | SQLite | 已确认 |
 | 数据库访问 | SQLAlchemy `[asyncio]` extra、`>=2.0,<2.1` Core，不使用 ORM | 已确认 |
 | 异步 SQLite Driver | aiosqlite `>=0.20,<1` | 已确认，阶段 3 引入 |
