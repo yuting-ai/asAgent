@@ -435,6 +435,16 @@
 - 影响：该协调器不替代 ConversationRepository 或 RunRepository，不生成 `run.started` Event，也不实现 API 重试幂等键、每 Conversation 锁、Runtime 组合、Publisher/Recorder 适配或锁超时的用户提示。这些仍需要在后续服务/API 任务中设计。
 - 替代方案：让入口依次调用两个 Repository、在各 Repository 中嵌套事务、由 SQLite Trigger 自动创建 Run，或现在提前引入通用 Unit of Work/分布式事务抽象；当前均不采用。
 
+### DEC-051：RunEvent 通过注入的 Repository 持久化
+
+- 日期：2026-08-10
+- 状态：已确认
+- 背景：Agent Loop 已通过 Core `EventPublisher` 发布安全运行事件；若 Loop 直接依赖 SQLite，或 Publisher 自行创建数据库连接，Core 与存储实现会耦合，且连接生命周期难以由组合根统一管理。
+- 决策：新增 `storage.event_publisher.RepositoryEventPublisher`，仅依赖 `RunRepository` Protocol，并把 `publish(event)` 原样委托给 `repository.append_event(event)`。运行时需要 SQLite 持久化时，由组合根注入 `SqliteRunRepository`。
+- 原因：依赖倒置使 Agent Runtime 不知道数据库细节，同时可复用同一 Publisher 适配任何未来的 RunRepository 实现。事件顺序、去重约束和 JSON 转换继续由 Repository 的既有契约负责。
+- 影响：适配器不创建 Engine、不重试、不改变 Event 数据，也不吞掉写入异常；异常向上层传播，沿用 Agent Loop 已有的失败路径。该任务不接入 SSE、Run 状态更新或 ToolCall 持久化。
+- 替代方案：让 Agent Loop 直接调用 SQLite、在 Publisher 中硬编码 SqliteRunRepository 或创建独立 Engine、在此处补偿重试/状态更新；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

@@ -1449,3 +1449,28 @@
 ### 下一步
 
 - 在用户确认后，实现持久化 RunEvent 的最小 EventPublisher 适配；本次不开始该任务。
+
+## 2026-08-10 阶段 3 RunEvent 持久化 EventPublisher 工作记录
+
+### 完成
+
+- 新增 `storage.event_publisher.RepositoryEventPublisher`，实现 Core `EventPublisher` Protocol，并将安全 RunEvent 原样委托给注入的 `RunRepository.append_event()`。
+- 使用 `SqliteRunRepository` 注入时，事件可在关闭并重新创建 Repository 后按 Run 内 `sequence` 回放，并继续支持 `after_sequence` 续传。
+- 单元测试固定 Repository 写入异常会原样传播；集成测试验证跨实例持久化与乱序写入后的 sequence 回放。集成测试文件命名为 `test_repository_event_publisher.py`，避免与 unit 测试形成 Python 顶层模块同名冲突。
+
+### 验证
+
+- 检查：运行 EventPublisher unit/integration 定向测试、Ruff 格式化与检查、strict mypy、完整 `scripts/check.sh` 和 `git diff --check`。
+- 结果：通过；2 个定向测试通过，完整 138 个测试通过，97 个文件格式正确，93 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-051：RunEvent 通过注入的 Repository 持久化。
+
+### 风险或问题
+
+- 适配器目前不创建 Engine、不重试或吞掉写入异常；Agent Loop 的既有失败路径负责处理传播的异常。SSE、Run 状态更新和 ToolCall 持久化仍未接入。
+
+### 下一步
+
+- 在用户确认后，实现同样注入 `RunRepository` 的最小 ToolCallRecorder 持久化适配；本次不开始该任务。
