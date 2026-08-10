@@ -1905,3 +1905,29 @@
 ### 下一步
 
 - 在用户确认后，实现最小只读 `filesystem.list` 工具，并在执行前使用 WorkspaceResolver；本次不开始该任务。
+
+## 2026-08-10 阶段 5 分页目录列出工具工作记录
+
+### 完成
+
+- 新增只读 `filesystem.list` Tool，要求 `filesystem.read`，并在列出目录前通过 `WorkspaceResolver` 验证路径。
+- 工具只非递归列出一层文件、目录和符号链接的名称/类型，不读取正文、不跟随链接、不输出绝对路径，也不注册到当前 CLI。
+- 目录项按名称稳定排序；默认每页 50、单页最多 100，支持 `offset`。结果明确包含总条目数、当前显示区间和可继续调用的下一页 offset。
+- 空目录、空页、Workspace 越界、文件目标和无效直接参数均有明确测试行为。
+
+### 验证
+
+- 检查：运行 FilesystemListTool 定向单元测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 201 个测试通过，119 个文件格式正确，115 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 无；本次落实 DEC-039 的低风险只读能力与范围检查，未改变权限范围、审批或自动化策略。
+
+### 风险或问题
+
+- `filesystem.read` 尚未由实际 CLI/Runtime 授予，工具尚未接入 Registry；用户授权根、读取文件正文、写入、审计、审批与 Scheduler 仍是独立后续任务。
+
+### 下一步
+
+- 在用户确认后，实现最小只读 `filesystem.read_file` 工具，并复用 WorkspaceResolver、明确文件大小/文本编码限制；本次不开始该任务。
