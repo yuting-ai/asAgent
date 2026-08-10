@@ -1474,3 +1474,28 @@
 ### 下一步
 
 - 在用户确认后，实现同样注入 `RunRepository` 的最小 ToolCallRecorder 持久化适配；本次不开始该任务。
+
+## 2026-08-10 阶段 3 ToolCall 持久化 Recorder 工作记录
+
+### 完成
+
+- 新增 `storage.tool_call_recorder.RepositoryToolCallRecorder`，实现 Core `ToolCallRecorder` Protocol，并将完整 ToolCall 原样委托给注入的 `RunRepository.save_tool_call()`。
+- 使用 `SqliteRunRepository` 注入时，成功与失败工具调用的模型调用 ID、内部工具 ID、参数、结果或错误可跨 Repository 实例持久化并按既有稳定顺序读取。
+- 单元测试固定 Repository 写入异常会原样传播；集成测试验证跨实例持久化，以及 Recorder 不改变成功或失败 ToolCall 的审计内容。
+
+### 验证
+
+- 检查：运行 ToolCallRecorder unit/integration 定向测试、Ruff 格式化与检查、strict mypy、完整 `scripts/check.sh` 和 `git diff --check`。
+- 结果：通过；完整质量门禁通过，100 个文件格式正确，96 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-052：ToolCall 通过注入的 Repository 持久化。
+
+### 风险或问题
+
+- 当前两个持久化适配器仍未在正式 Runtime/API 组合根中共同注入；Run 状态更新、SSE、请求幂等、Conversation 锁与重启恢复入口仍待后续独立任务。
+
+### 下一步
+
+- 在用户确认后，设计并实现最小持久化 Runtime 组合或 API 入口；本次不开始该任务。

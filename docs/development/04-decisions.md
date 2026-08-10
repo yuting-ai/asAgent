@@ -445,6 +445,16 @@
 - 影响：适配器不创建 Engine、不重试、不改变 Event 数据，也不吞掉写入异常；异常向上层传播，沿用 Agent Loop 已有的失败路径。该任务不接入 SSE、Run 状态更新或 ToolCall 持久化。
 - 替代方案：让 Agent Loop 直接调用 SQLite、在 Publisher 中硬编码 SqliteRunRepository 或创建独立 Engine、在此处补偿重试/状态更新；当前均不采用。
 
+### DEC-052：ToolCall 通过注入的 Repository 持久化
+
+- 日期：2026-08-10
+- 状态：已确认
+- 背景：Agent Loop 已在工具调用结束后通过 Core `ToolCallRecorder` 记录完整的工具审计对象。若 Loop 直接写 SQLite，将把编排层与持久化实现耦合；若记录适配器自行创建连接，也会绕开应用的连接生命周期。
+- 决策：新增 `storage.tool_call_recorder.RepositoryToolCallRecorder`，仅依赖 `RunRepository` Protocol，并将 `record(tool_call)` 原样委托给 `repository.save_tool_call(tool_call)`。运行时需要 SQLite 持久化时，由组合根注入 `SqliteRunRepository`。
+- 原因：与 RunEvent 的持久化采用相同依赖倒置边界，使 Loop 无需知道数据库细节，并允许未来替换 Repository。ToolCall 的 JSON 参数、原始成功结果或错误及稳定读取顺序仍由 Repository 契约负责。
+- 影响：适配器不创建 Engine、不截断或重写 ToolCall、不重试也不吞掉异常；写入失败向 Loop 传播并触发其既有 FAILED 路径。本任务不改变工具执行、事件发布、Run 状态更新或 SSE。
+- 替代方案：让 Agent Loop 直接调用 SQLite、让 Recorder 硬编码 SqliteRunRepository、在 Recorder 内增加重试或吞错；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：
