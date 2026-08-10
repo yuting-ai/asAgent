@@ -1747,3 +1747,30 @@
 ### 下一步
 
 - 在用户确认后，实现阶段 4 的下一最小任务：基于 Context Budget 与完整历史单元的确定性最近历史选择；本次不开始该任务。
+
+## 2026-08-10 阶段 4 最近完整历史选择工作记录
+
+### 完成
+
+- 在 `agent.context_history` 新增不可变 `ContextHistorySelection` 与 `select_recent_context_history()`。
+- 选择器使用现有可替换 `TokenEstimator`，由调用方提供扣除固定成本后的消息预算；它从最新完整单元向前累加，并保持最终消息的原时间顺序。
+- 若加入一个更旧单元会超限，选择立即停止；若最新单元自身超限，返回空选择并省略全部历史，而不是截断该单元或跳过最新单元选择更旧内容。
+- 选择结果公开已选单元、扁平化消息、消息 Token 估算和省略单元数量，方便下一任务构造可解释的 ContextSnapshot。
+- 本任务仍未接入 AgentLoop、Provider、SQLite 或摘要；当前 CLI 请求内容不变。
+
+### 验证
+
+- 检查：运行 Context History 定向单元测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 173 个测试通过，112 个文件格式正确，108 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 无；本次按 DEC-058 实现确定性降级的最小选择规则，未改变摘要、记忆或 Snapshot 决策。
+
+### 风险或问题
+
+- 当前 API 接收的只是历史消息预算；尚未由 Context Builder 统一扣除 system prompt、工具 Schema 或未来摘要成本，也未生成模型请求快照。
+
+### 下一步
+
+- 在用户确认后，实现阶段 4 的下一最小任务：最小不可变 `ContextSnapshot` 与 Context Builder，组合固定成本、完整历史选择和 `ModelRequest`；本次不开始该任务。

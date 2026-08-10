@@ -2,10 +2,13 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from asagent.agent.context_budget import ConservativeUtf8TokenEstimator
 from asagent.agent.context_history import (
+    ContextHistorySelection,
     ContextHistoryUnit,
     ContextHistoryValidationError,
     group_context_history,
+    select_recent_context_history,
 )
 from asagent.models.contracts import (
     ModelMessage,
@@ -151,3 +154,130 @@ def test_history_rejects_duplicate_tool_call_ids_in_one_assistant_message() -> N
                 _tool_result("call-1"),
             ),
         )
+
+
+def _unit_tokens(unit: ContextHistoryUnit) -> int:
+    estimator = ConservativeUtf8TokenEstimator()
+    return sum(estimator.estimate_message(message) for message in unit.messages)
+
+
+def test_selection_keeps_the_newest_complete_units_in_history_order() -> None:
+    oldest_unit = ContextHistoryUnit(
+        messages=(
+            _user("old question"),
+            _assistant("old answer"),
+        ),
+    )
+    tool_unit = ContextHistoryUnit(
+        messages=(
+            _user("calculate 2 + 2"),
+            _assistant_tool_calls("call-1"),
+            _tool_result("call-1"),
+            _assistant("The answer is 4."),
+        ),
+    )
+    newest_unit = ContextHistoryUnit(
+        messages=(
+            _user("new question"),
+            _assistant("new answer"),
+        ),
+    )
+    units = (oldest_unit, tool_unit, newest_unit)
+
+    selection = select_recent_context_history(
+        units=units,
+        max_message_tokens=_unit_tokens(tool_unit) + _unit_tokens(newest_unit),
+        estimator=ConservativeUtf8TokenEstimator(),
+    )
+
+    assert selection.units == (tool_unit, newest_unit)
+    assert selection.messages == tool_unit.messages + newest_unit.messages
+    assert selection.message_tokens == (
+        _unit_tokens(tool_unit) + _unit_tokens(newest_unit)
+    )
+    assert selection.omitted_unit_count == 1
+
+
+def test_selection_never_splits_a_tool_call_chain() -> None:
+    tool_unit = ContextHistoryUnit(
+        messages=(
+            _user("calculate 2 + 2"),
+            _assistant_tool_calls("call-1"),
+            _tool_result("call-1"),
+            _assistant("The answer is 4."),
+        ),
+    )
+
+    selection = select_recent_context_history(
+        units=(tool_unit,),
+        max_message_tokens=_unit_tokens(tool_unit) - 1,
+        estimator=ConservativeUtf8TokenEstimator(),
+    )
+
+    assert selection.units == ()
+    assert selection.messages == ()
+    assert selection.message_tokens == 0
+    assert selection.omitted_unit_count == 1
+
+
+def test_selection_stops_when_the_newest_unit_does_not_fit() -> None:
+    oldest_unit = ContextHistoryUnit(messages=(_user("old"), _assistant("answer")))
+    newest_unit = ContextHistoryUnit(
+        messages=(
+            _user("newest question"),
+            _assistant("newest answer"),
+        ),
+    )
+
+    selection = select_recent_context_history(
+        units=(oldest_unit, newest_unit),
+        max_message_tokens=_unit_tokens(newest_unit) - 1,
+        estimator=ConservativeUtf8TokenEstimator(),
+    )
+
+    assert selection.units == ()
+    assert selection.omitted_unit_count == 2
+
+
+def test_selection_supports_empty_history_and_zero_budget() -> None:
+    empty_selection = select_recent_context_history(
+        units=(),
+        max_message_tokens=0,
+        estimator=ConservativeUtf8TokenEstimator(),
+    )
+    unit = ContextHistoryUnit(messages=(_user("hello"),))
+
+    zero_budget_selection = select_recent_context_history(
+        units=(unit,),
+        max_message_tokens=0,
+        estimator=ConservativeUtf8TokenEstimator(),
+    )
+
+    assert empty_selection == ContextHistorySelection(
+        units=(),
+        message_tokens=0,
+        omitted_unit_count=0,
+    )
+    assert zero_budget_selection == ContextHistorySelection(
+        units=(),
+        message_tokens=0,
+        omitted_unit_count=1,
+    )
+
+
+def test_selection_rejects_a_negative_budget_and_is_immutable() -> None:
+    with pytest.raises(ValueError, match="max_message_tokens"):
+        select_recent_context_history(
+            units=(),
+            max_message_tokens=-1,
+            estimator=ConservativeUtf8TokenEstimator(),
+        )
+
+    selection = ContextHistorySelection(
+        units=(),
+        message_tokens=0,
+        omitted_unit_count=0,
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        selection.message_tokens = 1  # type: ignore[misc]

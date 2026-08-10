@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from asagent.agent.context_budget import TokenEstimator
 from asagent.models.contracts import ModelMessage, ModelMessageRole
 
 
@@ -18,6 +19,60 @@ class ContextHistoryUnit:
             raise ValueError("context history units require at least one message")
         if self.messages[0].role is not ModelMessageRole.USER:
             raise ValueError("context history units must start with a user message")
+
+
+@dataclass(frozen=True, slots=True)
+class ContextHistorySelection:
+    """The complete recent history units selected for one model request."""
+
+    units: tuple[ContextHistoryUnit, ...]
+    message_tokens: int
+    omitted_unit_count: int
+
+    def __post_init__(self) -> None:
+        if self.message_tokens < 0:
+            raise ValueError("message_tokens must not be negative")
+        if self.omitted_unit_count < 0:
+            raise ValueError("omitted_unit_count must not be negative")
+
+    @property
+    def messages(self) -> tuple[ModelMessage, ...]:
+        return tuple(message for unit in self.units for message in unit.messages)
+
+
+def select_recent_context_history(
+    *,
+    units: tuple[ContextHistoryUnit, ...],
+    max_message_tokens: int,
+    estimator: TokenEstimator,
+) -> ContextHistorySelection:
+    """Select the newest complete history units that fit the message budget."""
+
+    if max_message_tokens < 0:
+        raise ValueError("max_message_tokens must not be negative")
+
+    selected_reversed: list[ContextHistoryUnit] = []
+    message_tokens = 0
+
+    for unit in reversed(units):
+        unit_tokens = sum(
+            estimator.estimate_message(message) for message in unit.messages
+        )
+        if message_tokens + unit_tokens > max_message_tokens:
+            return ContextHistorySelection(
+                units=tuple(reversed(selected_reversed)),
+                message_tokens=message_tokens,
+                omitted_unit_count=len(units) - len(selected_reversed),
+            )
+
+        selected_reversed.append(unit)
+        message_tokens += unit_tokens
+
+    return ContextHistorySelection(
+        units=tuple(reversed(selected_reversed)),
+        message_tokens=message_tokens,
+        omitted_unit_count=0,
+    )
 
 
 def group_context_history(

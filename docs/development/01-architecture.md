@@ -197,6 +197,8 @@ Runtime 不直接：
 
 阶段 4 的第二块基础位于 `agent.context_history`。`group_context_history()` 先验证模型历史：历史只能从 USER message 开始，SYSTEM prompt 只能通过 `ModelRequest.system_prompt` 单独提供；带 tool calls 的 ASSISTANT message 必须紧跟其声明顺序对应的 TOOL results，且 call ID 不得重复、缺失或错配。验证通过后，它返回不可变的 `ContextHistoryUnit` 元组，每个单元从一个 USER message 开始并延续到下一条 USER message 之前。后续 Context Builder 只能整体选择或丢弃这些单元，因而不会裁断工具调用链；当前模块不修改历史，也尚未接入 Loop 或实际裁剪。
 
+`agent.context_history.select_recent_context_history()` 是该模块的确定性裁剪基础：调用方先从总输入预算扣除 system prompt、工具 Schema 等固定成本，得到 `max_message_tokens`，选择器再从最新 `ContextHistoryUnit` 向前累加 `TokenEstimator` 的消息估算。它只在完整单元仍能放入时保留，并按原时间顺序返回不可变 `ContextHistorySelection`；最新单元本身无法放入时返回空选择，不截断单元，也不跳过最新单元去选择更旧的历史。选择结果包含扁平化消息、已选 Token 和省略单元数量，供后续 ContextSnapshot 解释裁剪原因。当前 Context Builder 尚未调用它。
+
 模型能力与用户策略分别建模：Provider Profile 或未来模型能力配置提供 `context_window_tokens` 作为硬上限；用户上下文策略提供 `max_input_tokens`、`reserved_output_tokens` 与可选轮次保护。实际输入预算取用户上限和模型窗口扣除输出预留后的较小值。入口不得根据模型名称猜测窗口大小；未来设置界面可以让用户选择预算档位或数值，但不得超过模型能力上限。
 
 Context Builder 只从 SQLite 原始 Message 读取并生成请求副本，永不覆盖或删除原始历史。历史裁剪以完整用户回合与完整 assistant tool_calls/TOOL results 链为单位；没有可用摘要或摘要失败时，回退为确定性地保留预算内最近完整单元，不清空 Conversation。未来 Conversation Summary 按 Conversation、覆盖的 Message sequence 区间和策略版本建立稳定身份，以防并发或重试重复压缩；只有 READY 摘要可进入 Snapshot。
