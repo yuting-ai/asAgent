@@ -465,6 +465,16 @@
 - 影响：失败、取消或达到步骤上限时可不写 AssistantMessage，但仍原子更新终态 Run；由未来 Runtime 决定何时传入用户可见文本。该组件不生成领域对象、不更新 Conversation 元数据、不做幂等、重试、SSE 或工具审计。
 - 替代方案：Runtime 依次调用两个 Repository、用 SQLite Trigger 自动创建消息、让 RunRepository 直接依赖 Conversation 表，或提前引入通用事务抽象；当前均不采用。
 
+### DEC-054：持久化 Agent Runtime 依赖生命周期 Protocol 与预配置 Loop
+
+- 日期：2026-08-10
+- 状态：已确认
+- 背景：阶段 3 已有 SQLite 的启动/结束原子事务，以及 EventPublisher 与 ToolCallRecorder 持久化适配器；若 Runtime 直接 import SQLite 或由入口自行拼接每一步，将破坏 Core 边界并容易遗漏终态保存。
+- 决策：`PersistentAgentRuntime` 位于 agent 应用层，只依赖 `ConversationRepository`、新增的 Core `RunStarter` / `RunFinisher` Protocol、已配置的 `AgentLoop`、时钟和 ID 工厂。它负责顺序组合“原子开始、读取可见历史、Loop、原子完成”；SQLite 实现和两个 Repository 审计适配器由外部组合根构造并注入 Loop/Runtime。
+- 原因：Runtime 获得一条明确、可测试的请求生命周期，同时仍不知道数据库、Engine、FastAPI 或 Electron。将 EventPublisher/Recorder 保持为 Loop 的已配置依赖，避免 Runtime 重复定义事件与工具审计语义。
+- 影响：未知 Conversation 在模型调用前拒绝；所有 Loop 终态都会保存 Run；仅 COMPLETED 的最终文本写入 AssistantMessage。LIMIT_REACHED 的潜在文本不进入 Conversation，以免未闭合工具回合污染未来模型历史。请求幂等、每 Conversation 锁、取消注册、SSE 和 API 仍不在本任务范围。
+- 替代方案：让 CLI/API 手写完整生命周期、Runtime 直接依赖 SqliteRunStarter/Finisher、让 Loop 负责 Message/Run 写入，或把 LIMIT_REACHED 文本一律保存为助手回答；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

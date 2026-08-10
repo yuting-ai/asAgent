@@ -187,7 +187,9 @@ Runtime 不直接：
 - 读取具体模型厂商环境变量。
 - 向某个渠道发送消息。
 
-阶段 2 当前的 `agent.loop.AgentLoop` 是尚未接入 Repository 的最小非流式编排器。它接收 `ModelProvider`、`ToolExecutor`、本次 Run 的 `ToolSnapshot` 和可选取消令牌，在内存中维护模型消息历史，并返回 `AgentLoopResult`。每次 `complete()` 响应消耗一个决策步骤，默认上限为 8；同一响应中的多个工具按稳定顺序执行但不额外消耗步骤。Provider 报告超时时，Loop 返回 `FAILED` 且不计入尚未取得响应的步骤。每次请求始终使用 Snapshot 导出的工具定义，工具结果再作为 TOOL message 进入下一次请求。可选 `ToolCallRecorder` 在已解析内部工具的调用结束后记录不可变 `ToolCall`：内部 `tool_call_id` 与模型 `model_call_id` 分离，原始成功结果不受模型上下文截断影响。若记录失败，Loop 停止后续调用并返回 `FAILED`。若注入 `EventPublisher`，调用方必须同时提供本次 `run_id`、`conversation_id`、事件 ID 工厂和时钟；Loop 从 1 递增发布事件。Publisher 未注入时保持无事件的最小执行；已注入但发布失败时，Loop 立即停止后续模型或工具调用并以 `FAILED` 返回。
+阶段 2 当前的 `agent.loop.AgentLoop` 是最小非流式编排器。它接收 `ModelProvider`、`ToolExecutor`、本次 Run 的 `ToolSnapshot` 和可选取消令牌，在内存中维护模型消息历史，并返回 `AgentLoopResult`。每次 `complete()` 响应消耗一个决策步骤，默认上限为 8；同一响应中的多个工具按稳定顺序执行但不额外消耗步骤。Provider 报告超时时，Loop 返回 `FAILED` 且不计入尚未取得响应的步骤。每次请求始终使用 Snapshot 导出的工具定义，工具结果再作为 TOOL message 进入下一次请求。可选 `ToolCallRecorder` 在已解析内部工具的调用结束后记录不可变 `ToolCall`：内部 `tool_call_id` 与模型 `model_call_id` 分离，原始成功结果不受模型上下文截断影响。若记录失败，Loop 停止后续调用并返回 `FAILED`。若注入 `EventPublisher`，调用方必须同时提供本次 `run_id`、`conversation_id`、事件 ID 工厂和时钟；Loop 从 1 递增发布事件。Publisher 未注入时保持无事件的最小执行；已注入但发布失败时，Loop 立即停止后续模型或工具调用并以 `FAILED` 返回。
+
+阶段 3 的 `agent.persistent_runtime.PersistentAgentRuntime` 是第一个应用层持久化组合：它仅依赖 Core `ConversationRepository`、`RunStarter`、`RunFinisher` Protocol 和预先配置的 `AgentLoop`，不导入 SQLite。一次 `run()` 先验证 Conversation 存在，构造 UserMessage 与 CREATED Run 并交给 Starter 原子创建；随后读取用户可见历史、转换为 ModelMessage 并调用 Loop；最后无论 Loop 成功、失败、取消或达到步骤限制，都用 Finisher 原子保存终态 Run。仅 `COMPLETED` 且有最终文本时创建 AssistantMessage；`LIMIT_REACHED` 的文本可能来自未闭合工具回合，不能伪装为正常对话历史。SQLite 组合根负责把 `SqliteRunStarter`、`SqliteRunFinisher`、`RepositoryEventPublisher` 和 `RepositoryToolCallRecorder` 注入其中。
 
 ## 7. Agent Loop 状态机
 

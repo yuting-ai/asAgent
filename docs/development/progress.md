@@ -1524,3 +1524,29 @@
 ### 下一步
 
 - 在用户确认后，实现最小持久化 Agent Runtime 服务，组合已有生命周期协调器和持久化适配器；本次不开始该任务。
+
+## 2026-08-10 阶段 3 最小持久化 Agent Runtime 工作记录
+
+### 完成
+
+- 新增 Core `RunStarter` 与 `RunFinisher` Protocol，使 Agent 应用层可使用既有 SQLite 生命周期协调器而不导入 SQLite。
+- 新增 `PersistentAgentRuntime`：验证 Conversation 后原子创建用户消息与 CREATED Run，读取可见历史执行已配置 Loop，再原子保存终态 Run 和可选最终 AssistantMessage。
+- 真实 SQLite 集成测试覆盖普通完成与 RunEvent 回放、工具回合的 ToolCall 审计、失败 Run 无 AssistantMessage，以及未知 Conversation 在模型调用前拒绝。
+- `LIMIT_REACHED` 的可能文本不会写入 Conversation，因为它可能仍关联未完成 ToolCall；只有 COMPLETED 的最终文本成为用户可见消息。
+
+### 验证
+
+- 检查：运行持久化 Runtime 定向集成测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；105 个文件格式正确，101 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-054：持久化 Agent Runtime 依赖生命周期 Protocol 与预配置 Loop。
+
+### 风险或问题
+
+- Runtime 尚未成为 CLI/API 的实际入口；没有请求幂等、每 Conversation 锁、取消 Token 注册、SSE、流式输出或重启后未完成 Run 的恢复策略。
+
+### 下一步
+
+- 在用户确认后，为持久化 Runtime 设计最小的运行时组合根与可手动体验的 SQLite 开发入口；本次不开始该任务。
