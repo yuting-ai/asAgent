@@ -475,6 +475,16 @@
 - 影响：未知 Conversation 在模型调用前拒绝；所有 Loop 终态都会保存 Run；仅 COMPLETED 的最终文本写入 AssistantMessage。LIMIT_REACHED 的潜在文本不进入 Conversation，以免未闭合工具回合污染未来模型历史。请求幂等、每 Conversation 锁、取消注册、SSE 和 API 仍不在本任务范围。
 - 替代方案：让 CLI/API 手写完整生命周期、Runtime 直接依赖 SqliteRunStarter/Finisher、让 Loop 负责 Message/Run 写入，或把 LIMIT_REACHED 文本一律保存为助手回答；当前均不采用。
 
+### DEC-055：SQLite 启动迁移由显式数据库初始化函数执行
+
+- 日期：2026-08-10
+- 状态：已确认
+- 背景：Alembic 升级此前只存在于集成测试辅助函数中，开发组合根无法可靠地为 `AppPaths.data_dir` 下的应用数据库创建或升级 Schema。
+- 决策：新增 `storage.sqlite.database.upgrade_sqlite_database(database_path, alembic_config_path)`。调用方显式提供两条路径；函数创建数据库父目录、为 Alembic 设置同步 SQLite URL，并执行 `upgrade head`。迁移失败原样传播。
+- 原因：将启动迁移从测试代码提升为可复用的 Storage 边界，同时不让 SQLite 层猜测用户数据位置或持有 AppPaths。显式 Alembic 配置路径使开发组合根的资源来源可见。
+- 影响：后续持久化 CLI/API 组合根使用 `AppPaths.data_dir / "asagent.sqlite3"` 计算数据库位置，并在构造 Repository 前调用该函数。函数不创建 Engine、Repository、Conversation、Run 或 Runtime；正式打包时迁移资源如何携带仍由桌面打包阶段决定。
+- 替代方案：每个入口复制测试 `_upgrade()`、Repository 首次使用时隐式迁移、Storage 中硬编码 `.local-data` 或当前工作目录，或跳过迁移直接创建表；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：
