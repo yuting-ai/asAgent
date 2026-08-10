@@ -505,6 +505,16 @@
 - 影响：CLI 现在支持离线/真实 Provider 与内存态/持久化的四种明确组合；真实持久化模式会产生费用，仍仅是开发入口，不引入 API、SSE、桌面 UI、取消注册或未完成 Run 恢复。测试用 FakeModelProvider 验证通用 Provider 注入路径，不在自动化测试访问真实网络或 Secret。
 - 替代方案：保持真实 Provider 只能内存态运行、为真实模式复制 PersistentAgentRuntime、让 Runtime 自行读取 Profile/环境变量，或在持久化模式失败时回退到离线 Provider；当前均不采用。
 
+### DEC-058：上下文压缩、长期记忆与历史检索分层并以快照确定模型可见内容
+
+- 日期：2026-08-10
+- 状态：已确认
+- 背景：长 Conversation 需要预算、裁剪和可能的语义压缩；个人助手又需要跨 Conversation 学习稳定偏好，并可能检索相关历史。若把这些过程混为后台“记忆刷新”，模型当前实际可见材料会随异步回调变化，重试可能重复摘要或写入，且临时对话内容会错误升级为长期偏好。参考 CowAgent 的上下文和记忆实现后，asAgent 采用其“完整工具链裁剪、分项预算与用户可配策略”的优点，但不复制其后台摘要注入、模型名窗口猜测或短期压缩与长期记忆混写方式。
+- 决策：阶段 4 的 Context Builder 每次调用前创建不可变 `ContextSnapshot`，并以完整工具链为裁剪单元。模型能力配置提供 context window 硬上限；用户策略提供输入预算、输出预留和轮次保护，实际预算不得超过能力上限。原始 Conversation Message 继续是 SQLite 主数据；摘要、裁剪和检索只生成模型请求副本。Conversation Summary、User Memory、Skill 和跨 Conversation 检索严格分层：Summary 仅用于同一 Conversation 连续性；User Memory 是经用户确认的跨 Conversation 偏好/事实；Skill 是用户维护的版本化说明；检索结果是带来源、受范围和预算限制的历史参考，不进入 System Prompt。阶段 4 只定义摘要/压缩接口和确定性降级；阶段 10 才持久化/复用 Summary、写入 User Memory 并先实现关键词检索。
+- 原因：快照让 Run 可解释且避免后台竞态；幂等的摘要覆盖区间与策略版本让重试可控；分层避免把临时内容或旧提示当成永久人格。模型能力与用户偏好分离，既允许未来设置窗口控制成本和体验，又避免用户设置超过 Provider 实际限制。关键词检索先于向量数据库，符合 DEC-016 并降低当前复杂度。
+- 影响：后续 Context Builder 需要 TokenEstimator、预算策略、工具链分组、ContextSnapshot 与默认脱敏调试信息。未来摘要持久化需记录 Conversation、覆盖的 Message sequence 区间、策略版本和 READY 状态，并对同一 Conversation 压缩串行化；摘要不可用时保留最近完整单元。User Memory 必须支持确认、来源、编辑和删除。跨 Conversation 检索默认不扫描全部历史，排除内部运行材料，并按用户范围、相关度、数量与 Token 预算过滤。
+- 替代方案：按模型名字硬编码上下文窗口；让摘要后台直接改写正在使用的消息；压缩时删除 SQLite 原始历史；把摘要直接写成 User Memory 或 Skill；每次请求无范围检索全部 Conversation；一开始引入向量数据库；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

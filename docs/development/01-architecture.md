@@ -191,6 +191,12 @@ Runtime 不直接：
 
 阶段 3 的 `agent.persistent_runtime.PersistentAgentRuntime` 是第一个应用层持久化组合：它仅依赖 Core `ConversationRepository`、`RunStarter`、`RunFinisher` Protocol 和预先配置的 `AgentLoop`，不导入 SQLite。一次 `run()` 先验证 Conversation 存在，构造 UserMessage 与 CREATED Run 并交给 Starter 原子创建；随后读取用户可见历史、转换为 ModelMessage 并调用 Loop；最后无论 Loop 成功、失败、取消或达到步骤限制，都用 Finisher 原子保存终态 Run。仅 `COMPLETED` 且有最终文本时创建 AssistantMessage；`LIMIT_REACHED` 的文本可能来自未闭合工具回合，不能伪装为正常对话历史。SQLite 组合根负责把 `SqliteRunStarter`、`SqliteRunFinisher`、`RepositoryEventPublisher` 和 `RepositoryToolCallRecorder` 注入其中。
 
+阶段 4 的 Context Builder 在每次模型调用前，从原始 Conversation、已确认的 Conversation Summary、用户记忆和本次工具 Snapshot 生成不可变 `ContextSnapshot`。Snapshot 明确记录模型本次实际可见的 system prompt、模型消息、工具定义、各组成部分的估算 Token 占用、预算、选中的 Message sequence/摘要身份和裁剪原因；Loop 只能消费该快照，不得在请求进行中由后台任务修改它。调试快照默认关闭且脱敏，不把用户文本、工具参数、结果或 Secret 写入 RunEvent。
+
+模型能力与用户策略分别建模：Provider Profile 或未来模型能力配置提供 `context_window_tokens` 作为硬上限；用户上下文策略提供 `max_input_tokens`、`reserved_output_tokens` 与可选轮次保护。实际输入预算取用户上限和模型窗口扣除输出预留后的较小值。入口不得根据模型名称猜测窗口大小；未来设置界面可以让用户选择预算档位或数值，但不得超过模型能力上限。
+
+Context Builder 只从 SQLite 原始 Message 读取并生成请求副本，永不覆盖或删除原始历史。历史裁剪以完整用户回合与完整 assistant tool_calls/TOOL results 链为单位；没有可用摘要或摘要失败时，回退为确定性地保留预算内最近完整单元，不清空 Conversation。未来 Conversation Summary 按 Conversation、覆盖的 Message sequence 区间和策略版本建立稳定身份，以防并发或重试重复压缩；只有 READY 摘要可进入 Snapshot。
+
 ## 7. Agent Loop 状态机
 
 ```text
@@ -466,7 +472,11 @@ User Memory          local-user 的长期偏好和事实
 Knowledge            用户主动或 Agent 整理的结构化资料
 ```
 
-第一版只做 Conversation History。Memory 按路线图后置，并先实现文本和关键词方案，再评估 Embedding。
+这四层不得混用：原始 Conversation 是可审计主数据；Conversation Summary 只服务同一 Conversation 的长历史连续性；User Memory 保存跨 Conversation 的稳定偏好、明确事实和长期事项；Skill 是用户维护、可版本化的操作说明，不能把自动学习到的偏好直接伪装为 Skill。阶段 4 只实现摘要/压缩接口和短期上下文边界；Conversation Summary 的持久化复用、User Memory 写入和跨 Conversation 检索都在阶段 10 实现。
+
+阶段 10 的跨 Conversation 检索是可选的“历史参考”能力，而非每次请求默认扫描全部历史。它只检索用户可见 Message、已确认 Summary 和已确认 User Memory，不索引 RunEvent、ToolCall 参数或结果等内部材料；命中结果带来源 Conversation、Message sequence/摘要身份与时间，并在独立的低权重参考区进入 ContextSnapshot，而非进入 System Prompt。检索受用户选择的范围、相关度阈值、数量和 Token 预算限制；默认不跨所有 Conversation 静默检索。先用 SQLite 文本/关键词检索实现，并在实际使用证明不足后再评估 Embedding/向量索引。
+
+User Memory 的自动候选与正式写入分开：系统可从对话提出候选，但默认须用户确认后才成为跨 Conversation 可见的偏好或事实；用户应能查看来源、编辑和删除。这样个人助手可逐步适应用户习惯，同时避免一次闲聊、错误推断或旧指令污染长期行为。
 
 主数据规则：
 

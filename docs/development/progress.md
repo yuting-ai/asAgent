@@ -1668,3 +1668,29 @@
 ### 下一步
 
 - 在用户确认后，开始阶段 4 的上下文预算与摘要基础；本次不开始该任务。
+
+## 2026-08-10 阶段 4 Context 与 Memory 边界设计记录
+
+### 完成
+
+- 确认模型 context window 硬上限与用户可配置输入预算、输出预留和轮次保护分开建模；未来设置窗口只能在模型能力范围内调整。
+- 确认每次模型调用使用不可变 ContextSnapshot，记录实际可见组成、来源、预算与裁剪原因，后台摘要不得修改已经开始的请求。
+- 明确原始 Conversation、Conversation Summary、User Memory、Skill 与跨 Conversation 历史检索的职责和数据边界；User Memory 默认以候选加用户确认方式写入。
+- 确认跨 Conversation 检索是阶段 10 的可选历史参考能力，先采用 SQLite 关键词/文本检索，默认不无范围扫描全部 Conversation，也不索引内部运行材料。
+
+### 验证
+
+- 检查：对照阶段 4/10 路线、现有 SQLite 主数据边界、完整工具链约束和经用户授权读取的 CowAgent 上下文/记忆模块；运行 `git diff --check`。
+- 结果：通过；设计不改变当前代码或持久化 Schema，且与 DEC-016、DEC-020、DEC-030 和阶段 4/10 的职责边界一致。
+
+### 决策变化
+
+- 新增 DEC-058：上下文压缩、长期记忆与历史检索分层并以快照确定模型可见内容。
+
+### 风险或问题
+
+- ContextBudget、TokenEstimator、ContextSnapshot、完整工具链分组和摘要接口均尚未实现；当前 CLI 仍把完整可见历史直接交给 Runtime。
+
+### 下一步
+
+- 在用户确认后，实现阶段 4 的第一个最小任务：Context Budget、分项 Token 估算和不可变使用量快照；本次不开始该任务。

@@ -173,8 +173,10 @@ asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不
 
 - 实现分层 System Prompt Builder。
 - 实现消息标准化和合法性检查。
-- 实现 Token 估算和上下文预算。
-- 实现旧工具结果截断、历史裁剪和摘要接口。
+- 分离 Provider/模型的 context window 硬上限与用户可配置的输入预算、输出预留和轮次保护；未来设置窗口只能在模型上限内调整策略。
+- 实现 Token 估算和上下文预算，覆盖 system prompt、工具 Schema、模型消息与输出预留。
+- 生成不可变、默认脱敏的 ContextSnapshot，说明模型本次实际可见的组成、来源、预算和裁剪原因。
+- 实现旧工具结果截断、按完整工具调用链裁剪历史，以及可替换的 Conversation Summary 接口；摘要失败时回退为确定性裁剪，不修改原始 Conversation。
 - 添加 Context 调试快照，默认脱敏且关闭。
 
 ### 验收
@@ -182,6 +184,7 @@ asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不
 - 大历史不会无界增长。
 - 裁剪不破坏当前 Run 的工具调用链。
 - 每个上下文组成部分的 Token 占用可观察。
+- 后台摘要或并发任务不能修改已创建的 ContextSnapshot。
 
 ## 8. 阶段 5：Workspace 与安全工具
 
@@ -325,8 +328,9 @@ asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不
 
 ### 开发任务
 
-- Conversation Summary。
-- User Memory 的显式读写接口。
+- Conversation Summary 的持久化、覆盖区间与跨重启复用。
+- User Memory 的候选、用户确认、显式读写与来源追溯接口。
+- 可选跨 Conversation 历史检索：先实现 SQLite 文本/关键词检索，按用户范围、相关度、数量和 Token 预算把来源明确的参考资料加入 ContextSnapshot；实际证明需要后再评估 Embedding。
 - 关键词搜索和去重。
 - Knowledge Markdown 以 Workspace 文件为主数据，SQLite 只保存索引、Checksum 和解析状态。
 - 结构化 User Memory 以 SQLite 为主；`workspace/memory/` 只提供可重建导出。
