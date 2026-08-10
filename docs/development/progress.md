@@ -1574,3 +1574,29 @@
 ### 下一步
 
 - 在用户确认后，实现最小持久化开发 CLI 组合根，以同一 Conversation 跨进程使用 SQLite Runtime；本次不开始该任务。
+
+## 2026-08-10 阶段 3 持久化开发 CLI 工作记录
+
+### 完成
+
+- 新增显式 `--persistent` 与 `--conversation-id` CLI 参数；默认内存态开发 CLI 与真实 Profile 入口的既有行为保持不变。
+- 持久化模式从 `AppPaths.data_dir` 推导 `asagent.sqlite3` 并升级 Schema，组合 SQLite Repository、Starter、Finisher、RunEvent/ToolCall 持久化适配器与 PersistentAgentRuntime。
+- 未指定 Conversation 时创建本地用户 Conversation 并显示其 ID；指定 ID 时复用既有 Conversation，不存在则在模型调用前明确拒绝。
+- 集成测试验证同一 Conversation 跨两次独立 SQLite 组件组合保留完整用户/助手消息与两个完成 Run；持久化模式使用离线 DevelopmentToolModelProvider，不产生真实模型费用。
+
+### 验证
+
+- 检查：运行 CLI unit/integration 定向测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 152 个测试通过，108 个文件格式正确，104 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 新增 DEC-056：持久化开发 CLI 以显式模式组合 SQLite Runtime。
+
+### 风险或问题
+
+- 此入口仍是开发工具，不是正式 API 或桌面界面；没有事件终端多播/SSE、真实 Provider 持久化组合、请求幂等、Conversation 锁、取消注册或未完成 Run 恢复。
+
+### 下一步
+
+- 在用户确认后，手动运行持久化离线 CLI，验证跨进程 Conversation 续接与 SQLite RunEvent/ToolCall 审计；本次不开始该任务。

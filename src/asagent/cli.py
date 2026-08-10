@@ -10,6 +10,7 @@ from uuid import uuid4
 import httpx
 
 from asagent.agent.loop import AgentLoop
+from asagent.agent.persistent_runtime import PersistentAgentRuntime
 from asagent.bootstrap.environment_secret_provider import (
     EnvironmentSecretProvider,
 )
@@ -17,9 +18,18 @@ from asagent.bootstrap.provider_factory import create_model_provider
 from asagent.chat.service import ChatService
 from asagent.core.conversation import Conversation
 from asagent.core.event_publisher import EventPublisher
-from asagent.core.ids import ConversationId, EventId, MessageId, RunId
+from asagent.core.ids import (
+    ConversationId,
+    EventId,
+    MessageId,
+    RunId,
+    ToolCallId,
+    UserId,
+)
+from asagent.core.repositories import ConversationRepository
 from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
+from asagent.core.tool_call_recorder import ToolCallRecorder
 from asagent.models.contracts import (
     ModelEvent,
     ModelMessage,
@@ -33,6 +43,15 @@ from asagent.models.profile_loader import load_provider_profiles
 from asagent.models.provider import ModelProvider
 from asagent.models.tool_names import openai_compatible_tool_name
 from asagent.paths import AppPaths
+from asagent.storage.event_publisher import RepositoryEventPublisher
+from asagent.storage.sqlite.conversation_repository import (
+    SqliteConversationRepository,
+)
+from asagent.storage.sqlite.database import upgrade_sqlite_database
+from asagent.storage.sqlite.run_finisher import SqliteRunFinisher
+from asagent.storage.sqlite.run_repository import SqliteRunRepository
+from asagent.storage.sqlite.run_starter import SqliteRunStarter
+from asagent.storage.tool_call_recorder import RepositoryToolCallRecorder
 from asagent.tools.builtin.calculator import CalculatorTool
 from asagent.tools.builtin.current_time import CurrentTimeTool
 from asagent.tools.builtin.echo import EchoTool
@@ -149,6 +168,7 @@ def build_agent_loop(
 def build_development_agent_loop(
     *,
     event_publisher: EventPublisher,
+    tool_call_recorder: ToolCallRecorder | None = None,
 ) -> AgentLoop:
     registry = _register_builtin_tools()
     snapshot = ToolSnapshot.from_definitions(
@@ -165,6 +185,8 @@ def build_development_agent_loop(
         event_publisher=event_publisher,
         event_id_factory=new_event_id,
         clock=now,
+        tool_call_recorder=tool_call_recorder,
+        tool_call_id_factory=new_tool_call_id,
     )
 
 
@@ -272,6 +294,101 @@ def new_run_id() -> RunId:
     return RunId(f"run_{uuid4().hex}")
 
 
+def new_tool_call_id() -> ToolCallId:
+    return ToolCallId(f"tool_{uuid4().hex}")
+
+
+def _alembic_config_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "alembic.ini"
+
+
+def build_persistent_development_runtime(
+    *,
+    conversations: SqliteConversationRepository,
+    runs: SqliteRunRepository,
+    starter: SqliteRunStarter,
+    finisher: SqliteRunFinisher,
+) -> PersistentAgentRuntime:
+    return PersistentAgentRuntime(
+        conversations=conversations,
+        run_starter=starter,
+        run_finisher=finisher,
+        loop=build_development_agent_loop(
+            event_publisher=RepositoryEventPublisher(runs),
+            tool_call_recorder=RepositoryToolCallRecorder(runs),
+        ),
+        now=now,
+        new_run_id=new_run_id,
+        new_message_id=new_message_id,
+    )
+
+
+async def get_or_create_persistent_conversation(
+    *,
+    conversations: ConversationRepository,
+    conversation_id: ConversationId | None,
+) -> Conversation:
+    if conversation_id is not None:
+        conversation = await conversations.get(conversation_id)
+        if conversation is None:
+            raise ValueError("requested conversation is unavailable")
+        return conversation
+
+    created_at = now()
+    conversation = Conversation(
+        conversation_id=new_conversation_id(),
+        user_id=UserId("local-user"),
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    await conversations.save(conversation)
+    return conversation
+
+
+async def run_persistent_agent_chat(
+    *,
+    runtime: PersistentAgentRuntime,
+    conversation_id: ConversationId,
+    model_name: str,
+    system_prompt: str,
+    read_line: Callable[[str], str],
+    write_line: Callable[[str], None],
+) -> None:
+    write_line(
+        "asAgent persistent development agent. "
+        f"Conversation: {conversation_id}. Type 'exit' to quit.",
+    )
+
+    while True:
+        try:
+            content = read_line("You: ")
+        except EOFError:
+            return
+
+        if content.strip().lower() in {"exit", "quit"}:
+            return
+        if not content.strip():
+            continue
+
+        try:
+            result = await runtime.run(
+                conversation_id=conversation_id,
+                content=content,
+                model_name=model_name,
+                system_prompt=system_prompt,
+            )
+        except Exception as error:
+            write_line(f"Error: {error}")
+            continue
+
+        if result.assistant_message is not None:
+            write_line(f"asAgent: {result.assistant_message.content}")
+        elif result.error is not None:
+            write_line(f"Error: {result.error}")
+        else:
+            write_line(f"Run ended: {result.run.status.value}")
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the asAgent development CLI.")
     parser.add_argument(
@@ -288,16 +405,78 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=Path(".local-data"),
         help="Root containing config/providers.toml for a real Provider Profile.",
     )
+    parser.add_argument(
+        "--persistent",
+        action="store_true",
+        help="Use the SQLite-backed offline development Agent.",
+    )
+    parser.add_argument(
+        "--conversation-id",
+        help="Reuse an existing Conversation in --persistent mode.",
+    )
     return parser.parse_args(argv)
 
 
 async def _run_main(args: argparse.Namespace) -> None:
-    publisher = ConsoleEventPublisher(print)
-    conversation_id = new_conversation_id()
     system_prompt = (
         "You are asAgent's development assistant. Use the supplied tools when "
         "they help answer the user."
     )
+
+    if args.persistent:
+        if args.profile is not None or args.secret_env is not None:
+            raise ProviderConfigurationError(
+                "--persistent cannot be combined with --profile or --secret-env",
+            )
+
+        paths = AppPaths.from_root(args.app_home)
+        database_path = paths.data_dir / "asagent.sqlite3"
+        upgrade_sqlite_database(
+            database_path=database_path,
+            alembic_config_path=_alembic_config_path(),
+        )
+
+        conversations = SqliteConversationRepository(database_path)
+        runs = SqliteRunRepository(database_path)
+        starter = SqliteRunStarter(database_path)
+        finisher = SqliteRunFinisher(database_path)
+
+        try:
+            conversation = await get_or_create_persistent_conversation(
+                conversations=conversations,
+                conversation_id=(
+                    ConversationId(args.conversation_id)
+                    if args.conversation_id is not None
+                    else None
+                ),
+            )
+            await run_persistent_agent_chat(
+                runtime=build_persistent_development_runtime(
+                    conversations=conversations,
+                    runs=runs,
+                    starter=starter,
+                    finisher=finisher,
+                ),
+                conversation_id=conversation.conversation_id,
+                model_name="development-tools",
+                system_prompt=system_prompt,
+                read_line=input,
+                write_line=print,
+            )
+        finally:
+            await finisher.aclose()
+            await starter.aclose()
+            await runs.aclose()
+            await conversations.aclose()
+        return
+
+    if args.conversation_id is not None:
+        raise ProviderConfigurationError(
+            "--conversation-id requires --persistent",
+        )
+
+    publisher = ConsoleEventPublisher(print)
+    conversation_id = new_conversation_id()
 
     if args.profile is None and args.secret_env is None:
         agent_loop = build_development_agent_loop(event_publisher=publisher)

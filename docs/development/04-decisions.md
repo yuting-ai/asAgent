@@ -485,6 +485,16 @@
 - 影响：后续持久化 CLI/API 组合根使用 `AppPaths.data_dir / "asagent.sqlite3"` 计算数据库位置，并在构造 Repository 前调用该函数。函数不创建 Engine、Repository、Conversation、Run 或 Runtime；正式打包时迁移资源如何携带仍由桌面打包阶段决定。
 - 替代方案：每个入口复制测试 `_upgrade()`、Repository 首次使用时隐式迁移、Storage 中硬编码 `.local-data` 或当前工作目录，或跳过迁移直接创建表；当前均不采用。
 
+### DEC-056：持久化开发 CLI 以显式模式组合 SQLite Runtime
+
+- 日期：2026-08-10
+- 状态：已确认
+- 背景：持久化 Runtime、SQLite 生命周期协调器和审计适配器已经独立验证，但此前没有入口将它们组合成可跨进程手动体验的完整链路；直接改变默认 CLI 又会破坏已有离线、无副作用的开发行为。
+- 决策：新增 `--persistent` 开关。启用后 CLI 从 `AppPaths.data_dir / "asagent.sqlite3"` 计算数据库路径、执行启动迁移，组合 SQLite Repository/Starter/Finisher、Repository EventPublisher/ToolCallRecorder 与 PersistentAgentRuntime。它仅使用离线 DevelopmentToolModelProvider；可选 `--conversation-id` 用于复用既有 Conversation，省略时创建新的本地用户 Conversation。
+- 原因：显式模式使持久化行为可体验、可测试且不意外改变默认 CLI；离线 Provider 保持零网络、零费用的可重复演示。对话 ID 显式输出与输入提供最小跨进程续接，不提前构建对话列表 UI 或 API。
+- 影响：`--persistent` 不能与真实 Provider 的 `--profile`/`--secret-env` 组合；不存在 Conversation 在模型调用前拒绝。该模式只打印最终回答、错误或终态，事件已持久化但尚不做终端多播/SSE。正式 Secret Store、真实 Provider 持久化模式、API 与 Electron 仍为后续任务。
+- 替代方案：把默认 CLI 改为持久化、让每次启动新建不可续接 Conversation、持久化模式默认调用真实模型、或现在引入 EventPublisher fan-out/SSE；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

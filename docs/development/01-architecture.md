@@ -246,6 +246,8 @@ Loop 对一组 tool calls 按稳定顺序逐个执行。未知工具、参数错
 
 CLI 以显式 `--profile <name> --secret-env <environment-name> --app-home <root>` 启用真实 Provider 路径：入口通过 `AppPaths` 加载 `<root>/config/providers.toml`，将所选 Profile 的 `secret_id` 显式绑定到调用者选择的开发期环境变量，并拥有 `httpx.AsyncClient` 生命周期。源码开发可使用 `uv run --env-file .env asagent ...` 在进程启动前注入该变量；`.env` 仅是被忽略的开发便利文件，正式桌面端仍应使用系统 Secret Store。Profile、Key 或网络错误不会静默降级为离线 Provider。CLI 不持久化历史，也不是正式产品界面；SQLite、SSE 和 Electron 继续复用 Core 边界并在后续阶段实现。
 
+阶段 3 新增显式 `asagent --persistent --app-home <root>` 离线开发模式。它以 `AppPaths.data_dir / "asagent.sqlite3"` 初始化/升级 SQLite，组合 SQLite Conversation/Run Repository、Starter、Finisher、Repository EventPublisher、Repository ToolCallRecorder 和 PersistentAgentRuntime。未给 `--conversation-id` 时创建并打印新 Conversation 身份；提供该参数时只加载既有 Conversation，不存在即在模型调用前拒绝。它使用确定性的 DevelopmentToolModelProvider，不与真实 `--profile`/`--secret-env` 混用；默认 CLI 仍保持原来的内存态、终端事件开发模式。持久化模式只输出最终回答、错误或终态，安全 RunEvent 通过 SQLite 回放而不在此处实现多播或 SSE。
+
 CLI、Local API 与未来渠道将通过同一个更完整的入口接口进入：
 
 ```python
