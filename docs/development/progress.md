@@ -1647,3 +1647,24 @@
 ### 下一步
 
 - 在用户确认后，先手动验收一次真实 Provider 的持久化 Conversation 与 SQLite 审计，或开始阶段 4 的上下文预算与摘要基础；本次不开始该任务。
+
+## 2026-08-10 阶段 3 真实 Provider 持久化 CLI 手动验收记录
+
+### 完成
+
+- 用户以真实 DeepSeek Profile 创建持久化 Conversation `conv_47e42c802be848e1a17d9b31cc6330c1`，要求调用 Calculator 计算 `123 * 456`。
+- 该 Conversation 的 Run `run_f8bada09b9b54e969bd0347dda3bf14e` 为 `completed`；RunEvent 严格按 sequence 保存启动、两次模型请求/完成、工具请求/完成及完成事件，共八条。
+- ToolCall 审计保存 `builtin.calculator`、Provider `model_call_id` 与原始结果 `56088`，错误字段为空，证明真实 Provider 使用的持久化组合与离线模式走同一审计路径。
+
+### 验证
+
+- 检查：真实 `--persistent --profile deepseek --secret-env ASAGENT_MODEL_API_KEY` CLI 会话，以及 SQLite 对 runs、run_events 与 tool_calls 的查询。
+- 结果：通过；真实模型完成工具回合并写入 SQLite，状态、事件顺序和工具审计均符合 Runtime 契约。
+
+### 风险或问题
+
+- SQLite 的 datetime 回读为 UTC 时间；`sqlite3` 默认以未附时区的值显示，因此与本机时区存在显示偏移，但领域与 Storage 边界均按 UTC 解释，符合 DEC-047。
+
+### 下一步
+
+- 在用户确认后，开始阶段 4 的上下文预算与摘要基础；本次不开始该任务。
