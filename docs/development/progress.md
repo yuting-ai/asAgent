@@ -1720,3 +1720,30 @@
 ### 下一步
 
 - 在用户确认后，实现阶段 4 的下一最小任务：ModelMessage 历史的合法性检查与完整工具调用链分组；本次不开始该任务。
+
+## 2026-08-10 阶段 4 模型历史合法性与工具链分组工作记录
+
+### 完成
+
+- 新增 `agent.context_history`：在 Context Builder 之前验证 `ModelMessage` 历史，并将其划分为不可变的 `ContextHistoryUnit`。
+- 明确模型历史必须从 USER message 开始；SYSTEM prompt 不允许混入历史，继续由 `ModelRequest.system_prompt` 单独承载。
+- 带 tool calls 的 ASSISTANT message 现在必须紧跟声明顺序对应的 TOOL results；缺少、错配、孤立或重复的 call ID 会以 `ContextHistoryValidationError` 明确拒绝。
+- 分组以新的 USER message 作为边界，完整的 assistant tool calls 与全部 TOOL results 因此始终属于同一可整体保留或裁掉的历史单元。
+- 本任务不改 AgentLoop、SQLite 主数据或模型请求内容，尚未实际执行裁剪。
+
+### 验证
+
+- 检查：运行 Context History 定向单元测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 168 个测试通过，112 个文件格式正确，108 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 无；本次落实 DEC-058 已确认的完整工具链裁剪约束，未改变 ContextSnapshot 或摘要策略。
+
+### 风险或问题
+
+- 目前只产生安全的历史单元；Context Builder 尚未按预算选择单元，也没有生成 ContextSnapshot、持久化 Summary 或接入 Loop。
+
+### 下一步
+
+- 在用户确认后，实现阶段 4 的下一最小任务：基于 Context Budget 与完整历史单元的确定性最近历史选择；本次不开始该任务。
