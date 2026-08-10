@@ -193,6 +193,8 @@ Runtime 不直接：
 
 阶段 4 的 Context Builder 在每次模型调用前，从原始 Conversation、已确认的 Conversation Summary、用户记忆和本次工具 Snapshot 生成不可变 `ContextSnapshot`。Snapshot 明确记录模型本次实际可见的 system prompt、模型消息、工具定义、各组成部分的估算 Token 占用、预算、选中的 Message sequence/摘要身份和裁剪原因；Loop 只能消费该快照，不得在请求进行中由后台任务修改它。调试快照默认关闭且脱敏，不把用户文本、工具参数、结果或 Secret 写入 RunEvent。
 
+阶段 4 的第一块基础已实现于 `agent.context_budget`：`ModelContextCapabilities` 表示模型 context window 硬上限，`ContextBudget` 表示用户输入上限与输出预留，并解析为不可变 `ResolvedContextBudget`；`TokenEstimator` 是可替换的估算边界，当前 `ConservativeUtf8TokenEstimator` 对 UTF-8 文本、消息结构、工具调用与工具 Schema 做确定性保守估算；`ContextUsage` 记录一次 `ModelRequest` 的 system prompt、工具 Schema 与消息分项占用、剩余预算及是否超限。该模块尚未构建完整 ContextSnapshot，也未接入 Loop、裁剪、摘要、Profile 或设置 UI。
+
 模型能力与用户策略分别建模：Provider Profile 或未来模型能力配置提供 `context_window_tokens` 作为硬上限；用户上下文策略提供 `max_input_tokens`、`reserved_output_tokens` 与可选轮次保护。实际输入预算取用户上限和模型窗口扣除输出预留后的较小值。入口不得根据模型名称猜测窗口大小；未来设置界面可以让用户选择预算档位或数值，但不得超过模型能力上限。
 
 Context Builder 只从 SQLite 原始 Message 读取并生成请求副本，永不覆盖或删除原始历史。历史裁剪以完整用户回合与完整 assistant tool_calls/TOOL results 链为单位；没有可用摘要或摘要失败时，回退为确定性地保留预算内最近完整单元，不清空 Conversation。未来 Conversation Summary 按 Conversation、覆盖的 Message sequence 区间和策略版本建立稳定身份，以防并发或重试重复压缩；只有 READY 摘要可进入 Snapshot。

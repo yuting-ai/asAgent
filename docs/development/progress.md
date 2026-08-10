@@ -1694,3 +1694,29 @@
 ### 下一步
 
 - 在用户确认后，实现阶段 4 的第一个最小任务：Context Budget、分项 Token 估算和不可变使用量快照；本次不开始该任务。
+
+## 2026-08-10 阶段 4 Context Budget 与使用量快照工作记录
+
+### 完成
+
+- 新增 `ModelContextCapabilities`、`ContextBudget` 与 `ResolvedContextBudget`，将模型 context window 硬上限和用户输入/输出策略分开，并以两者较小的可用输入空间作为有效预算。
+- 新增运行时可替换的 `TokenEstimator` Protocol；当前 `ConservativeUtf8TokenEstimator` 确定性计算 UTF-8 文本字节数和消息、tool call、工具 Schema 的结构开销，不冒充任何 Provider 的精确 tokenizer。
+- 新增不可变 `ContextUsage`，可从一次 `ModelRequest` 分别统计 system prompt、工具 Schema 和消息 Token 估算，公开总输入、剩余输入预算与是否超限。
+- 本任务不接入 AgentLoop，因此当前 CLI/真实 Provider 的请求内容与输出行为不变；后续 Context Builder 将消费这些预算和使用量数据决定裁剪或摘要。
+
+### 验证
+
+- 检查：运行 Context Budget 定向单元测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 159 个测试通过，110 个文件格式正确，106 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 无；本次落实 DEC-058 的预算与可观察性基础，未改变既有数据或压缩策略决策。
+
+### 风险或问题
+
+- 当前估算器为保守近似，可能早于 Provider 精确 tokenizer 触发未来裁剪；Model Profile 能力配置、完整 ContextSnapshot、工具链分组、裁剪与摘要接口仍未实现。
+
+### 下一步
+
+- 在用户确认后，实现阶段 4 的下一最小任务：ModelMessage 历史的合法性检查与完整工具调用链分组；本次不开始该任务。
