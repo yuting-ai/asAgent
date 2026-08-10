@@ -5,6 +5,12 @@ from datetime import UTC, datetime
 import pytest
 
 from asagent.agent.cancellation import RunCancellationToken
+from asagent.agent.context_budget import (
+    ConservativeUtf8TokenEstimator,
+    ContextBudget,
+    ModelContextCapabilities,
+)
+from asagent.agent.context_builder import ContextBuilder
 from asagent.agent.loop import AgentLoop
 from asagent.core.event_publisher import EventPublisher
 from asagent.core.ids import ConversationId, EventId, RunId, ToolCallId
@@ -160,6 +166,7 @@ def _loop(
     clock: Callable[[], datetime] | None = None,
     tool_call_recorder: ToolCallRecorder | None = None,
     tool_call_id_factory: Callable[[], ToolCallId] | None = None,
+    context_builder: ContextBuilder | None = None,
 ) -> AgentLoop:
     registry = ToolRegistry()
     registry.register(tool)
@@ -180,6 +187,7 @@ def _loop(
         clock=clock,
         tool_call_recorder=tool_call_recorder,
         tool_call_id_factory=tool_call_id_factory,
+        context_builder=context_builder,
     )
 
 
@@ -188,6 +196,25 @@ def _user_message() -> ModelMessage:
         role=ModelMessageRole.USER,
         content="Please echo hello.",
     )
+
+
+def _context_builder(input_budget_tokens: int) -> ContextBuilder:
+    return ContextBuilder(
+        budget=ContextBudget(
+            max_input_tokens=input_budget_tokens,
+            reserved_output_tokens=1,
+        ).resolve(
+            ModelContextCapabilities(
+                context_window_tokens=input_budget_tokens + 1,
+            ),
+        ),
+        estimator=ConservativeUtf8TokenEstimator(),
+    )
+
+
+def _message_tokens(messages: tuple[ModelMessage, ...]) -> int:
+    estimator = ConservativeUtf8TokenEstimator()
+    return sum(estimator.estimate_message(message) for message in messages)
 
 
 @pytest.mark.asyncio
@@ -937,3 +964,62 @@ def test_loop_requires_a_positive_step_limit() -> None:
             tool_snapshot=_snapshot(tool),
             max_tool_result_chars=1,
         )
+
+
+@pytest.mark.asyncio
+async def test_loop_uses_context_snapshot_request_when_builder_is_configured() -> None:
+    provider = FakeModelProvider(
+        responses=(ModelResponse(text="Hello!", tool_calls=()),),
+    )
+    tool = CountingEchoTool()
+    old_history = (
+        ModelMessage(role=ModelMessageRole.USER, content="old question"),
+        ModelMessage(role=ModelMessageRole.ASSISTANT, content="old answer"),
+    )
+    current_message = _user_message()
+    estimator = ConservativeUtf8TokenEstimator()
+    system_prompt = "Be helpful."
+    fixed_tokens = estimator.estimate_system_prompt(system_prompt) + sum(
+        estimator.estimate_tool_definition(tool_definition)
+        for tool_definition in _snapshot(tool).model_tools
+    )
+
+    result = await _loop(
+        provider,
+        tool,
+        context_builder=_context_builder(
+            fixed_tokens + _message_tokens((current_message,)),
+        ),
+    ).run(
+        model_name="fake-model",
+        system_prompt=system_prompt,
+        messages=old_history + (current_message,),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert provider.requests[0].messages == (current_message,)
+    assert provider.requests[0].tools == _snapshot(tool).model_tools
+
+
+@pytest.mark.asyncio
+async def test_loop_fails_without_calling_the_model_when_context_exceeds_budget() -> (
+    None
+):
+    provider = FakeModelProvider()
+    tool = CountingEchoTool()
+
+    result = await _loop(
+        provider,
+        tool,
+        context_builder=_context_builder(1),
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+    )
+
+    assert result.status is RunStatus.FAILED
+    assert result.error == "context budget exceeded"
+    assert result.steps_used == 0
+    assert result.messages == (_user_message(),)
+    assert provider.requests == ()

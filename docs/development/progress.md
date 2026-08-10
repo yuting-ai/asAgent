@@ -1801,3 +1801,29 @@
 ### 下一步
 
 - 在用户确认后，实现阶段 4 的下一最小任务：让 AgentLoop 通过 Context Builder 在每次模型调用前创建并消费 ContextSnapshot；本次不开始该任务。
+
+## 2026-08-10 阶段 4 AgentLoop ContextSnapshot 接入工作记录
+
+### 完成
+
+- `AgentLoop` 现可选注入 `ContextBuilder`；注入后，每一个模型决策步骤都先构建新的不可变 `ContextSnapshot`，并且 `ModelProvider.complete()` 只接收其中的 `request`。
+- Context Builder 以当前完整内存历史重建快照，因此工具回合后的下一次模型调用也重新应用预算与完整工具链选择；Loop 自己继续保留完整运行历史用于执行结果和审计。
+- `ContextBudgetExceededError` 在模型调用前收敛为 `FAILED`、安全错误文本 `context budget exceeded`，不发布 `model.requested`，也不触发 Provider 网络调用。
+- 未注入 Builder 时保留既有请求构造路径。当前尚无 Provider Profile 的 context window 配置，故不硬编码默认窗口；后续组合根会显式注入 Builder 后再让实际路径默认启用。
+
+### 验证
+
+- 检查：运行 AgentLoop 定向单元测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 181 个测试通过，114 个文件格式正确，110 个源码文件 Ruff 与 strict mypy 无问题。
+
+### 决策变化
+
+- 无；本次落实 DEC-058 的“快照确定模型可见内容”，未硬编码模型窗口，也未改变 Summary/Memory 边界。
+
+### 风险或问题
+
+- CLI 与持久化 Runtime 尚未从 Profile/用户设置解析 context window 和预算，因此当前真实运行仍沿用未注入 Builder 的兼容路径；Snapshot 也尚未持久化或作为调试信息导出。
+
+### 下一步
+
+- 在用户确认后，实现阶段 4 的下一最小任务：为 Provider Profile 增加显式 context window 能力配置，并在 CLI/Runtime 组合根默认注入 ContextBuilder；本次不开始该任务。

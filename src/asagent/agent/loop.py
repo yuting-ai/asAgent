@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from asagent.agent.cancellation import RunCancellationToken
+from asagent.agent.context_builder import (
+    ContextBudgetExceededError,
+    ContextBuilder,
+)
 from asagent.core.event_publisher import EventPublisher
 from asagent.core.ids import ConversationId, EventId, RunId, ToolCallId
 from asagent.core.run_event import RunEvent
@@ -70,6 +74,7 @@ class AgentLoop:
         clock: Callable[[], datetime] | None = None,
         tool_call_recorder: ToolCallRecorder | None = None,
         tool_call_id_factory: Callable[[], ToolCallId] | None = None,
+        context_builder: ContextBuilder | None = None,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps must be positive")
@@ -91,6 +96,7 @@ class AgentLoop:
         self._clock = clock
         self._tool_call_recorder = tool_call_recorder
         self._tool_call_id_factory = tool_call_id_factory
+        self._context_builder = context_builder
 
     async def run(
         self,
@@ -183,16 +189,22 @@ class AgentLoop:
                 if self._is_cancelled(cancellation_token):
                     return await result(RunStatus.CANCELLED, None)
 
+                try:
+                    request = self._build_model_request(
+                        model_name=model_name,
+                        system_prompt=system_prompt,
+                        history=tuple(history),
+                    )
+                except ContextBudgetExceededError:
+                    return await result(
+                        RunStatus.FAILED,
+                        None,
+                        "context budget exceeded",
+                    )
+
                 await publish("model.requested", {"step": next_step})
                 try:
-                    response = await self._model.complete(
-                        ModelRequest(
-                            model=model_name,
-                            system_prompt=system_prompt,
-                            messages=tuple(history),
-                            tools=self._tool_snapshot.model_tools,
-                        ),
-                    )
+                    response = await self._model.complete(request)
                 except ProviderTimeoutError:
                     if self._is_cancelled(cancellation_token):
                         return await result(RunStatus.CANCELLED, None)
@@ -308,6 +320,28 @@ class AgentLoop:
                 steps_used=steps_used,
                 error="tool call recording failed",
             )
+
+    def _build_model_request(
+        self,
+        *,
+        model_name: str,
+        system_prompt: str,
+        history: tuple[ModelMessage, ...],
+    ) -> ModelRequest:
+        if self._context_builder is None:
+            return ModelRequest(
+                model=model_name,
+                system_prompt=system_prompt,
+                messages=history,
+                tools=self._tool_snapshot.model_tools,
+            )
+
+        return self._context_builder.build(
+            model=model_name,
+            system_prompt=system_prompt,
+            history=history,
+            tools=self._tool_snapshot.model_tools,
+        ).request
 
     async def _record_tool_call(
         self,
