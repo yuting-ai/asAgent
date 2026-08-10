@@ -515,7 +515,7 @@ Repository 接口属于 Core，SQLite 实现属于 Storage。事务边界由 Cha
 
 阶段 1 的 `InMemoryConversationRepository` 位于 `storage`，是 `ConversationRepository` 的进程内适配器，而不是 Core 的一部分。它按 `conversation_id` 覆盖保存 Conversation，按用户筛选 Conversation，并按追加顺序返回同一 Conversation 的用户可见 Message；向未保存的 Conversation 追加 Message 会明确失败，避免产生孤儿 Message。数据只存活到当前 Python 进程结束，阶段 3 的 SQLite 实现将替换这一适配器而不改变上层 Repository 依赖。
 
-阶段 3 的 `storage.sqlite.conversation_repository.SqliteConversationRepository` 是首个持久化 `ConversationRepository` 实现。它只接收已经迁移的 SQLite 文件路径，不推导或创建用户目录；未来组合根负责由 `AppPaths.data_dir` 传入实际路径并管理迁移。实现使用 SQLAlchemy Core 的异步 `aiosqlite` 方言，显式 `aclose()` 释放连接资源，并对每个连接启用 foreign keys。Conversation 按 `created_at`、稳定 ID 排序，Message 由数据库分配 Conversation 内 `sequence` 后读取。SQLite 不能保留时区信息，因此该适配器在写入和读取边界统一将时间规范化为 UTC-aware `datetime`。
+阶段 3 的 `storage.sqlite.conversation_repository.SqliteConversationRepository` 是首个持久化 `ConversationRepository` 实现。它只接收已经迁移的 SQLite 文件路径，不推导或创建用户目录；未来组合根负责由 `AppPaths.data_dir` 传入实际路径并管理迁移。`storage.sqlite.connection.create_sqlite_async_engine()` 是运行时连接的唯一工厂：每个连接启用 foreign keys、WAL、5 秒 busy timeout 与 `synchronous = FULL`。Conversation 按 `created_at`、稳定 ID 排序，Message 由数据库分配 Conversation 内 `sequence` 后读取。SQLite 不能保留时区信息，因此该适配器在写入和读取边界统一将时间规范化为 UTC-aware `datetime`。运行时连接的集成测试固定了这些 PRAGMA，以及异常事务回滚和短暂写锁下等待后提交的行为。
 
 `run_events` 至少对 `(run_id, sequence)` 建立唯一约束。创建用户消息与 Run 时需要一个明确事务边界，避免 API 重试后产生孤立消息或重复 Run。
 

@@ -405,6 +405,16 @@
 - 影响：持久化 Conversation 和 Message 可在重启后保持 UTC 时间语义；未来 PostgreSQL 适配器仍必须遵守同一 UTC 领域约定，但可使用原生时区类型。
 - 替代方案：让各调用方自行处理时区、回读 naive datetime、或将 SQLite 原始字符串直接暴露给 Core；当前均不采用。
 
+### DEC-048：SQLite 运行时连接使用 WAL、有限锁等待与 FULL 同步
+
+- 日期：2026-08-10
+- 状态：已确认
+- 背景：阶段 3 的 Repository 会有多个连接及未来并发写入；SQLite 的外键、journal mode、锁等待与同步策略若分散在各 Repository，行为会随入口不一致且难以测试。
+- 决策：所有运行时异步 SQLite Engine 经 `storage.sqlite.connection.create_sqlite_async_engine()` 创建，并在每个连接建立时设置 `foreign_keys = ON`、`journal_mode = WAL`、`busy_timeout = 5000` 毫秒和 `synchronous = FULL`。事务由调用方显式使用 SQLAlchemy 异步事务上下文管理；短暂写锁时后续写者在 busy timeout 内等待，而非立即失败。
+- 原因：foreign keys 保持关系完整性；WAL 改善读写并存；有限等待吸收短暂单写者竞争且不无限挂起；个人助手优先数据耐久性，故选择 FULL 而非降低同步级别。集中工厂避免每个 Repository 复制或遗漏连接设置。
+- 影响：SQLite Repository 只依赖该工厂，不自行注册 PRAGMA；运行时集成测试验证连接参数、异常回滚与锁等待后的写入。更长时间的锁冲突仍在 5 秒后报错，未来入口负责将其转换为可理解的 Run/API 失败；跨进程策略、业务级重试与 Run 的原子事务边界仍是后续任务。
+- 替代方案：默认 rollback journal、连接遇锁立即失败、无限等待、`synchronous = NORMAL`，或让各 Repository 单独配置 PRAGMA；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

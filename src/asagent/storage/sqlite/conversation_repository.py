@@ -1,51 +1,20 @@
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, cast
 
-from sqlalchemy import event, func, select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.engine import URL
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from sqlalchemy.pool import ConnectionPoolEntry
 
 from asagent.core.conversation import Conversation
 from asagent.core.ids import ConversationId, MessageId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
+from asagent.storage.sqlite.connection import create_sqlite_async_engine
 from asagent.storage.sqlite.schema import conversations, messages, users
-
-
-class _Cursor(Protocol):
-    def close(self) -> None: ...
-
-    def execute(self, operation: str) -> object: ...
-
-
-class _SqliteDbApiConnection(Protocol):
-    def cursor(self) -> _Cursor: ...
-
-
-def _enable_foreign_keys(
-    dbapi_connection: object,
-    _connection_record: ConnectionPoolEntry,
-) -> None:
-    connection = cast(_SqliteDbApiConnection, dbapi_connection)
-    cursor = connection.cursor()
-
-    try:
-        cursor.execute("PRAGMA foreign_keys = ON")
-    finally:
-        cursor.close()
 
 
 class SqliteConversationRepository:
     def __init__(self, database_path: Path) -> None:
-        database_url = URL.create(
-            "sqlite+aiosqlite",
-            database=str(database_path),
-        )
-        self._engine: AsyncEngine = create_async_engine(database_url)
-        event.listen(self._engine.sync_engine, "connect", _enable_foreign_keys)
+        self._engine = create_sqlite_async_engine(database_path)
 
     async def aclose(self) -> None:
         await self._engine.dispose()
