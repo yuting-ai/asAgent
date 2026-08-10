@@ -1853,3 +1853,29 @@
 ### 下一步
 
 - 在用户确认后，执行真实 Provider 多轮人工验收，观察工具调用、上下文连续性、长输出与持久化 Run 审计；本次不开始该任务。
+
+## 2026-08-10 阶段 4 真实 Provider 多轮人工验收记录
+
+### 完成
+
+- 用户以真实 DeepSeek Profile 在持久化 Conversation `conv_3a3ad645dc6040798920d6c9ee019e3d` 完成四轮对话。
+- 模型在后续回合正确保持临时代号“蓝鲸-42”，并在明确要求时调用 Calculator 得到 `123 × 456 = 56088`；之后完成十条安全设计清单与最终回顾，未在要求禁止时调用工具。
+- SQLite 查询确认四个 Run 均为 `completed`。Calculator Run `run_018f32d1e0054c89a0c5bc371b55031e` 保存 `builtin.calculator`、原始结果 `56088` 且无错误。
+- 该工具 Run 的 RunEvent 严格按 sequence 保存启动、两次模型请求/完成、工具请求/完成及完成事件，共八条，与既有持久化工具回合契约一致。
+
+### 验证
+
+- 检查：真实 `--persistent --profile deepseek --secret-env ASAGENT_MODEL_API_KEY` 多轮 CLI 会话，以及 SQLite 的 `runs`、`tool_calls` 与 `run_events` 查询。
+- 结果：通过；真实模型的上下文连续性、工具选择、长输出与持久化审计均符合当前 Runtime 行为。
+
+### 决策变化
+
+- 无；本次是人工体验验收，不改变 DEC-058/DEC-059 的 Context Builder 与模型能力配置边界。
+
+### 风险或问题
+
+- 当前真实 CLI 仍未自动注入 ContextBuilder，因此该验收不覆盖实际 token 裁剪、超预算失败或 ContextSnapshot 调试输出；长 Conversation 在现阶段仍会完整送入模型。
+
+### 下一步
+
+- 在用户确认后，评估本次体验是否暴露新的 Context 问题；若无阻塞问题，阶段 4 的基础建设到此收束，后续 Context 功能只在实际需要时以单独任务推进，不提前实现摘要或记忆。
