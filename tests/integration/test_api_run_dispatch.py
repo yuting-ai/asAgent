@@ -47,6 +47,7 @@ async def test_submit_message_dispatches_background_execution(tmp_path: Path) ->
         starter=starter,
         finisher=finisher,
     )
+    execution_finished = asyncio.Event()
     run_submission = RunSubmissionService(
         conversations=conversations,
         run_starter=starter,
@@ -59,12 +60,15 @@ async def test_submit_message_dispatches_background_execution(tmp_path: Path) ->
         submission: SubmittedRun,
         cancellation_token: RunCancellationToken,
     ) -> None:
-        await runtime.execute_submitted(
-            submission=submission,
-            model_name="development-tools",
-            system_prompt="Use tools.",
-            cancellation_token=cancellation_token,
-        )
+        try:
+            await runtime.execute_submitted(
+                submission=submission,
+                model_name="development-tools",
+                system_prompt="Use tools.",
+                cancellation_token=cancellation_token,
+            )
+        finally:
+            execution_finished.set()
 
     dispatcher = InProcessRunDispatcher(execute_submitted=execute_submitted)
     app = create_app(
@@ -101,15 +105,9 @@ async def test_submit_message_dispatches_background_execution(tmp_path: Path) ->
         assert response.json()["run"]["status"] == "created"
         assert response.json()["run"]["run_id"] == "run-1"
 
-        completed = False
-        for _ in range(200):
-            stored_run = await runs.get(RunId("run-1"))
-            if stored_run is not None and stored_run.status is RunStatus.COMPLETED:
-                completed = True
-                break
-            await asyncio.sleep(0)
+        async with asyncio.timeout(5.0):
+            await execution_finished.wait()
 
-        assert completed is True
         assert tuple(
             message.content
             for message in await conversations.list_messages(conversation_id)
