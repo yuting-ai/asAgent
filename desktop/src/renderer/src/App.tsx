@@ -57,6 +57,19 @@ function conversationLabel(title: string | null): string {
   return title ?? 'New conversation'
 }
 
+function orderConversations(conversations: ConversationSummary[]): ConversationSummary[] {
+  return [...conversations].sort((left, right) => {
+    const updatedAtDifference =
+      new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
+
+    if (updatedAtDifference !== 0) {
+      return updatedAtDifference
+    }
+
+    return right.conversation_id.localeCompare(left.conversation_id)
+  })
+}
+
 function formatThreadTime(iso: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) {
@@ -203,7 +216,7 @@ export default function App(): React.JSX.Element {
 
         setAppInfo(info)
         setBackendStatus(status.status)
-        setConversations(items)
+        setConversations(orderConversations(items))
         setSelectedConversationId(items[0]?.conversation_id ?? null)
       } catch {
         if (!cancelled) {
@@ -359,7 +372,7 @@ export default function App(): React.JSX.Element {
 
     try {
       const conversation = await window.desktop.createConversation()
-      setConversations((current) => [...current, conversation])
+      setConversations((current) => orderConversations([...current, conversation]))
       setSelectedConversationId(conversation.conversation_id)
       setRunActivity(null)
       setActivityExpanded(false)
@@ -388,10 +401,12 @@ export default function App(): React.JSX.Element {
       const submitted = await window.desktop.submitMessage(conversationId, content)
       setMessages((current) => [...current, submitted.message])
       setConversations((current) =>
-        current.map((conversation) =>
-          conversation.conversation_id === submitted.conversation.conversation_id
-            ? submitted.conversation
-            : conversation
+        orderConversations(
+          current.map((conversation) =>
+            conversation.conversation_id === submitted.conversation.conversation_id
+              ? submitted.conversation
+              : conversation
+          )
         )
       )
       setDraft('')

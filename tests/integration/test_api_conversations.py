@@ -135,16 +135,16 @@ async def test_list_conversations_returns_only_local_user_metadata(
 
     payload = response.json()
     assert [item["conversation_id"] for item in payload] == [
-        "conv-first",
         "conv-second",
+        "conv-first",
     ]
     assert [datetime.fromisoformat(item["created_at"]) for item in payload] == [
-        first.created_at,
         second.created_at,
+        first.created_at,
     ]
     assert [datetime.fromisoformat(item["updated_at"]) for item in payload] == [
-        first.updated_at,
         second.updated_at,
+        first.updated_at,
     ]
     assert all("user_id" not in item for item in payload)
     assert all("messages" not in item for item in payload)

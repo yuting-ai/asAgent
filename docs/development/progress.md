@@ -6,7 +6,7 @@
 - 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建（响应含可空 title，创建请求仍禁止 title）、可见 Message 查询/提交、按 Run ID 查询状态、协作取消，以及基于持久化 RunEvent 的认证 SSE 回放/实时观察。首条消息提交会在 RunStarter 同事务中生成会话标题。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-11
-- 当前目标：桌面 Chat 侧栏已能在首条消息提交后立即显示截断标题；下一项在用户确认后继续阶段 7 体验回顾与下一真实用户价值路径。
+- 当前目标：桌面 Chat 已能显示并按最近活跃排序的会话；下一项在用户确认后继续阶段 7 体验回顾与下一真实用户价值路径。
 
 ## 2. 已完成
 
@@ -2757,3 +2757,19 @@
 ### 下一步
 
 - 在用户确认后，继续阶段 7 体验回顾并领取下一项真实用户价值路径；不提前实现手动标题编辑、模型摘要标题或设置页。
+
+## 2026-08-11 阶段 7 最近活跃会话排序工作记录
+
+### 完成
+
+- SQLite `ConversationRepository` 与 Local API 的 Conversation 列表现按 `updated_at` 倒序、再按稳定 Conversation ID 倒序返回。
+- 桌面 Renderer 在创建 Conversation 或提交 Message 后使用相同规则更新本地列表，当前会话无需刷新即可移至侧栏顶部。
+
+### 验证
+
+- 检查：Conversation Repository/API 定向测试、Ruff、strict mypy、完整 `scripts/check.sh`、Electron 的格式化、类型检查、ESLint、Vitest 与生产构建。
+- 结果：通过；定向 22 个 Python 测试、完整 Python 门禁 281 个测试、桌面 Vitest 6 个测试及桌面构建均成功。
+
+### 下一步
+
+- 在用户确认后，选择下一条阶段 7 真实用户价值路径；优先评估持久化 Activity 总览，而不提前实现权限设置、搜索或 Connector。

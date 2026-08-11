@@ -93,6 +93,35 @@ async def test_save_replaces_conversation_with_same_stable_id(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_lists_most_recently_updated_conversations_first(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    user_id = UserId("local-user")
+    older = _conversation(
+        ConversationId("conversation-older"),
+        user_id,
+        updated_at=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+    newer = _conversation(
+        ConversationId("conversation-newer"),
+        user_id,
+        updated_at=datetime(2026, 8, 9, 12, 1, tzinfo=UTC),
+    )
+    repository = SqliteConversationRepository(database_path)
+
+    try:
+        await repository.save(older)
+        await repository.save(newer)
+
+        assert await repository.list_for_user(user_id) == (newer, older)
+    finally:
+        await repository.aclose()
+
+
+@pytest.mark.asyncio
 async def test_normalizes_persisted_datetimes_to_utc(tmp_path: Path) -> None:
     database_path = tmp_path / "asagent.sqlite3"
     _upgrade(database_path)

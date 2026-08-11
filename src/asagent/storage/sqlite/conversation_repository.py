@@ -42,8 +42,8 @@ class SqliteConversationRepository:
                 select(conversations)
                 .where(conversations.c.user_id == str(user_id))
                 .order_by(
-                    conversations.c.created_at.asc(),
-                    conversations.c.conversation_id.asc(),
+                    conversations.c.updated_at.desc(),
+                    conversations.c.conversation_id.desc(),
                 ),
             )
             rows = result.mappings().all()

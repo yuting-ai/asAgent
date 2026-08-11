@@ -589,6 +589,7 @@
 - 决策：Conversation 保存可空 `title`。创建 API 继续拒绝请求体中的 `title`；首次提交用户消息时，提交服务将文本规范化并截断至 60 个字符生成标题，已有标题永不自动覆盖。标题更新、Conversation `updated_at`、UserMessage 与 CREATED Run 通过既有 RunStarter 在同一 SQLite 事务中写入。
 - 原因：侧栏需要即时、稳定且零模型成本的可读标签；原子写入避免“消息/Run 已创建但标题未更新”的部分成功状态，并且不为标题专门引入新的 API、后台模型调用或编辑工作流。
 - 影响：历史 Conversation 的 `title` 可以为 null，桌面显示 `New conversation`。未来手动改名或模型摘要标题必须以独立的明确操作覆盖该字段，不能改变当前自动生成语义。
+- 补充：`ConversationRepository.list_for_user()` 以 `updated_at` 倒序、`conversation_id` 倒序提供稳定的最近活跃排序；提交服务在写入初始 Message/Run 时同步更新时间，桌面以同一规则立即重排本地列表。
 - 替代方案：创建时由客户端提供 title、每轮消息重写标题、用模型异步生成摘要标题、或仅在桌面内保留未持久化标题；当前均不采用。
 
 ### DEC-062 实施补充：固定写入操作沿用 Main 私有 Token
