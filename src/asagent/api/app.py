@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from asagent.agent.run_submission import (
     ConversationAccessDeniedError,
     RunSubmissionService,
+    SubmittedRun,
     UnknownConversationError,
 )
 from asagent.api.auth import BearerTokenAuthenticator, LocalApiToken
@@ -107,6 +108,7 @@ def create_app(
     access_token: LocalApiToken,
     conversations: ConversationRepository,
     run_submission: RunSubmissionService,
+    dispatch_submitted_run: Callable[[SubmittedRun], object],
     conversation_id_factory: Callable[[], ConversationId] | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
@@ -184,6 +186,8 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="conversation not found",
             ) from error
+
+        dispatch_submitted_run(submission)
 
         return SubmitMessageResponse(
             message=MessageResponse.from_message(submission.user_message),

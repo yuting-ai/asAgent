@@ -45,8 +45,13 @@ class InProcessRunDispatcher:
     ) -> None:
         self._execute_submitted = execute_submitted
         self._tokens: dict[RunId, RunCancellationToken] = {}
+        self._tasks: dict[RunId, asyncio.Task[RunDispatchOutcome]] = {}
+        self._closed = False
 
     def dispatch(self, submission: SubmittedRun) -> RunDispatchHandle:
+        if self._closed:
+            raise RuntimeError("run dispatcher is closed")
+
         run_id = submission.run.run_id
         if run_id in self._tokens:
             raise ValueError("run is already active")
@@ -60,6 +65,7 @@ class InProcessRunDispatcher:
             ),
             name=f"asagent-run-{run_id}",
         )
+        self._tasks[run_id] = task
         return RunDispatchHandle(run_id=run_id, task=task)
 
     def cancel(self, run_id: RunId) -> bool:
@@ -72,6 +78,30 @@ class InProcessRunDispatcher:
 
     def is_active(self, run_id: RunId) -> bool:
         return run_id in self._tokens
+
+    async def aclose(self, *, timeout_seconds: float = 5.0) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        if self._closed:
+            return
+
+        self._closed = True
+        for token in self._tokens.values():
+            token.cancel()
+
+        tasks = tuple(self._tasks.values())
+        if not tasks:
+            return
+
+        _, pending = await asyncio.wait(
+            tasks,
+            timeout=timeout_seconds,
+        )
+        for task in pending:
+            task.cancel()
+
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
     async def _execute(
         self,
@@ -91,6 +121,7 @@ class InProcessRunDispatcher:
             )
         finally:
             self._tokens.pop(run_id, None)
+            self._tasks.pop(run_id, None)
 
         return RunDispatchOutcome(
             run_id=run_id,

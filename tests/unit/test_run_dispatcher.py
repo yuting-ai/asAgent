@@ -147,3 +147,46 @@ async def test_dispatch_captures_executor_error_and_cleans_up() -> None:
     assert outcome.error is expected_error
     assert outcome.cancel_requested is False
     assert dispatcher.is_active(RunId("run-1")) is False
+
+
+@pytest.mark.asyncio
+async def test_aclose_cancels_active_runs_and_cleans_up() -> None:
+    started = asyncio.Event()
+
+    async def execute(
+        submission: SubmittedRun,
+        cancellation_token: RunCancellationToken,
+    ) -> None:
+        del submission
+        started.set()
+        while not cancellation_token.is_cancelled:
+            await asyncio.sleep(0)
+
+    dispatcher = InProcessRunDispatcher(execute_submitted=execute)
+    handle = dispatcher.dispatch(_submission())
+
+    await started.wait()
+    assert dispatcher.is_active(RunId("run-1")) is True
+
+    await dispatcher.aclose()
+    outcome = await handle.wait()
+
+    assert outcome.cancel_requested is True
+    assert outcome.error is None
+    assert dispatcher.is_active(RunId("run-1")) is False
+
+
+@pytest.mark.asyncio
+async def test_aclose_rejects_later_dispatch() -> None:
+    async def execute(
+        submission: SubmittedRun,
+        cancellation_token: RunCancellationToken,
+    ) -> None:
+        del submission
+        del cancellation_token
+
+    dispatcher = InProcessRunDispatcher(execute_submitted=execute)
+    await dispatcher.aclose()
+
+    with pytest.raises(RuntimeError, match="run dispatcher is closed"):
+        dispatcher.dispatch(_submission())

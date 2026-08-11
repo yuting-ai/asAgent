@@ -6,7 +6,7 @@ import pytest
 from alembic.config import Config
 
 from alembic import command
-from asagent.agent.run_submission import RunSubmissionService
+from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
 from asagent.core.conversation import Conversation
@@ -30,6 +30,10 @@ class UnusedRunStarter:
     ) -> None:
         del user_message, run
         raise AssertionError("run submission is not used by this test")
+
+
+def _discard_submission(submission: SubmittedRun) -> None:
+    del submission
 
 
 def _unused_run_submission(
@@ -95,6 +99,7 @@ async def test_list_conversations_returns_only_local_user_metadata(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
         run_submission=_unused_run_submission(repository),
+        dispatch_submitted_run=_discard_submission,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -145,6 +150,7 @@ async def test_list_conversations_requires_the_current_local_api_token(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
         run_submission=_unused_run_submission(repository),
+        dispatch_submitted_run=_discard_submission,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -192,6 +198,7 @@ async def test_list_conversation_messages_returns_visible_messages_in_sequence_o
         access_token=LocalApiToken("test-token"),
         conversations=repository,
         run_submission=_unused_run_submission(repository),
+        dispatch_submitted_run=_discard_submission,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -257,6 +264,7 @@ async def test_list_conversation_messages_hides_unknown_or_other_user_conversati
         access_token=LocalApiToken("test-token"),
         conversations=repository,
         run_submission=_unused_run_submission(repository),
+        dispatch_submitted_run=_discard_submission,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -290,6 +298,7 @@ async def test_list_conversation_messages_requires_the_current_local_api_token(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
         run_submission=_unused_run_submission(repository),
+        dispatch_submitted_run=_discard_submission,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -322,6 +331,7 @@ async def test_create_conversation_persists_an_empty_local_conversation(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
         run_submission=_unused_run_submission(repository),
+        dispatch_submitted_run=_discard_submission,
         conversation_id_factory=lambda: conversation_id,
         clock=lambda: created_at,
     )
@@ -370,6 +380,7 @@ async def test_create_conversation_rejects_unknown_request_fields(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
         run_submission=_unused_run_submission(repository),
+        dispatch_submitted_run=_discard_submission,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -404,6 +415,7 @@ async def test_create_conversation_requires_the_current_local_api_token(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
         run_submission=_unused_run_submission(repository),
+        dispatch_submitted_run=_discard_submission,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -450,6 +462,7 @@ async def test_submit_message_creates_a_visible_message_and_created_run(
             new_run_id=lambda: RunId("run-created"),
             new_message_id=lambda: MessageId("msg-created"),
         ),
+        dispatch_submitted_run=_discard_submission,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -539,6 +552,7 @@ async def test_submit_message_rejects_invalid_request_bodies(
             new_run_id=lambda: RunId("run-created"),
             new_message_id=lambda: MessageId("msg-created"),
         ),
+        dispatch_submitted_run=_discard_submission,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -603,6 +617,7 @@ async def test_submit_message_hides_unknown_or_other_user_conversations(
             new_run_id=lambda: RunId("run-created"),
             new_message_id=lambda: MessageId("msg-created"),
         ),
+        dispatch_submitted_run=_discard_submission,
     )
     transport = httpx.ASGITransport(app=app)
 

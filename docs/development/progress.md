@@ -6,7 +6,7 @@
 - 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建与可见 Message 查询；运行、取消与 SSE 尚未实现。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-11
-- 当前目标：Local API 已能持久化用户消息与 CREATED Run；下一项在用户确认后，设计 CREATED Run 的最小执行调度边界，避免在 HTTP 请求中阻塞模型调用。
+- 当前目标：Local API 已能在后台执行已提交 Run 并持久化最终回答；下一项在用户确认后，设计 Run 查询与取消的最小 HTTP 契约，随后再接入 SSE。
 
 ## 2. 已完成
 
@@ -2416,3 +2416,30 @@
 ### 下一步
 
 - 在用户确认后，将 InProcessRunDispatcher 以一个简单的组合根执行函数接到 PersistentAgentRuntime，并保持异常由 Dispatcher Outcome 观察；不新增 PersistentRunExecutor。本次不开始该任务。
+
+## 2026-08-11 阶段 6 后台 Run 执行 Local API 工作记录
+
+### 完成
+
+- `POST /api/v1/conversations/{conversation_id}/messages` 在 Submission Service 原子创建 USER Message 与 CREATED Run 后，调用注入的 `InProcessRunDispatcher` 安排后台执行；HTTP 不等待模型，因此始终立即返回 201 与创建时的 Run 表面。
+- 开发 `serve` 组合根现在使用 SQLite Repository、Starter、Finisher、持久化离线 `development-tools` Runtime 和 Dispatcher 形成端到端闭环；后台 Run 会持久化终态、用户可见 AssistantMessage、RunEvent 与 ToolCall。
+- Dispatcher 现在保存活跃 Task；`aclose()` 拒绝后续调度，对活跃 Run 请求协作取消、有限等待并在必要时取消剩余 Task。服务退出按 Dispatcher、Finisher、Starter、Run Repository、Conversation Repository 的顺序关闭，避免任务访问已关闭 SQLite。
+- 本任务明确 `serve` 仅使用离线 development runtime；真实 `--profile` 服务端组合、HTTP Run 取消、Run 查询、SSE、崩溃恢复与跨进程执行 claim 均未提前实现。
+
+### 验证
+
+- 检查：运行 Dispatcher、API dispatch/health/server/conversations/OpenAPI 定向测试，随后运行 Ruff、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；定向 34 个测试、完整 266 个测试通过，Ruff 格式化与检查、strict mypy、锁文件检查均通过；mypy 检查 134 个源码文件。
+
+### 决策变化
+
+- 无；本次按 DEC-063 直接在 `serve` 组合根连接既有 Submission Service、Runtime 与 Dispatcher，不新增仅转发的执行包装层。
+
+### 风险或问题
+
+- Dispatcher 是进程内实现；进程崩溃或强制关闭后仍可能留下 CREATED Run，尚无持久化 claim、恢复或补齐终态机制。
+- 当前 API 只能提交并异步执行 Run，尚不能按 Run ID 查询状态、请求取消或订阅事件；客户端也无法仅凭 POST 响应获取最终文本。
+
+### 下一步
+
+- 在用户确认后，实现阶段 6 最小 Run 查询 API：按 local-user 与 Conversation 归属返回稳定 Run 身份、状态和时间；本次不开始 HTTP 取消或 SSE。

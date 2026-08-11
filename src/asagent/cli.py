@@ -10,9 +10,11 @@ from uuid import uuid4
 
 import httpx
 
+from asagent.agent.cancellation import RunCancellationToken
 from asagent.agent.loop import AgentLoop
 from asagent.agent.persistent_runtime import PersistentAgentRuntime
-from asagent.agent.run_submission import RunSubmissionService
+from asagent.agent.run_dispatcher import InProcessRunDispatcher
+from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
 from asagent.api.bootstrap import read_local_api_token
 from asagent.api.server import READY_PREFIX, LocalApiServer
@@ -499,20 +501,49 @@ async def _run_main(args: argparse.Namespace) -> None:
             alembic_config_path=_alembic_config_path(),
         )
         conversations = SqliteConversationRepository(database_path)
+        runs = SqliteRunRepository(database_path)
         starter = SqliteRunStarter(database_path)
+        finisher = SqliteRunFinisher(database_path)
+        runtime = build_persistent_development_runtime(
+            conversations=conversations,
+            runs=runs,
+            starter=starter,
+            finisher=finisher,
+        )
+        run_submission = RunSubmissionService(
+            conversations=conversations,
+            run_starter=starter,
+            now=now,
+            new_run_id=new_run_id,
+            new_message_id=new_message_id,
+        )
+        system_prompt = (
+            "You are asAgent's development assistant. Use the supplied tools when "
+            "they help answer the user."
+        )
+
+        async def execute_submitted(
+            submission: SubmittedRun,
+            cancellation_token: RunCancellationToken,
+        ) -> None:
+            await runtime.execute_submitted(
+                submission=submission,
+                model_name="development-tools",
+                system_prompt=system_prompt,
+                cancellation_token=cancellation_token,
+            )
+
+        dispatcher = InProcessRunDispatcher(
+            execute_submitted=execute_submitted,
+        )
 
         try:
             server = LocalApiServer(
                 create_app(
                     access_token=access_token,
                     conversations=conversations,
-                    run_submission=RunSubmissionService(
-                        conversations=conversations,
-                        run_starter=starter,
-                        now=now,
-                        new_run_id=new_run_id,
-                        new_message_id=new_message_id,
-                    ),
+                    run_submission=run_submission,
+                    dispatch_submitted_run=dispatcher.dispatch,
                 ),
                 host=args.host,
                 port=args.port,
@@ -521,7 +552,10 @@ async def _run_main(args: argparse.Namespace) -> None:
             print(f"{READY_PREFIX}{ready.to_json()}")
             await server.wait_closed()
         finally:
+            await dispatcher.aclose()
+            await finisher.aclose()
             await starter.aclose()
+            await runs.aclose()
             await conversations.aclose()
 
         return

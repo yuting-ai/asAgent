@@ -6,7 +6,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from asagent.agent.run_submission import RunSubmissionService
+from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
 from asagent.api.server import LocalApiServer
@@ -31,6 +31,10 @@ class UnusedRunStarter:
         raise AssertionError("run submission is not used by this test")
 
 
+def _discard_submission(submission: SubmittedRun) -> None:
+    del submission
+
+
 def _unused_run_submission(
     conversations: InMemoryConversationRepository,
 ) -> RunSubmissionService:
@@ -49,6 +53,7 @@ def _create_app() -> FastAPI:
         access_token=_TOKEN,
         conversations=conversations,
         run_submission=_unused_run_submission(conversations),
+        dispatch_submitted_run=_discard_submission,
     )
 
 

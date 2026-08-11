@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from asagent.agent.run_submission import RunSubmissionService
+from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
 from asagent.core.ids import MessageId, RunId
@@ -22,6 +22,10 @@ class UnusedRunStarter:
         raise AssertionError("run submission is not used by this test")
 
 
+def _discard_submission(submission: SubmittedRun) -> None:
+    del submission
+
+
 def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
     conversations = InMemoryConversationRepository()
     app = create_app(
@@ -34,6 +38,7 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
             new_run_id=lambda: RunId("unused-run"),
             new_message_id=lambda: MessageId("unused-message"),
         ),
+        dispatch_submitted_run=_discard_submission,
     )
 
     schema = app.openapi()
