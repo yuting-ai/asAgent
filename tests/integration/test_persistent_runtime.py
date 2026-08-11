@@ -8,7 +8,7 @@ from alembic.config import Config
 from alembic import command
 from asagent.agent.loop import AgentLoop
 from asagent.agent.persistent_runtime import PersistentAgentRuntime
-from asagent.agent.run_submission import RunSubmissionService
+from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.core.conversation import Conversation
 from asagent.core.ids import (
     ConversationId,
@@ -18,9 +18,11 @@ from asagent.core.ids import (
     ToolCallId,
     UserId,
 )
+from asagent.core.messages import UserMessage
+from asagent.core.run import Run
 from asagent.core.run_lifecycle import RunFinisher, RunStarter
 from asagent.core.run_status import RunStatus
-from asagent.models.contracts import ModelResponse, ModelToolCall
+from asagent.models.contracts import ModelMessageRole, ModelResponse, ModelToolCall
 from asagent.models.fake_provider import FakeModelProvider
 from asagent.models.tool_names import openai_compatible_tool_name
 from asagent.storage.event_publisher import RepositoryEventPublisher
@@ -316,6 +318,128 @@ async def test_rejects_unknown_conversation_before_model_call(
 
         assert provider.requests == ()
         assert await runs.get(RunId("run-1")) is None
+    finally:
+        await finisher.aclose()
+        await starter.aclose()
+        await runs.aclose()
+        await conversations.aclose()
+
+
+@pytest.mark.asyncio
+async def test_executes_an_existing_submission_without_creating_a_second_run(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    conversation_id = ConversationId("conversation-1")
+    conversations = SqliteConversationRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    starter = SqliteRunStarter(database_path)
+    finisher = SqliteRunFinisher(database_path)
+    provider = FakeModelProvider(
+        responses=(ModelResponse(text="Hello!", tool_calls=()),),
+    )
+    message_numbers = count(1)
+    run_submission = RunSubmissionService(
+        conversations=conversations,
+        run_starter=starter,
+        now=_clock,
+        new_run_id=lambda: RunId("run-1"),
+        new_message_id=lambda: MessageId(f"message-{next(message_numbers)}"),
+    )
+    runtime = PersistentAgentRuntime(
+        conversations=conversations,
+        run_submission=run_submission,
+        run_finisher=finisher,
+        loop=_loop(provider=provider, runs=runs),
+        now=_clock,
+        new_message_id=lambda: MessageId(f"message-{next(message_numbers)}"),
+    )
+
+    try:
+        await conversations.save(_conversation(conversation_id))
+        submission = await run_submission.submit(
+            conversation_id=conversation_id,
+            content="Hello",
+        )
+
+        result = await runtime.execute_submitted(
+            submission=submission,
+            model_name="fake-model",
+            system_prompt="Be helpful.",
+        )
+
+        assert result.run.status is RunStatus.COMPLETED
+        assert result.assistant_message is not None
+        assert result.assistant_message.content == "Hello!"
+        assert await runs.list_for_conversation(conversation_id) == (result.run,)
+        assert tuple(
+            message.content
+            for message in await conversations.list_messages(conversation_id)
+        ) == ("Hello", "Hello!")
+        assert provider.requests[0].messages[-1].content == "Hello"
+        assert provider.requests[0].messages[-1].role is ModelMessageRole.USER
+        assert await conversations.list_messages(conversation_id) == (
+            submission.user_message,
+            result.assistant_message,
+        )
+    finally:
+        await finisher.aclose()
+        await starter.aclose()
+        await runs.aclose()
+        await conversations.aclose()
+
+
+@pytest.mark.asyncio
+async def test_execute_submitted_rejects_non_created_runs(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    conversation_id = ConversationId("conversation-1")
+    conversations = SqliteConversationRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    starter = SqliteRunStarter(database_path)
+    finisher = SqliteRunFinisher(database_path)
+    provider = FakeModelProvider()
+    created_at = _clock()
+    submission = SubmittedRun(
+        user_message=UserMessage(
+            message_id=MessageId("message-1"),
+            conversation_id=conversation_id,
+            content="Hello",
+            created_at=created_at,
+        ),
+        run=Run(
+            run_id=RunId("run-1"),
+            conversation_id=conversation_id,
+            status=RunStatus.COMPLETED,
+            created_at=created_at,
+            updated_at=created_at,
+        ),
+    )
+
+    try:
+        await conversations.save(_conversation(conversation_id))
+
+        with pytest.raises(ValueError, match="can only execute a created run"):
+            await _runtime(
+                conversations=conversations,
+                runs=runs,
+                starter=starter,
+                finisher=finisher,
+                provider=provider,
+            ).execute_submitted(
+                submission=submission,
+                model_name="fake-model",
+                system_prompt="Be helpful.",
+            )
+
+        assert provider.requests == ()
+        assert await runs.list_for_conversation(conversation_id) == ()
+        assert await conversations.list_messages(conversation_id) == ()
     finally:
         await finisher.aclose()
         await starter.aclose()

@@ -2312,3 +2312,29 @@
 ### 下一步
 
 - 在用户确认后，设计并实现阶段 6 的最小 CREATED Run 执行调度边界：明确何时启动、如何持有/释放取消令牌、何时将 Runtime 结果持久化，以及 HTTP/SSE 如何只观察而不承担执行；本次不开始该任务。
+
+## 2026-08-11 Persistent Runtime 已提交 Run 执行边界工作记录
+
+### 完成
+
+- `PersistentAgentRuntime.run()` 现在仅负责通过 Submission Service 提交用户输入，随后委托新的 `execute_submitted()` 完成模型与工具执行。
+- `execute_submitted()` 只消费已经持久化的 `SubmittedRun`，并要求其 Run 状态为 `CREATED`；它不会再次创建用户 Message 或 Run。
+- 已验证直接执行已有提交时，模型上下文看见原始用户消息，数据库最终只保留一个 Run、一条原用户消息与正常的最终助手消息；非 CREATED 输入在任何模型调用前被拒绝。
+
+### 验证
+
+- 检查：运行 Persistent Runtime 集成测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；定向 6 个测试、完整 258 个测试通过，Ruff 格式化与检查、strict mypy、锁文件检查均通过；mypy 检查 131 个源码文件。
+
+### 决策变化
+
+- 无；本次只是将既有 Submission/执行生命周期显式化，为后续 API Dispatcher 消费已提交 Run 消除重复写入风险。
+
+### 风险或问题
+
+- `execute_submitted()` 假定调用方只传入已经由 Submission Service 原子持久化的对象；它不自行重新查询或领取 Run，也没有后台 Task、取消令牌注册、崩溃恢复或并发 claim 语义。
+- 当前 Local API 仍只创建 CREATED Run；在 Dispatcher 到位前，它不会自动产生模型回复。
+
+### 下一步
+
+- 在用户确认后，设计并实现阶段 6 的最小进程内 Run Dispatcher：从 API 收到 SubmittedRun 后创建受控后台 Task、持有并按 run_id 释放取消令牌、调用 `execute_submitted()`，但暂不实现 SSE；本次不开始该任务。

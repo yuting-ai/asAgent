@@ -193,7 +193,7 @@ Runtime 不直接：
 
 阶段 3 的 `agent.run_submission.RunSubmissionService` 是“提交用户输入”这一应用层边界：它读取指定 Conversation，可选校验预期 `user_id`，生成 `UserMessage` 与 `CREATED` Run，并只通过 `RunStarter` 原子写入后返回不可变 `SubmittedRun`。未知 Conversation 与用户不可访问 Conversation 以不同的内部错误表达，入口可按其安全策略映射为同一外部响应；Starter 写入失败原样传播，不伪造成功。它不调用模型、不发布事件、不完成 Run，也不导入 SQLite 或 FastAPI。
 
-`agent.persistent_runtime.PersistentAgentRuntime` 复用该 Submission Service，再读取用户可见历史、转换为 ModelMessage 并调用预先配置的 `AgentLoop`；最后无论 Loop 成功、失败、取消或达到步骤限制，都用 `RunFinisher` 原子保存终态 Run。仅 `COMPLETED` 且有最终文本时创建 AssistantMessage；`LIMIT_REACHED` 的文本可能来自未闭合工具回合，不能伪装为正常对话历史。Runtime 自己仅保留最终助手消息的 ID 工厂，避免 Service 同时负责两类消息身份。SQLite 组合根负责把 `SqliteRunStarter`、`SqliteRunFinisher`、`RepositoryEventPublisher` 和 `RepositoryToolCallRecorder` 注入该链路。
+`agent.persistent_runtime.PersistentAgentRuntime` 将提交与执行显式拆开：兼容入口 `run()` 先调用 Submission Service，再把结果委托给 `execute_submitted()`；后者只接受已有的 `SubmittedRun`，并只允许其中 Run 仍为 `CREATED`。它读取用户可见历史、转换为 ModelMessage 并调用预先配置的 `AgentLoop`；最后无论 Loop 成功、失败、取消或达到步骤限制，都用 `RunFinisher` 原子保存终态 Run。仅 `COMPLETED` 且有最终文本时创建 AssistantMessage；`LIMIT_REACHED` 的文本可能来自未闭合工具回合，不能伪装为正常对话历史。Runtime 自己仅保留最终助手消息的 ID 工厂，避免 Service 同时负责两类消息身份。这个执行入口为后续 Dispatcher 消费 API 已提交 Run 提供边界，避免重复创建用户消息或 Run；它本身不调度后台 Task。SQLite 组合根负责把 `SqliteRunStarter`、`SqliteRunFinisher`、`RepositoryEventPublisher` 和 `RepositoryToolCallRecorder` 注入该链路。
 
 阶段 4 的 Context Builder 在每次模型调用前，从原始 Conversation、已确认的 Conversation Summary、用户记忆和本次工具 Snapshot 生成不可变 `ContextSnapshot`。Snapshot 明确记录模型本次实际可见的 system prompt、模型消息、工具定义、各组成部分的估算 Token 占用、预算、选中的 Message sequence/摘要身份和裁剪原因；Loop 只能消费该快照，不得在请求进行中由后台任务修改它。调试快照默认关闭且脱敏，不把用户文本、工具参数、结果或 Secret 写入 RunEvent。
 

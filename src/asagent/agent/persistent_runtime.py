@@ -4,7 +4,7 @@ from datetime import datetime
 
 from asagent.agent.cancellation import RunCancellationToken
 from asagent.agent.loop import AgentLoop
-from asagent.agent.run_submission import RunSubmissionService
+from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.core.ids import ConversationId, MessageId
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.repositories import ConversationRepository
@@ -53,7 +53,26 @@ class PersistentAgentRuntime:
             conversation_id=conversation_id,
             content=content,
         )
+        return await self.execute_submitted(
+            submission=submission,
+            model_name=model_name,
+            system_prompt=system_prompt,
+            cancellation_token=cancellation_token,
+        )
+
+    async def execute_submitted(
+        self,
+        *,
+        submission: SubmittedRun,
+        model_name: str,
+        system_prompt: str,
+        cancellation_token: RunCancellationToken | None = None,
+    ) -> PersistentAgentRunResult:
         initial_run = submission.run
+        conversation_id = initial_run.conversation_id
+
+        if initial_run.status is not RunStatus.CREATED:
+            raise ValueError("can only execute a created run")
 
         history = await self._conversations.list_messages(conversation_id)
         loop_result = await self._loop.run(
