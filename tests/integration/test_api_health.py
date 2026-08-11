@@ -3,13 +3,19 @@ import pytest
 
 from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
+from asagent.storage.in_memory_conversation_repository import (
+    InMemoryConversationRepository,
+)
 
 _TOKEN = LocalApiToken("test-token")
 
 
 @pytest.mark.asyncio
 async def test_health_endpoint_accepts_the_current_local_api_token() -> None:
-    app = create_app(access_token=_TOKEN)
+    app = create_app(
+        access_token=_TOKEN,
+        conversations=InMemoryConversationRepository(),
+    )
     transport = httpx.ASGITransport(app=app)
 
     async with httpx.AsyncClient(
@@ -38,7 +44,10 @@ async def test_health_endpoint_accepts_the_current_local_api_token() -> None:
 async def test_health_endpoint_rejects_invalid_local_api_credentials(
     headers: dict[str, str],
 ) -> None:
-    app = create_app(access_token=_TOKEN)
+    app = create_app(
+        access_token=_TOKEN,
+        conversations=InMemoryConversationRepository(),
+    )
     transport = httpx.ASGITransport(app=app)
 
     async with httpx.AsyncClient(

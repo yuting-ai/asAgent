@@ -2145,3 +2145,32 @@
 ### 下一步
 
 - 在用户确认后，实现阶段 6 的最小 Conversation HTTP 查询接口，并复用当前 Bearer 认证；本次不开始该任务。
+
+## 2026-08-11 阶段 6 Conversation 列表 Local API 工作记录
+
+### 完成
+
+- 新增认证后的 `GET /api/v1/conversations`，固定只查询 `local-user` 的 Conversation，并仅返回 `conversation_id`、`created_at` 和 `updated_at`。
+- App Factory 显式接收 Core `ConversationRepository` Protocol，因而 API 路由不依赖 SQLite；SQLite 集成测试通过注入 `SqliteConversationRepository` 验证真实读取与用户隔离。
+- `serve` 组合根现在从 `--app-home` 的 AppPaths 定位数据库、执行既有迁移、构造 SQLite Conversation Repository 并在服务结束时关闭它；Token Bootstrap、回环绑定与 ready 输出语义保持不变。
+- 真实手动请求确认 `.local-data` 已有的三个持久化 Conversation 能经带 Bearer Header 的 API 返回，响应不包含用户身份、消息、Run 或审计正文。
+
+### 验证
+
+- 检查：运行 API Health、实际 TCP Server 与 Conversation API 定向集成测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 238 个测试通过，132 个文件格式正确，128 个源码文件 Ruff 与 strict mypy 无问题，锁定依赖解析为 42 个包。
+- 检查：使用 stdin Bootstrap Token 启动 `serve`，再通过正确 Bearer Header 查询 `/api/v1/conversations`。
+- 结果：通过；返回三条 `local-user` Conversation 的元数据，UTC 时间以 JSON ISO 8601 字符串表示。
+
+### 决策变化
+
+- 无；本次落实既有 Core Repository 注入和 DEC-062 认证边界，不新增存储或授权模型。
+
+### 风险或问题
+
+- 当前列表没有分页、标题、单条详情或消息读取；随着 Conversation 数量增长，列表查询策略需要单独设计，不能在本任务中无界扩展。
+- 当前服务启动会确保 SQLite 已迁移并构造 Conversation Repository，但尚不构造 Agent Runtime、模型 Provider、Workspace 或 Run 管理；Health 仍不能代表它们可用。
+
+### 下一步
+
+- 在用户确认后，实现阶段 6 的最小单条 Conversation 消息查询接口，并明确 404、用户可见消息边界与响应排序；本次不开始该任务。

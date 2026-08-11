@@ -120,7 +120,7 @@ Token 不作为命令行参数。首选由 Main 通过仅连接到该子进程�
 uv run asagent serve ...
 ```
 
-阶段 6 当前已实现最小开发入口：`uv run asagent serve --bootstrap-stdin --port 0`。调用方在 stdin 写入一行 `{"token":"..."}` Bootstrap JSON；该参数只声明读取管道，Token 本身不出现在命令行。Backend 仅接受 `127.0.0.1`，自己绑定端口并在 Uvicorn 启动后向 stdout 输出一次 `ASAGENT_READY ` 前缀的 JSON，其中包含 `host`、实际 `port`、`pid` 和 `protocol_version`，不包含 Token。此阶段 Health 已要求同一 Token 的 Bearer Header；AppPaths、Workspace、Runtime 状态及 Electron Main 的 PID/协议校验、Health 轮询仍待阶段 7 组合。
+阶段 6 当前已实现最小开发入口：`uv run asagent serve --bootstrap-stdin --app-home <root> --port 0`。调用方在 stdin 写入一行 `{"token":"..."}` Bootstrap JSON；该参数只声明读取管道，Token 本身不出现在命令行。Backend 以 `AppPaths.from_root(app_home)` 定位并升级 `<root>/data/asagent.sqlite3`，在整个服务生命周期持有 `SqliteConversationRepository`，退出时关闭它；App Factory 仍只接收注入的 Repository。Backend 仅接受 `127.0.0.1`，自己绑定端口并在 Uvicorn 启动后向 stdout 输出一次 `ASAGENT_READY ` 前缀的 JSON，其中包含 `host`、实际 `port`、`pid` 和 `protocol_version`，不包含 Token。此阶段 Health 与只读 Conversation 列表都要求同一 Token 的 Bearer Header；Workspace、Runtime 状态及 Electron Main 的 PID/协议校验、Health 轮询仍待阶段 7 组合。
 
 发布环境命令为：
 

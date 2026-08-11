@@ -481,14 +481,29 @@ async def _run_main(args: argparse.Namespace) -> None:
             raise ValueError("serve requires --bootstrap-stdin")
 
         access_token = read_local_api_token(sys.stdin.readline)
-        server = LocalApiServer(
-            create_app(access_token=access_token),
-            host=args.host,
-            port=args.port,
+        paths = AppPaths.from_root(args.app_home)
+        database_path = paths.data_dir / "asagent.sqlite3"
+        upgrade_sqlite_database(
+            database_path=database_path,
+            alembic_config_path=_alembic_config_path(),
         )
-        ready = await server.start()
-        print(f"{READY_PREFIX}{ready.to_json()}")
-        await server.wait_closed()
+        conversations = SqliteConversationRepository(database_path)
+
+        try:
+            server = LocalApiServer(
+                create_app(
+                    access_token=access_token,
+                    conversations=conversations,
+                ),
+                host=args.host,
+                port=args.port,
+            )
+            ready = await server.start()
+            print(f"{READY_PREFIX}{ready.to_json()}")
+            await server.wait_closed()
+        finally:
+            await conversations.aclose()
+
         return
 
     system_prompt = (

@@ -7,13 +7,22 @@ import pytest
 from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
 from asagent.api.server import LocalApiServer
+from asagent.storage.in_memory_conversation_repository import (
+    InMemoryConversationRepository,
+)
 
 _TOKEN = LocalApiToken("test-token")
 
 
 @pytest.mark.asyncio
 async def test_local_api_server_binds_loopback_dynamic_port_and_serves_health() -> None:
-    server = LocalApiServer(create_app(access_token=_TOKEN), port=0)
+    server = LocalApiServer(
+        create_app(
+            access_token=_TOKEN,
+            conversations=InMemoryConversationRepository(),
+        ),
+        port=0,
+    )
     ready = await server.start()
 
     try:
@@ -56,4 +65,11 @@ def test_local_api_server_rejects_unsafe_or_invalid_binding(
     message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        LocalApiServer(create_app(access_token=_TOKEN), host=host, port=port)
+        LocalApiServer(
+            create_app(
+                access_token=_TOKEN,
+                conversations=InMemoryConversationRepository(),
+            ),
+            host=host,
+            port=port,
+        )
