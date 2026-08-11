@@ -86,9 +86,13 @@
 
 ### DEC-014：桌面发布采用 PyInstaller onedir Sidecar
 
-- 状态：已确认
+- 状态：已确认，首次本地冒烟已验证
 - 决策：Python Backend 打包为 onedir，由 electron-builder `extraResources` 携带。
 - 原因：最终用户不需要 Python，且适合 Agent 数据文件和动态依赖。
+- 已验证实现：首次本地构建通过 `scripts/build_backend.py` 收集 Alembic 配置与迁移
+  资源，并为 `aiosqlite` 声明 hidden import；冻结 CLI 从 bundle 的 `_MEIPASS`
+  定位迁移配置，所有可写 SQLite 数据仍由 `--app-home` 的 AppPaths 决定。独立目录
+  自动化冒烟已覆盖认证 Health、会话创建、离线 Calculator 回合与 bundle 数据目录断言。
 
 ### DEC-015：Docker 不是桌面依赖
 

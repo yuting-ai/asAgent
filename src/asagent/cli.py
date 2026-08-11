@@ -311,6 +311,9 @@ def new_tool_call_id() -> ToolCallId:
 
 
 def _alembic_config_path() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "alembic.ini"  # type: ignore[attr-defined]
+
     return Path(__file__).resolve().parents[2] / "alembic.ini"
 
 

@@ -2791,3 +2791,52 @@
 ### 下一步
 
 - 先完成阶段 7 的 PyInstaller Sidecar 打包冒烟测试；通过后进入阶段 8 的测试 stdio MCP Server，不再继续扩展当前 UI 占位页面。
+
+## 2026-08-11 阶段 7 PyInstaller Sidecar 首次手动冒烟工作记录
+
+### 完成
+
+- 增加 `pyinstaller` 开发依赖与 `scripts/build_backend.py`，生成
+  `desktop/build/dist/asagent-backend/asagent-backend` 的 onedir Sidecar。
+- 将 `alembic.ini`、`alembic/` 迁移资源打进 bundle，并显式收集 `aiosqlite`；
+  冻结 CLI 通过 `sys._MEIPASS` 定位 Alembic 配置，源码 CLI 保持原有仓库路径。
+- 忽略 `desktop/build/` 产生的本地构建产物。
+
+### 验证
+
+- 在临时工作目录（非源码根）启动打包后的可执行文件，成功取得动态端口的
+  `ASAGENT_READY` 记录。
+- SQLite 仅写入显式 `--app-home/.../data/asagent.sqlite3`；bundle 安装目录未出现
+  `*.sqlite3` 文件。
+
+### 下一步
+
+- 将该 Sidecar 验收自动化：从独立临时目录启动 bundle，完成认证 Health、创建会话、
+  离线 `calculate 2 + 2` 工具回合及数据位置断言。自动化通过后才结束阶段 7，并进入
+  阶段 8 的最小 stdio MCP Server。
+
+## 2026-08-11 阶段 7 PyInstaller Sidecar 自动化验收与阶段收尾
+
+### 完成
+
+- 新增 `scripts/smoke_backend_bundle.py`，以独立临时工作目录启动已构建的 onedir
+  Sidecar，通过 stdin 传递临时 Token，不暴露 Token 到命令行或日志。
+- 脚本依次验证认证 Health、创建 Conversation、提交 `calculate 2 + 2`、Run 完成后
+  的 `Tool result: 4`，并断言 SQLite 只写入 `--app-home/data/asagent.sqlite3`、bundle
+  目录没有 SQLite。
+- 阶段 7 完成：Electron 最小安全集成与本地 Sidecar 的首次自动化冒烟均已验收。当前
+  UI 的未实现占位继续冻结，正式 electron-builder 资源携带、签名、公证和安装器留给
+  阶段 12。
+
+### 验证
+
+- `uv run python scripts/build_backend.py` 成功生成 `desktop/build/dist`。
+- `uv run python scripts/smoke_backend_bundle.py` 成功退出（`SMOKE_EXIT=0`）。
+- `uv run ruff check scripts/build_backend.py scripts/smoke_backend_bundle.py`、
+  `uv run mypy`（135 个 source files）和 `scripts/check.sh`（281 passed）均通过。
+
+### 下一步
+
+- 进入阶段 8：先实现最小测试 stdio MCP Server 的 JSON-RPC `initialize`、
+  `notifications/initialized`、`tools/list` 与 `tools/call` 闭环；不先接入生产 MCP
+  Server、Streamable HTTP、Electron 设置页或真实外部服务。

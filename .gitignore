@@ -15,6 +15,7 @@ htmlcov/
 
 # Python build artifacts
 build/
+desktop/build/
 dist/
 *.egg-info/
 

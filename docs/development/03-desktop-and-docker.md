@@ -306,6 +306,12 @@ desktop/build/dist/asagent-backend/
 └── _internal/
 ```
 
+当前首次本地构建由 `uv run python scripts/build_backend.py` 执行。它将
+`alembic.ini` 和 `alembic/` 迁移脚本作为 bundle data 携带，并显式收集
+SQLAlchemy SQLite 异步驱动所需的 `aiosqlite` hidden import。冻结运行时的
+CLI 从 `sys._MEIPASS/alembic.ini` 定位迁移配置；源码运行仍从仓库根目录定位。
+构建中间目录与产物位于 `desktop/build/`，不进入版本控制。
+
 ### 提前验证
 
 在 Local API 和 Electron 最小集成完成后，作为路线图阶段 7 的验收任务立即做第一次 PyInstaller Smoke Test，不等 MCP、Memory 和全部 UI 完成。阶段 12 再处理签名、公证、安装器、自动更新和正式发布。
@@ -318,6 +324,19 @@ desktop/build/dist/asagent-backend/
 - 子进程和信号处理。
 - 安装目录只读。
 - 运行时数据写入 AppPaths。
+
+2026-08-11 的首次手动冒烟及后续自动化冒烟均已通过。自动化命令为：
+
+```bash
+uv run python scripts/build_backend.py
+uv run python scripts/smoke_backend_bundle.py
+```
+
+`smoke_backend_bundle.py` 从临时工作目录（非源码根）启动
+`desktop/build/dist/asagent-backend/asagent-backend`，用 stdin 传入一次性 Token，
+再验证认证 Health、创建会话、离线 `calculate 2 + 2` 的 `Tool result: 4`。它还断言
+SQLite 仅出现在显式 `--app-home/data/asagent.sqlite3`，bundle 目录不存在 SQLite。
+因此阶段 7 的本地 Sidecar 验收已完成；这不是已签名、已公证的正式发行包。
 
 ### 平台构建
 
