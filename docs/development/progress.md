@@ -2681,3 +2681,30 @@
 ### 下一步
 
 - 在用户确认后，为开发 Electron Sidecar 增加可选的真实 DeepSeek Profile：复用现有 providers.toml 与开发 `.env`，保持离线 `development-tools` 默认值，且不把 API Key 暴露给 Renderer。本次不提前开始。
+
+## 2026-08-11 阶段 7 Electron 真实 Provider 开发验收工作记录
+
+### 完成
+
+- `serve` 现可复用 CLI 已有的成对 `--profile`、`--secret-env` 配置；无该参数对时继续组合离线 `development-tools` Runtime，有该参数对时以同一 SQLite/API/Dispatcher 路径组合真实 Provider Runtime。
+- Electron 新增显式 `npm run dev:deepseek`。它仅传递 DeepSeek Profile 名、Secret 环境变量名和 `.env` 路径给 Main/Sidecar；API Key 仍只在 Python 环境中解析，未进入 Renderer、Preload、IPC、URL 或日志。
+- Sidecar 的真实 HTTP Client 覆盖整个服务生命周期；真实 Provider 配置或调用失败不会回退至离线 Echo 行为。
+
+### 验证
+
+- 检查：在 `desktop/` 执行 Prettier、TypeScript 类型检查、ESLint、Vitest 和生产构建；随后执行 Python `scripts/check.sh`。
+- 结果：通过；桌面 Vitest 6 个测试、桌面格式/类型/静态检查/构建均成功，Python 完整门禁 277 个测试通过。
+- 人工验收：以 `npm run dev:deepseek` 启动桌面端，输入要求调用 Calculator 计算 `123 * 456` 的英文提示；真实 DeepSeek 返回 `56088`，Activity 依次显示 Run、模型、工具及完成事件。
+
+### 决策变化
+
+- 补充 DEC-062：默认离线与显式真实 Provider 开发入口并存，密钥只由 Python Sidecar 从开发 `.env` 读取。
+
+### 风险或问题
+
+- `.env` 仅适合源码开发；正式桌面版仍需在后续设置/Secret Store 工作中接入系统凭据存储。
+- 当前 `dev:deepseek` 名称是首个已验证 Profile 的便利入口；未来应由设置页选择 Provider Profile，而不是为每个 Provider 添加 npm 脚本。
+
+### 下一步
+
+- 在用户确认后，进行一次阶段 7 体验回顾并选择下一条真实用户价值路径（例如 Conversation 标题，或受限文件工具的桌面权限交互）；不提前实现设置页或正式打包。

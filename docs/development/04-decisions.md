@@ -564,6 +564,15 @@
 - 影响：当前固定操作为 Conversation 列表与指定 Conversation 的 Message 历史读取。创建、提交、Run 查询、取消和 SSE 将在各自独立任务中按同一原则增加，且每项都需经过来源校验。
 - 替代方案：将 Token/端口交给 Renderer、暴露通用 fetch 或 `ipcRenderer.invoke(channel, payload)` 转发器；当前均不采用。
 
+### DEC-062 实施补充：真实 Provider 仅通过显式桌面开发入口启用
+
+- 日期：2026-08-11
+- 状态：已确认
+- 决策：`npm run dev` 保持离线 `development-tools` 默认值；`npm run dev:deepseek` 才传入 `ASAGENT_DESKTOP_PROFILE` 与 `ASAGENT_DESKTOP_SECRET_ENV` 两个非敏感名称。Electron Main 将 Profile、Secret 环境变量名与仓库 `.env` 路径作为 Sidecar 启动配置，Python `serve` 使用既有 Profile/Secret/Provider 组合根创建真实持久化 Runtime，并保持 HTTP Client 至 Sidecar 关闭。实际 API Key 不作为 Electron 参数、IPC 数据或 Renderer 状态出现。
+- 原因：真实模型体验应复用已经验证的 API、Run、SSE 和工具路径，同时离线 UI 开发与自动化测试必须稳定、无网络成本且不依赖用户 Secret。
+- 影响：源码开发期需要用户自行维护被 Git 忽略的 `.env` 与非敏感 `providers.toml`；配置或调用错误明确失败，绝不静默回退离线模型。系统 Keychain、设置页与发行版 Sidecar 配置属于后续独立任务。
+- 替代方案：让默认开发入口总是调用真实模型、将 Key 传入 Renderer/Preload、或在 Electron 中自行调用模型服务；当前均不采用。
+
 ### DEC-062 实施补充：固定写入操作沿用 Main 私有 Token
 
 - 日期：2026-08-11

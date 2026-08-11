@@ -83,10 +83,26 @@ function getReadyBackendLauncher(): BackendLauncher {
 
 function createDevelopmentBackendLauncher(): BackendLauncher {
   const projectRoot = join(app.getAppPath(), '..')
+  const providerProfile = process.env['ASAGENT_DESKTOP_PROFILE']
+  const secretEnvironmentName = process.env['ASAGENT_DESKTOP_SECRET_ENV']
+
+  if (providerProfile === undefined && secretEnvironmentName === undefined) {
+    return new BackendLauncher({
+      projectRoot,
+      appHome: join(projectRoot, '.local-data')
+    })
+  }
+
+  if (providerProfile === undefined || secretEnvironmentName === undefined) {
+    throw new Error('Desktop real Provider configuration is incomplete.')
+  }
 
   return new BackendLauncher({
     projectRoot,
-    appHome: join(projectRoot, '.local-data')
+    appHome: join(projectRoot, '.local-data'),
+    providerProfile,
+    secretEnvironmentName,
+    environmentFile: join(projectRoot, '.env')
   })
 }
 

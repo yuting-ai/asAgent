@@ -13,6 +13,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
+    "dev:deepseek": "ASAGENT_DESKTOP_PROFILE=deepseek ASAGENT_DESKTOP_SECRET_ENV=ASAGENT_MODEL_API_KEY electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",

@@ -489,6 +489,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 async def _run_main(args: argparse.Namespace) -> None:
+    if (args.profile is None) != (args.secret_env is None):
+        raise ProviderConfigurationError(
+            "--profile and --secret-env must be provided together",
+        )
+
     if args.command == "serve":
         if not args.bootstrap_stdin:
             raise ValueError("serve requires --bootstrap-stdin")
@@ -504,12 +509,6 @@ async def _run_main(args: argparse.Namespace) -> None:
         runs = SqliteRunRepository(database_path)
         starter = SqliteRunStarter(database_path)
         finisher = SqliteRunFinisher(database_path)
-        runtime = build_persistent_development_runtime(
-            conversations=conversations,
-            runs=runs,
-            starter=starter,
-            finisher=finisher,
-        )
         run_submission = RunSubmissionService(
             conversations=conversations,
             run_starter=starter,
@@ -522,13 +521,52 @@ async def _run_main(args: argparse.Namespace) -> None:
             "they help answer the user."
         )
 
+        http_client: httpx.AsyncClient | None = None
+
+        if args.profile is None:
+            runtime = build_persistent_development_runtime(
+                conversations=conversations,
+                runs=runs,
+                starter=starter,
+                finisher=finisher,
+            )
+            model_name = "development-tools"
+        else:
+            profiles = load_provider_profiles(paths.config_dir)
+            try:
+                profile = profiles.providers[args.profile]
+            except KeyError as error:
+                raise ProviderConfigurationError(
+                    "requested provider profile is unavailable",
+                ) from error
+
+            secrets = EnvironmentSecretProvider(
+                environment=dict(os.environ),
+                bindings={profile.secret_id: args.secret_env},
+            )
+            http_client = httpx.AsyncClient()
+            provider = create_model_provider(
+                profiles=profiles,
+                profile_name=args.profile,
+                secrets=secrets,
+                http_client=http_client,
+            )
+            runtime = build_persistent_agent_runtime(
+                model=provider,
+                conversations=conversations,
+                runs=runs,
+                starter=starter,
+                finisher=finisher,
+            )
+            model_name = profile.model
+
         async def execute_submitted(
             submission: SubmittedRun,
             cancellation_token: RunCancellationToken,
         ) -> None:
             await runtime.execute_submitted(
                 submission=submission,
-                model_name="development-tools",
+                model_name=model_name,
                 system_prompt=system_prompt,
                 cancellation_token=cancellation_token,
             )
@@ -557,6 +595,8 @@ async def _run_main(args: argparse.Namespace) -> None:
             await dispatcher.aclose()
             await finisher.aclose()
             await starter.aclose()
+            if http_client is not None:
+                await http_client.aclose()
             await runs.aclose()
             await conversations.aclose()
 
@@ -566,11 +606,6 @@ async def _run_main(args: argparse.Namespace) -> None:
         "You are asAgent's development assistant. Use the supplied tools when "
         "they help answer the user."
     )
-
-    if (args.profile is None) != (args.secret_env is None):
-        raise ProviderConfigurationError(
-            "--profile and --secret-env must be provided together",
-        )
 
     if args.conversation_id is not None and not args.persistent:
         raise ProviderConfigurationError(

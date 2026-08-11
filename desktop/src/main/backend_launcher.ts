@@ -56,6 +56,9 @@ type BackendLauncherOptions = {
   healthTimeoutMs?: number
   healthRetryIntervalMs?: number
   stopTimeoutMs?: number
+  providerProfile?: string
+  secretEnvironmentName?: string
+  environmentFile?: string
 }
 
 function parseReadyRecord(line: string): ServerReady | null {
@@ -158,6 +161,9 @@ export class BackendLauncher {
   private readonly healthTimeoutMs: number
   private readonly healthRetryIntervalMs: number
   private readonly stopTimeoutMs: number
+  private readonly providerProfile: string | undefined
+  private readonly secretEnvironmentName: string | undefined
+  private readonly environmentFile: string | undefined
   private child: ChildProcess | undefined
   private ready: ServerReady | undefined
   private token: string | undefined
@@ -171,6 +177,18 @@ export class BackendLauncher {
     this.healthTimeoutMs = options.healthTimeoutMs ?? 5_000
     this.healthRetryIntervalMs = options.healthRetryIntervalMs ?? 100
     this.stopTimeoutMs = options.stopTimeoutMs ?? 3_000
+    this.providerProfile = options.providerProfile
+    this.secretEnvironmentName = options.secretEnvironmentName
+    this.environmentFile = options.environmentFile
+
+    const realProviderConfigured = this.providerProfile !== undefined
+
+    if (
+      realProviderConfigured !== (this.secretEnvironmentName !== undefined) ||
+      realProviderConfigured !== (this.environmentFile !== undefined)
+    ) {
+      throw new Error('Real Provider configuration is incomplete.')
+    }
   }
 
   get isReady(): boolean {
@@ -313,14 +331,24 @@ export class BackendLauncher {
     }
 
     const token = randomBytes(32).toString('base64url')
-    const child = this.spawnBackend(
-      'uv',
-      ['run', 'asagent', 'serve', '--bootstrap-stdin', '--app-home', this.appHome, '--port', '0'],
-      {
-        cwd: this.projectRoot,
-        stdio: 'pipe'
-      }
-    )
+    const command = ['run']
+
+    if (this.environmentFile !== undefined) {
+      command.push('--env-file', this.environmentFile)
+    }
+
+    command.push('asagent', 'serve', '--bootstrap-stdin')
+
+    if (this.providerProfile !== undefined && this.secretEnvironmentName !== undefined) {
+      command.push('--profile', this.providerProfile, '--secret-env', this.secretEnvironmentName)
+    }
+
+    command.push('--app-home', this.appHome, '--port', '0')
+
+    const child = this.spawnBackend('uv', command, {
+      cwd: this.projectRoot,
+      stdio: 'pipe'
+    })
 
     if (child.stdin === null || child.stdout === null) {
       child.kill('SIGTERM')

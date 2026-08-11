@@ -86,6 +86,52 @@ describe('BackendLauncher', () => {
     )
   })
 
+  it('passes only real Provider configuration names to the Python Sidecar', async () => {
+    const child = createChild()
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      providerProfile: 'deepseek',
+      secretEnvironmentName: 'ASAGENT_MODEL_API_KEY',
+      environmentFile: '/project/.env',
+      spawnBackend,
+      fetchBackend: vi.fn(async () => new Response(null, { status: 200 }))
+    })
+
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+
+    await expect(starting).resolves.toBeUndefined()
+
+    expect(spawnBackend).toHaveBeenCalledWith(
+      'uv',
+      [
+        'run',
+        '--env-file',
+        '/project/.env',
+        'asagent',
+        'serve',
+        '--bootstrap-stdin',
+        '--profile',
+        'deepseek',
+        '--secret-env',
+        'ASAGENT_MODEL_API_KEY',
+        '--app-home',
+        '/project/.local-data',
+        '--port',
+        '0'
+      ],
+      expect.objectContaining({
+        cwd: '/project',
+        stdio: 'pipe'
+      })
+    )
+  })
+
   it('reads conversations through its private backend connection', async () => {
     const child = createChild()
     const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
