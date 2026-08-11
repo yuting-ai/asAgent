@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 6 进行中；阶段 0–5 的 Core、Agent Loop、SQLite 持久化、Context Builder 基础与受控 Workspace Tool 边界已完成，当前正在建立 Electron 未来使用的 Local API 与 SSE 入口。
+- 项目阶段：阶段 7 进行中；阶段 0–6 的 Core、Agent Loop、SQLite 持久化、Context Builder 基础、受控 Workspace Tool 边界与 Local API/SSE 已完成，当前开始 Electron 最小集成。
 - 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建、可见 Message 查询/提交、按 Run ID 查询状态、协作取消，以及基于持久化 RunEvent 的认证 SSE 回放/实时观察。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-11
-- 当前目标：阶段 6 Local API 最小闭环（提交、后台执行、查询、取消、SSE）已可用；下一项在用户确认后推进 Electron 接入，或补 `Last-Event-ID` 兼容与真实 Provider 服务端配置。
+- 当前目标：已生成并验证可运行的 Electron + React + TypeScript 开发骨架；下一项在用户确认后将模板默认权限收紧为安全的 Main/Preload/Renderer 边界，并替换为最小 asAgent 聊天壳。
 
 ## 2. 已完成
 
@@ -2522,3 +2522,28 @@
 ### 下一步
 
 - 在用户确认后，推进 Electron Main/Renderer 接入本 Local API，或补 `Last-Event-ID` 与真实 Provider `serve` 配置；本次不自动开始。
+
+## 2026-08-11 阶段 7 Electron 开发骨架工作记录
+
+### 完成
+
+- 在仓库 `desktop/` 下通过官方 `@quick-start/electron` 的 `react-ts` 模板创建了 Electron + React + TypeScript + electron-vite 工程，并生成独立的 `package-lock.json`。
+- 已在 macOS 开发环境执行 `npm install` 与 `npm run dev`，Electron 示例窗口可正常启动；当前使用 Electron 39、Chromium 142 与 Node 22 运行时。
+
+### 验证
+
+- 检查：在 `desktop/` 执行 `npm run dev`。
+- 结果：通过；开发窗口已显示 React/TypeScript 模板页面。
+
+### 决策变化
+
+- 无；采用路线图既有的 Electron + React + TypeScript、Vite/electron-vite 开发方向，尚未接入 Python Sidecar 或 Local API。
+
+### 风险或问题
+
+- 生成模板仍包含示例 UI、通用 Electron API 暴露与 `sandbox: false`，因此它只证明开发工具链可用，不能视为安全桌面客户端。
+- 尚未启动 Backend、传递 Token、校验 Health、调用 HTTP API 或订阅 SSE。
+
+### 下一步
+
+- 在用户确认后，收紧 BrowserWindow/Preload 边界并替换示例 Renderer 为最小 asAgent 聊天壳；本次不连接 Backend。
