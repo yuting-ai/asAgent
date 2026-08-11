@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 
 type AppInfo = {
   appName: string
@@ -24,10 +24,16 @@ type ActiveRun = {
   status: 'running' | 'cancelling'
 }
 
+type RunActivityOutcome = 'completed' | 'failed' | 'cancelled' | 'limit'
+
 type RunActivity = {
   runId: string
   conversationId: string
   entries: string[]
+  phase: 'live' | 'done'
+  outcome: RunActivityOutcome | null
+  startedAt: number
+  endedAt: number | null
 }
 
 type AppView =
@@ -79,10 +85,6 @@ function formatThreadTime(iso: string): string {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
-function isTerminalRunEvent(eventType: string): boolean {
-  return ['run.completed', 'run.failed', 'run.cancelled', 'run.limit_reached'].includes(eventType)
-}
-
 function runActivityEntry(eventType: string): string {
   switch (eventType) {
     case 'run.started':
@@ -105,6 +107,46 @@ function runActivityEntry(eventType: string): string {
       return 'Run failed.'
     default:
       return 'Working…'
+  }
+}
+
+function runActivityOutcome(eventType: string): RunActivityOutcome | null {
+  switch (eventType) {
+    case 'run.completed':
+      return 'completed'
+    case 'run.failed':
+      return 'failed'
+    case 'run.cancelled':
+      return 'cancelled'
+    case 'run.limit_reached':
+      return 'limit'
+    default:
+      return null
+  }
+}
+
+function formatElapsed(startedAt: number, endedAt: number | null): string | null {
+  const end = endedAt ?? Date.now()
+  const seconds = Math.max(1, Math.round((end - startedAt) / 1000))
+  return `${seconds}s`
+}
+
+function activitySummaryLabel(activity: RunActivity): string {
+  const stepCount = activity.entries.length
+  const steps = `${stepCount} step${stepCount === 1 ? '' : 's'}`
+  const elapsed = formatElapsed(activity.startedAt, activity.endedAt)
+  const withTime = elapsed === null ? steps : `${steps} · ${elapsed}`
+
+  switch (activity.outcome) {
+    case 'failed':
+      return `Failed · ${withTime}`
+    case 'cancelled':
+      return `Cancelled · ${withTime}`
+    case 'limit':
+      return `Stopped · ${withTime}`
+    case 'completed':
+    default:
+      return `Worked · ${withTime}`
   }
 }
 
@@ -137,8 +179,10 @@ export default function App(): React.JSX.Element {
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
   const [isCancellingRun, setIsCancellingRun] = useState(false)
   const [runActivity, setRunActivity] = useState<RunActivity | null>(null)
+  const [activityExpanded, setActivityExpanded] = useState(false)
   const [activeView, setActiveView] = useState<AppView>('chat')
   const [activityTab, setActivityTab] = useState<ActivityTab>('approvals')
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -211,10 +255,12 @@ export default function App(): React.JSX.Element {
     const removeEventListener = window.desktop.onRunEvent((update) => {
       appendRunActivity(update.runId, runActivityEntry(update.event.event_type))
 
-      if (!isTerminalRunEvent(update.event.event_type)) {
+      const outcome = runActivityOutcome(update.event.event_type)
+      if (outcome === null) {
         return
       }
 
+      finishRunActivity(update.runId, outcome)
       setActiveRun((current) => (current?.runId === update.runId ? null : current))
       setIsCancellingRun(false)
 
@@ -230,6 +276,7 @@ export default function App(): React.JSX.Element {
       setActiveRun((current) => (current?.runId === error.runId ? null : current))
       setIsCancellingRun(false)
       appendRunActivity(error.runId, 'Run event stream failed.')
+      finishRunActivity(error.runId, 'failed')
       setErrorMessage(error.message)
     })
 
@@ -238,6 +285,10 @@ export default function App(): React.JSX.Element {
       removeErrorListener()
     }
   }, [selectedConversationId])
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages, runActivity?.entries.length, runActivity?.phase, selectedConversationId])
 
   const selectedConversation = conversations.find(
     (conversation) => conversation.conversation_id === selectedConversationId
@@ -276,6 +327,22 @@ export default function App(): React.JSX.Element {
     })
   }
 
+  function finishRunActivity(runId: string, outcome: RunActivityOutcome): void {
+    setRunActivity((current) => {
+      if (current === null || current.runId !== runId) {
+        return current
+      }
+
+      return {
+        ...current,
+        phase: 'done',
+        outcome,
+        endedAt: Date.now()
+      }
+    })
+    setActivityExpanded(false)
+  }
+
   async function createConversation(): Promise<void> {
     if (isBusy) {
       return
@@ -289,6 +356,7 @@ export default function App(): React.JSX.Element {
       setConversations((current) => [...current, conversation])
       setSelectedConversationId(conversation.conversation_id)
       setRunActivity(null)
+      setActivityExpanded(false)
       setActiveView('chat')
     } catch {
       setErrorMessage('A new conversation could not be created.')
@@ -322,8 +390,13 @@ export default function App(): React.JSX.Element {
       setRunActivity({
         runId: submitted.run.run_id,
         conversationId,
-        entries: ['Starting run…']
+        entries: ['Starting run…'],
+        phase: 'live',
+        outcome: null,
+        startedAt: Date.now(),
+        endedAt: null
       })
+      setActivityExpanded(false)
     } catch {
       setErrorMessage('Message submission failed.')
     } finally {
@@ -681,37 +754,115 @@ export default function App(): React.JSX.Element {
                     </p>
                   ) : (
                     <>
-                      {visibleMessages.map((message) => (
-                        <div
-                          className={`msg ${message.role === 'assistant' ? 'agent' : 'user'}`}
-                          key={message.message_id}
-                        >
-                          <div className="msg-avatar">
-                            {message.role === 'assistant' ? 'aA' : 'Y'}
-                          </div>
-                          <div className="msg-bubble">{message.content}</div>
-                        </div>
-                      ))}
-                      {runActivity?.conversationId === selectedConversationId ? (
-                        <div className="msg agent">
-                          <div className="msg-avatar">aA</div>
-                          <div className="msg-bubble">
-                            <div className="activity-card">
-                              <div className="activity-card-title">Run activity</div>
-                              <ul className="activity-list">
-                                {runActivity.entries.map((entry, index) => (
-                                  <li
-                                    className="activity-item"
-                                    key={`${runActivity.runId}-${index}`}
-                                  >
-                                    {entry}
-                                  </li>
-                                ))}
-                              </ul>
+                      {(() => {
+                        const visibleActivity =
+                          runActivity?.conversationId === selectedConversationId
+                            ? runActivity
+                            : null
+                        const activityAnchorIndex =
+                          visibleActivity === null
+                            ? -1
+                            : visibleMessages.reduce(
+                                (lastIndex, message, index) =>
+                                  message.role === 'user' ? index : lastIndex,
+                                -1
+                              )
+
+                        function renderRunActivity(activity: RunActivity): React.JSX.Element {
+                          return (
+                            <div className="msg agent run-activity-msg">
+                              {activity.phase === 'done' && !activityExpanded ? (
+                                <button
+                                  aria-expanded="false"
+                                  className={`activity-summary outcome-${activity.outcome ?? 'completed'}`}
+                                  onClick={() => setActivityExpanded(true)}
+                                  type="button"
+                                >
+                                  <span className="activity-summary-label">
+                                    {activitySummaryLabel(activity)}
+                                  </span>
+                                  <span aria-hidden="true" className="activity-chevron">
+                                    ▾
+                                  </span>
+                                </button>
+                              ) : (
+                                <div
+                                  className={`msg-bubble activity-shell${
+                                    activity.phase === 'live' ? ' is-live' : ''
+                                  }`}
+                                >
+                                  <div className="activity-card">
+                                    {activity.phase === 'live' ? (
+                                      <div className="activity-card-header">
+                                        <span aria-hidden="true" className="activity-spinner" />
+                                        <span className="activity-card-title">Working…</span>
+                                        <span className="activity-card-meta">
+                                          {activity.entries.at(-1) ?? 'Starting run…'}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        aria-expanded="true"
+                                        className="activity-card-header is-button"
+                                        onClick={() => setActivityExpanded(false)}
+                                        type="button"
+                                      >
+                                        <span className="activity-card-title">
+                                          {activitySummaryLabel(activity)}
+                                        </span>
+                                        <span aria-hidden="true" className="activity-chevron">
+                                          ▴
+                                        </span>
+                                      </button>
+                                    )}
+                                    <ul className="activity-list">
+                                      {activity.entries.map((entry, index) => {
+                                        const isCurrent =
+                                          activity.phase === 'live' &&
+                                          index === activity.entries.length - 1
+
+                                        return (
+                                          <li
+                                            className={`activity-item${isCurrent ? ' is-current' : ''}`}
+                                            key={`${activity.runId}-${index}`}
+                                          >
+                                            <span
+                                              aria-hidden="true"
+                                              className="activity-item-dot"
+                                            />
+                                            <span>{entry}</span>
+                                          </li>
+                                        )
+                                      })}
+                                    </ul>
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        </div>
-                      ) : null}
+                          )
+                        }
+
+                        return (
+                          <>
+                            {visibleMessages.map((message, index) => (
+                              <div className="chat-turn" key={message.message_id}>
+                                <div
+                                  className={`msg ${message.role === 'assistant' ? 'agent' : 'user'}`}
+                                >
+                                  <div className="msg-bubble">{message.content}</div>
+                                </div>
+                                {visibleActivity !== null && index === activityAnchorIndex
+                                  ? renderRunActivity(visibleActivity)
+                                  : null}
+                              </div>
+                            ))}
+                            {visibleActivity !== null && activityAnchorIndex === -1
+                              ? renderRunActivity(visibleActivity)
+                              : null}
+                          </>
+                        )
+                      })()}
+                      <div ref={messagesEndRef} />
                     </>
                   )}
                 </div>
