@@ -2365,3 +2365,28 @@
 ### 下一步
 
 - 在用户确认后，为 PersistentAgentRuntime 建立最小 Dispatcher 执行适配与失败终态持久化边界；在这之前不让 Local API 自动调度，以免后台异常使 Run 长期停留在 CREATED。本次不开始该任务。
+
+## 2026-08-11 架构粒度约定记录
+
+### 完成
+
+- 确认后续设计以简单、清晰、可验证为优先，不为“架构感”或未经证实的未来需求继续细拆包装层。
+- 新增对象前必须能说明它独立的调用者、生命周期、失败处理或业务规则；若仅有单一调用者且只转发，默认合并到现有边界。
+- 当前 Run 路径固定为 Submission Service、PersistentAgentRuntime、InProcessRunDispatcher 三层；不实现仅包裹 Runtime 的 PersistentRunExecutor。意外执行异常的失败终态归 PersistentAgentRuntime。
+
+### 验证
+
+- 检查：复核当前 Submission、Runtime、Dispatcher 的数据流、调用者和异常归属。
+- 结果：通过；三层分别覆盖原子提交、模型/工具执行终态、后台任务/协作式取消，均有独立测试价值；拟议包装层没有独立调用者或规则。
+
+### 决策变化
+
+- 新增 DEC-063：以独立生命周期和失败语义控制抽象粒度。
+
+### 风险或问题
+
+- “保持简单”不等于把线程/Task 生命周期、事务或安全策略塞进路由；当实际出现第二个调用者、跨进程恢复、持久化 claim 或 SSE 多播等新失败模式时，应重新评估边界。
+
+### 下一步
+
+- 在用户确认后，增强 `PersistentAgentRuntime.execute_submitted()` 对意外执行异常的 FAILED 终态持久化；随后再将现有 Dispatcher 接到 Runtime。本次不开始该任务。
