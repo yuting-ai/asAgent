@@ -6,14 +6,42 @@ import pytest
 from alembic.config import Config
 
 from alembic import command
+from asagent.agent.run_submission import RunSubmissionService
 from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
 from asagent.core.conversation import Conversation
-from asagent.core.ids import ConversationId, MessageId, UserId
+from asagent.core.ids import ConversationId, MessageId, RunId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
+from asagent.core.run import Run
+from asagent.core.run_status import RunStatus
 from asagent.storage.sqlite.conversation_repository import (
     SqliteConversationRepository,
 )
+from asagent.storage.sqlite.run_repository import SqliteRunRepository
+from asagent.storage.sqlite.run_starter import SqliteRunStarter
+
+
+class UnusedRunStarter:
+    async def start(
+        self,
+        *,
+        user_message: UserMessage,
+        run: Run,
+    ) -> None:
+        del user_message, run
+        raise AssertionError("run submission is not used by this test")
+
+
+def _unused_run_submission(
+    conversations: SqliteConversationRepository,
+) -> RunSubmissionService:
+    return RunSubmissionService(
+        conversations=conversations,
+        run_starter=UnusedRunStarter(),
+        now=lambda: datetime(2026, 8, 11, tzinfo=UTC),
+        new_run_id=lambda: RunId("unused-run"),
+        new_message_id=lambda: MessageId("unused-message"),
+    )
 
 
 def _upgrade(database_path: Path) -> None:
@@ -66,6 +94,7 @@ async def test_list_conversations_returns_only_local_user_metadata(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        run_submission=_unused_run_submission(repository),
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -115,6 +144,7 @@ async def test_list_conversations_requires_the_current_local_api_token(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        run_submission=_unused_run_submission(repository),
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -161,6 +191,7 @@ async def test_list_conversation_messages_returns_visible_messages_in_sequence_o
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        run_submission=_unused_run_submission(repository),
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -225,6 +256,7 @@ async def test_list_conversation_messages_hides_unknown_or_other_user_conversati
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        run_submission=_unused_run_submission(repository),
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -257,6 +289,7 @@ async def test_list_conversation_messages_requires_the_current_local_api_token(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        run_submission=_unused_run_submission(repository),
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -288,6 +321,7 @@ async def test_create_conversation_persists_an_empty_local_conversation(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        run_submission=_unused_run_submission(repository),
         conversation_id_factory=lambda: conversation_id,
         clock=lambda: created_at,
     )
@@ -335,6 +369,7 @@ async def test_create_conversation_rejects_unknown_request_fields(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        run_submission=_unused_run_submission(repository),
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -368,6 +403,7 @@ async def test_create_conversation_requires_the_current_local_api_token(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        run_submission=_unused_run_submission(repository),
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -385,3 +421,216 @@ async def test_create_conversation_requires_the_current_local_api_token(
     assert response.status_code == 401
     assert response.json() == {"detail": "invalid local API credentials"}
     assert stored == ()
+
+
+@pytest.mark.asyncio
+async def test_submit_message_creates_a_visible_message_and_created_run(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    conversation = _conversation(
+        ConversationId("conv-local"),
+        UserId("local-user"),
+        datetime(2026, 8, 11, 11, 0, tzinfo=UTC),
+        datetime(2026, 8, 11, 11, 0, tzinfo=UTC),
+    )
+    created_at = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    conversations = SqliteConversationRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    starter = SqliteRunStarter(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=conversations,
+        run_submission=RunSubmissionService(
+            conversations=conversations,
+            run_starter=starter,
+            now=lambda: created_at,
+            new_run_id=lambda: RunId("run-created"),
+            new_message_id=lambda: MessageId("msg-created"),
+        ),
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        await conversations.save(conversation)
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            response = await client.post(
+                "/api/v1/conversations/conv-local/messages",
+                headers={"Authorization": "Bearer test-token"},
+                json={"content": "Hello, asAgent."},
+            )
+
+        messages = await conversations.list_messages(conversation.conversation_id)
+        persisted_runs = await runs.list_for_conversation(
+            conversation.conversation_id,
+        )
+    finally:
+        await starter.aclose()
+        await runs.aclose()
+        await conversations.aclose()
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "message": {
+            "message_id": "msg-created",
+            "role": "user",
+            "content": "Hello, asAgent.",
+            "created_at": "2026-08-11T12:00:00Z",
+        },
+        "run": {
+            "run_id": "run-created",
+            "status": "created",
+            "created_at": "2026-08-11T12:00:00Z",
+            "updated_at": "2026-08-11T12:00:00Z",
+        },
+    }
+    assert messages == (
+        UserMessage(
+            message_id=MessageId("msg-created"),
+            conversation_id=conversation.conversation_id,
+            content="Hello, asAgent.",
+            created_at=created_at,
+        ),
+    )
+    assert len(persisted_runs) == 1
+    assert persisted_runs[0].run_id == RunId("run-created")
+    assert persisted_runs[0].status is RunStatus.CREATED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {},
+        {"content": ""},
+        {"content": "   "},
+        {"content": "Hello", "unexpected": True},
+    ),
+)
+async def test_submit_message_rejects_invalid_request_bodies(
+    tmp_path: Path,
+    payload: dict[str, object],
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    conversation = _conversation(
+        ConversationId("conv-local"),
+        UserId("local-user"),
+        datetime(2026, 8, 11, 11, 0, tzinfo=UTC),
+        datetime(2026, 8, 11, 11, 0, tzinfo=UTC),
+    )
+    conversations = SqliteConversationRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    starter = SqliteRunStarter(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=conversations,
+        run_submission=RunSubmissionService(
+            conversations=conversations,
+            run_starter=starter,
+            now=lambda: datetime(2026, 8, 11, 12, 0, tzinfo=UTC),
+            new_run_id=lambda: RunId("run-created"),
+            new_message_id=lambda: MessageId("msg-created"),
+        ),
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        await conversations.save(conversation)
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            response = await client.post(
+                "/api/v1/conversations/conv-local/messages",
+                headers={"Authorization": "Bearer test-token"},
+                json=payload,
+            )
+
+        messages = await conversations.list_messages(conversation.conversation_id)
+        persisted_runs = await runs.list_for_conversation(
+            conversation.conversation_id,
+        )
+    finally:
+        await starter.aclose()
+        await runs.aclose()
+        await conversations.aclose()
+
+    assert response.status_code == 422
+    assert messages == ()
+    assert persisted_runs == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "conversation_id",
+    (
+        "missing",
+        "conv-other-user",
+    ),
+)
+async def test_submit_message_hides_unknown_or_other_user_conversations(
+    tmp_path: Path,
+    conversation_id: str,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    other_user_conversation = _conversation(
+        ConversationId("conv-other-user"),
+        UserId("other-user"),
+        datetime(2026, 8, 11, 8, 0, tzinfo=UTC),
+        datetime(2026, 8, 11, 8, 0, tzinfo=UTC),
+    )
+    conversations = SqliteConversationRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    starter = SqliteRunStarter(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=conversations,
+        run_submission=RunSubmissionService(
+            conversations=conversations,
+            run_starter=starter,
+            now=lambda: datetime(2026, 8, 11, 12, 0, tzinfo=UTC),
+            new_run_id=lambda: RunId("run-created"),
+            new_message_id=lambda: MessageId("msg-created"),
+        ),
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        await conversations.save(other_user_conversation)
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            response = await client.post(
+                f"/api/v1/conversations/{conversation_id}/messages",
+                headers={"Authorization": "Bearer test-token"},
+                json={"content": "Hello, asAgent."},
+            )
+
+        messages = await conversations.list_messages(
+            ConversationId("conv-other-user"),
+        )
+        persisted_runs = await runs.list_for_conversation(
+            ConversationId("conv-other-user"),
+        )
+    finally:
+        await starter.aclose()
+        await runs.aclose()
+        await conversations.aclose()
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "conversation not found"}
+    assert messages == ()
+    assert persisted_runs == ()

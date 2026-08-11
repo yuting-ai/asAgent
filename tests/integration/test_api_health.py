@@ -1,8 +1,15 @@
+from datetime import UTC, datetime
+
 import httpx
 import pytest
+from fastapi import FastAPI
 
+from asagent.agent.run_submission import RunSubmissionService
 from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
+from asagent.core.ids import MessageId, RunId
+from asagent.core.messages import UserMessage
+from asagent.core.run import Run
 from asagent.storage.in_memory_conversation_repository import (
     InMemoryConversationRepository,
 )
@@ -10,12 +17,41 @@ from asagent.storage.in_memory_conversation_repository import (
 _TOKEN = LocalApiToken("test-token")
 
 
+class UnusedRunStarter:
+    async def start(
+        self,
+        *,
+        user_message: UserMessage,
+        run: Run,
+    ) -> None:
+        del user_message, run
+        raise AssertionError("run submission is not used by this test")
+
+
+def _unused_run_submission(
+    conversations: InMemoryConversationRepository,
+) -> RunSubmissionService:
+    return RunSubmissionService(
+        conversations=conversations,
+        run_starter=UnusedRunStarter(),
+        now=lambda: datetime(2026, 8, 11, tzinfo=UTC),
+        new_run_id=lambda: RunId("unused-run"),
+        new_message_id=lambda: MessageId("unused-message"),
+    )
+
+
+def _create_app() -> FastAPI:
+    conversations = InMemoryConversationRepository()
+    return create_app(
+        access_token=_TOKEN,
+        conversations=conversations,
+        run_submission=_unused_run_submission(conversations),
+    )
+
+
 @pytest.mark.asyncio
 async def test_health_endpoint_accepts_the_current_local_api_token() -> None:
-    app = create_app(
-        access_token=_TOKEN,
-        conversations=InMemoryConversationRepository(),
-    )
+    app = _create_app()
     transport = httpx.ASGITransport(app=app)
 
     async with httpx.AsyncClient(
@@ -44,10 +80,7 @@ async def test_health_endpoint_accepts_the_current_local_api_token() -> None:
 async def test_health_endpoint_rejects_invalid_local_api_credentials(
     headers: dict[str, str],
 ) -> None:
-    app = create_app(
-        access_token=_TOKEN,
-        conversations=InMemoryConversationRepository(),
-    )
+    app = _create_app()
     transport = httpx.ASGITransport(app=app)
 
     async with httpx.AsyncClient(

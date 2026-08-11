@@ -1,12 +1,18 @@
 import json
 import os
+from datetime import UTC, datetime
 
 import httpx
 import pytest
+from fastapi import FastAPI
 
+from asagent.agent.run_submission import RunSubmissionService
 from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
 from asagent.api.server import LocalApiServer
+from asagent.core.ids import MessageId, RunId
+from asagent.core.messages import UserMessage
+from asagent.core.run import Run
 from asagent.storage.in_memory_conversation_repository import (
     InMemoryConversationRepository,
 )
@@ -14,15 +20,41 @@ from asagent.storage.in_memory_conversation_repository import (
 _TOKEN = LocalApiToken("test-token")
 
 
+class UnusedRunStarter:
+    async def start(
+        self,
+        *,
+        user_message: UserMessage,
+        run: Run,
+    ) -> None:
+        del user_message, run
+        raise AssertionError("run submission is not used by this test")
+
+
+def _unused_run_submission(
+    conversations: InMemoryConversationRepository,
+) -> RunSubmissionService:
+    return RunSubmissionService(
+        conversations=conversations,
+        run_starter=UnusedRunStarter(),
+        now=lambda: datetime(2026, 8, 11, tzinfo=UTC),
+        new_run_id=lambda: RunId("unused-run"),
+        new_message_id=lambda: MessageId("unused-message"),
+    )
+
+
+def _create_app() -> FastAPI:
+    conversations = InMemoryConversationRepository()
+    return create_app(
+        access_token=_TOKEN,
+        conversations=conversations,
+        run_submission=_unused_run_submission(conversations),
+    )
+
+
 @pytest.mark.asyncio
 async def test_local_api_server_binds_loopback_dynamic_port_and_serves_health() -> None:
-    server = LocalApiServer(
-        create_app(
-            access_token=_TOKEN,
-            conversations=InMemoryConversationRepository(),
-        ),
-        port=0,
-    )
+    server = LocalApiServer(_create_app(), port=0)
     ready = await server.start()
 
     try:
@@ -65,11 +97,4 @@ def test_local_api_server_rejects_unsafe_or_invalid_binding(
     message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        LocalApiServer(
-            create_app(
-                access_token=_TOKEN,
-                conversations=InMemoryConversationRepository(),
-            ),
-            host=host,
-            port=port,
-        )
+        LocalApiServer(_create_app(), host=host, port=port)

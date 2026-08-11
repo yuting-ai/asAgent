@@ -499,12 +499,20 @@ async def _run_main(args: argparse.Namespace) -> None:
             alembic_config_path=_alembic_config_path(),
         )
         conversations = SqliteConversationRepository(database_path)
+        starter = SqliteRunStarter(database_path)
 
         try:
             server = LocalApiServer(
                 create_app(
                     access_token=access_token,
                     conversations=conversations,
+                    run_submission=RunSubmissionService(
+                        conversations=conversations,
+                        run_starter=starter,
+                        now=now,
+                        new_run_id=new_run_id,
+                        new_message_id=new_message_id,
+                    ),
                 ),
                 host=args.host,
                 port=args.port,
@@ -513,6 +521,7 @@ async def _run_main(args: argparse.Namespace) -> None:
             print(f"{READY_PREFIX}{ready.to_json()}")
             await server.wait_closed()
         finally:
+            await starter.aclose()
             await conversations.aclose()
 
         return

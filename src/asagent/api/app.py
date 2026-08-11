@@ -4,13 +4,19 @@ from typing import Final, Literal
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
+from asagent.agent.run_submission import (
+    ConversationAccessDeniedError,
+    RunSubmissionService,
+    UnknownConversationError,
+)
 from asagent.api.auth import BearerTokenAuthenticator, LocalApiToken
 from asagent.core.conversation import Conversation
 from asagent.core.ids import ConversationId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.repositories import ConversationRepository
+from asagent.core.run import Run
 
 _LOCAL_USER_ID: Final = UserId("local-user")
 
@@ -62,10 +68,45 @@ class MessageResponse(BaseModel):
         )
 
 
+class CreateMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str
+
+    @field_validator("content")
+    @classmethod
+    def content_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("content must not be blank")
+        return value
+
+
+class RunResponse(BaseModel):
+    run_id: str
+    status: Literal["created"]
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_run(cls, run: Run) -> "RunResponse":
+        return cls(
+            run_id=str(run.run_id),
+            status="created",
+            created_at=run.created_at,
+            updated_at=run.updated_at,
+        )
+
+
+class SubmitMessageResponse(BaseModel):
+    message: MessageResponse
+    run: RunResponse
+
+
 def create_app(
     *,
     access_token: LocalApiToken,
     conversations: ConversationRepository,
+    run_submission: RunSubmissionService,
     conversation_id_factory: Callable[[], ConversationId] | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
@@ -118,6 +159,36 @@ def create_app(
         await conversations.save(conversation)
 
         return ConversationResponse.from_conversation(conversation)
+
+    @app.post(
+        "/api/v1/conversations/{conversation_id}/messages",
+        response_model=SubmitMessageResponse,
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(authenticate)],
+    )
+    async def submit_message(
+        conversation_id: str,
+        request: CreateMessageRequest,
+    ) -> SubmitMessageResponse:
+        try:
+            submission = await run_submission.submit(
+                conversation_id=ConversationId(conversation_id),
+                content=request.content,
+                user_id=_LOCAL_USER_ID,
+            )
+        except (
+            UnknownConversationError,
+            ConversationAccessDeniedError,
+        ) as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="conversation not found",
+            ) from error
+
+        return SubmitMessageResponse(
+            message=MessageResponse.from_message(submission.user_message),
+            run=RunResponse.from_run(submission.run),
+        )
 
     @app.get(
         "/api/v1/conversations/{conversation_id}/messages",

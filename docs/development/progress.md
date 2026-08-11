@@ -6,7 +6,7 @@
 - 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建与可见 Message 查询；运行、取消与 SSE 尚未实现。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-11
-- 当前目标：原子 Run 提交已收束为可复用应用层服务；下一项在用户确认后，按 Local API v1 契约实现“提交用户消息并创建 Run”的最小 HTTP 入口。
+- 当前目标：Local API 已能持久化用户消息与 CREATED Run；下一项在用户确认后，设计 CREATED Run 的最小执行调度边界，避免在 HTTP 请求中阻塞模型调用。
 
 ## 2. 已完成
 
@@ -2284,3 +2284,31 @@
 ### 下一步
 
 - 在用户确认后，实现阶段 6 的最小 `POST /api/v1/conversations/{conversation_id}/messages`：验证非空内容，调用 Submission Service，返回新 Message 与 `CREATED` Run 的稳定身份；本次不开始该任务。
+
+## 2026-08-11 阶段 6 提交 Message 与创建 Run Local API 工作记录
+
+### 完成
+
+- 新增认证后的 `POST /api/v1/conversations/{conversation_id}/messages`。请求只接受非空、非纯空白的 `content`，未知字段、缺失字段与空白内容均为 422；原始非空文本不会被 API 裁剪或改写。
+- 路由固定以 `local-user` 调用 `RunSubmissionService`，原子持久化 UserMessage 与 `CREATED` Run；成功以 201 返回嵌套的用户可见 Message 和 Run 身份、状态与 UTC 时间。
+- 不存在与不属于本地用户的 Conversation 均映射为同一 404，避免存在性泄漏；响应不包含 user_id、内部事件、ToolCall、Token 或模型输出。
+- App Factory 显式注入 Submission Service；开发 `serve` 组合根构造并关闭 `SqliteRunStarter`，但本任务不启动 Provider、Agent Loop、后台 Task 或 SSE。
+- OpenAPI 契约已增加该 POST 的 Bearer 保护、201 与 422 成功/验证表面断言。
+
+### 验证
+
+- 检查：运行 Health、真实 TCP Server、Conversation API 与 OpenAPI 契约定向测试，随后运行 Ruff、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；定向 27 个测试、完整 256 个测试通过，Ruff 格式化与检查、strict mypy、锁文件检查均通过；mypy 检查 131 个源码文件。
+
+### 决策变化
+
+- 无；本次按已确认的 Local API v1 契约复用 RunSubmissionService 与 RunStarter 原子事务，不改变 Provider、Runtime 或 SSE 架构。
+
+### 风险或问题
+
+- 每次成功 POST 都会创建一个新 Message 与 Run；当前无 idempotency key，因此客户端在响应丢失时不得自动重试并假定可去重。
+- CREATED Run 当前只被持久化，尚无执行调度器、取消令牌注册、Run 查询或 SSE；这避免 HTTP 请求被模型调用阻塞，但尚未形成端到端回复闭环。
+
+### 下一步
+
+- 在用户确认后，设计并实现阶段 6 的最小 CREATED Run 执行调度边界：明确何时启动、如何持有/释放取消令牌、何时将 Runtime 结果持久化，以及 HTTP/SSE 如何只观察而不承担执行；本次不开始该任务。
