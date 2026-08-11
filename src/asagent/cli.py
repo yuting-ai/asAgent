@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import os
+import sys
 from collections.abc import AsyncIterator, Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ import httpx
 from asagent.agent.loop import AgentLoop
 from asagent.agent.persistent_runtime import PersistentAgentRuntime
 from asagent.api.app import create_app
+from asagent.api.bootstrap import read_local_api_token
 from asagent.api.server import READY_PREFIX, LocalApiServer
 from asagent.bootstrap.environment_secret_provider import (
     EnvironmentSecretProvider,
@@ -440,6 +442,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Local API port. Defaults to 0 for a system-assigned port.",
     )
     parser.add_argument(
+        "--bootstrap-stdin",
+        action="store_true",
+        help=(
+            "Read one local API bootstrap JSON record from standard input. "
+            "The record must contain the temporary API token."
+        ),
+    )
+    parser.add_argument(
         "--profile",
         help="Use the named local Provider Profile instead of the offline provider.",
     )
@@ -467,8 +477,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 async def _run_main(args: argparse.Namespace) -> None:
     if args.command == "serve":
+        if not args.bootstrap_stdin:
+            raise ValueError("serve requires --bootstrap-stdin")
+
+        access_token = read_local_api_token(sys.stdin.readline)
         server = LocalApiServer(
-            create_app(),
+            create_app(access_token=access_token),
             host=args.host,
             port=args.port,
         )

@@ -73,7 +73,7 @@ asAgent/
 
 `core` 不依赖 FastAPI、Electron、SQLite SDK 或任何模型厂商 SDK。依赖方向由外向内，具体实现通过构造函数注入。
 
-阶段 6 的 Local API 从 `api.app.create_app()` 开始。该 App Factory 目前只暴露无需认证的 `GET /api/v1/health` liveness 契约，返回最小 JSON 状态；它不创建数据库连接、Agent Runtime、模型 Client、文件工具或后台任务。`api.server.LocalApiServer` 是独立的 Uvicorn 生命周期封装：它只接受 `127.0.0.1`，由 Backend 先绑定端口（允许 `0` 的系统分配）再交给 Uvicorn，并在实际服务启动后产生含 host、port、PID 和协议版本的 `ServerReady`。开发 CLI 的 `asagent serve --port 0` 以 `ASAGENT_READY ` 前缀输出其 JSON，供未来 Electron Main 读取；它尚未接收 Token、AppPaths 或 Runtime。Bearer Token、Origin/CORS、依赖注入、Conversation/Run 路由与 SSE 都保留给后续独立任务。
+阶段 6 的 Local API 从 `api.app.create_app(access_token=...)` 开始。该 App Factory 目前只暴露 `GET /api/v1/health` liveness 契约，返回最小 JSON 状态；它不创建数据库连接、Agent Runtime、模型 Client、文件工具或后台任务。`api.auth.LocalApiToken` 只在内存中保存本次启动的随机 Token，`BearerTokenAuthenticator` 以常量时间比较验证每个当前 API 请求；缺失、格式错误或不匹配的凭据统一返回 401，Health 也不再例外。`api.bootstrap.read_local_api_token()` 从一次 JSON Bootstrap 记录取得 Token，既不把它写入配置/SQLite/日志，也不放进 ready 记录。`api.server.LocalApiServer` 是独立的 Uvicorn 生命周期封装：它只接受 `127.0.0.1`，由 Backend 先绑定端口（允许 `0` 的系统分配）再交给 Uvicorn，并在实际服务启动后产生含 host、port、PID 和协议版本的 `ServerReady`。开发 CLI 的 `asagent serve --bootstrap-stdin --port 0` 从 stdin 读取该记录，再以 `ASAGENT_READY ` 前缀输出不含 Token 的 JSON，供未来 Electron Main 读取。Origin/CORS、依赖注入、Conversation/Run 路由与 SSE 都保留给后续独立任务。
 
 ## 4. 核心身份模型
 

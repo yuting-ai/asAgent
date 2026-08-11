@@ -59,10 +59,11 @@ def test_parse_args_supports_an_explicit_persistent_real_provider() -> None:
     assert str(args.app_home) == "custom-app-home"
 
 
-def test_parse_args_supports_local_api_server_command() -> None:
-    args = parse_args(("serve", "--port", "0"))
+def test_parse_args_supports_local_api_server_bootstrap() -> None:
+    args = parse_args(("serve", "--bootstrap-stdin", "--port", "0"))
 
     assert args.command == "serve"
+    assert args.bootstrap_stdin is True
     assert args.host == "127.0.0.1"
     assert args.port == 0
 

@@ -545,6 +545,16 @@
 - 影响：`fastapi` 成为运行依赖，Pydantic 继续只用于系统边界。后续独立任务再引入 Uvicorn、host/port 参数、仅监听 `127.0.0.1`、Token Bootstrap、Origin/CORS、Conversation/Run API 与 fetch-based SSE；Health 是否最终免认证由 Bootstrap 设计确认。
 - 替代方案：在 CLI 中手写 HTTP Server、先绑定固定端口再补路由、让 Health 启动完整 Runtime/真实 Provider，或第一步就引入认证/SSE；当前均不采用。
 
+### DEC-062：本地 API 使用一次性 stdin Bootstrap Token 并认证 Health
+
+- 日期：2026-08-11
+- 状态：已确认
+- 背景：仅绑定 `127.0.0.1` 不能阻止同一设备上的其他进程请求本地 API；而把 Token 放入命令行、URL、配置、SQLite 或 ready 输出都会扩大 Secret 暴露面。当前还没有 Electron Main，但阶段 6 需要先固定可测试的 Backend 认证契约。
+- 决策：每次 Backend 启动使用一个随机、仅内存存在的 `LocalApiToken`。开发 `serve` 命令只在显式 `--bootstrap-stdin` 模式下，从 stdin 读取一次 JSON Bootstrap 记录中的 Token；命令行参数与 `ASAGENT_READY` JSON 均不包含 Secret。App Factory 显式接收 Token，所有当前 API 路由（包括 Health）经 Bearer Header 认证；缺失、格式错误或错误 Token 均返回相同的 401 与 `WWW-Authenticate: Bearer`，比较使用常量时间函数。Token 不持久化、不记录日志，进程结束即失效。
+- 原因：一次性 stdin 管道与未来 Electron Main 持有的子进程 stdin 自然对应，避免开发期先引入环境变量或命令行 Secret；先保护 Health 使启动握手也必须证明调用方拥有本次启动能力。
+- 影响：源码开发需向 stdin 提供 Bootstrap JSON 后才能运行 `serve`；未来 Electron Main 负责生成随机 Token、写入自己的 Backend 子进程 stdin，并仅在 Main/Backend/当前 Renderer 内存中保存。CORS/Origin、Conversation/Run 路由、SSE、Token 轮换、Shutdown Endpoint 和 Electron 的进程管道管理仍是后续独立任务。
+- 替代方案：Health 永久免认证、固定或持久化 Token、通过 `--token` 传参、将 Token 放入 ready JSON/URL、或仅依赖回环地址；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

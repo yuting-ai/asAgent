@@ -2116,3 +2116,32 @@
 ### 下一步
 
 - 在用户确认后，设计阶段 6 的本地 API Token Bootstrap 与业务端点认证边界；本次不开始该任务。
+
+## 2026-08-11 阶段 6 Local API Token Bootstrap 与 Health 认证工作记录
+
+### 完成
+
+- 新增只在内存中存在的 `LocalApiToken` 与 Bearer 认证器；凭据使用常量时间比较，缺失、格式错误或错误 Token 统一返回 401 和 `WWW-Authenticate: Bearer`。
+- `create_app()` 现在显式接收本次启动 Token；当前唯一的 Health 路由也受相同认证保护，避免回环地址被错误视为身份验证。
+- 新增一次性 JSON Bootstrap 读取器。开发 `asagent serve` 仅在 `--bootstrap-stdin` 模式从 stdin 读取 `{"token":"..."}`，Token 不会进入命令行、ready JSON、配置、SQLite 或日志。
+- 真实手动验收确认服务输出的 `ASAGENT_READY` 仅含 host、port、PID 和协议版本；使用正确 `Authorization: Bearer ...` 请求回环 Health 返回 200 与最小 liveness JSON。
+
+### 验证
+
+- 检查：运行 Bootstrap/CLI/API Health/真实 TCP Server 定向测试、Ruff 格式化与检查、strict mypy 与完整 `scripts/check.sh`。
+- 结果：通过；完整 236 个测试通过，131 个文件格式正确，127 个源码文件 Ruff 与 strict mypy 无问题，锁定依赖解析为 42 个包。
+- 检查：以 stdin Bootstrap Token 启动 `asagent serve --bootstrap-stdin --port 0`，再以正确 Bearer Header 调用 ready 记录所示回环端口的 Health。
+- 结果：通过；HTTP 200 返回 `{"status":"ok"}`，ready 记录未暴露 Token。
+
+### 决策变化
+
+- 新增 DEC-062：本地 API 使用一次性 stdin Bootstrap Token 并认证 Health。
+
+### 风险或问题
+
+- 当前 stdin Bootstrap 是源码开发与未来 Electron 子进程管道的最小 Backend 契约；Electron Main 尚未生成 Token、持有子进程 stdin、校验 ready PID/版本或轮询 Health。
+- 还没有 Origin/CORS、业务 API、SSE、Token 轮换、Shutdown Endpoint 或正式 Renderer 内存传递；因此不能将当前 Server 视为完整桌面连接链路。
+
+### 下一步
+
+- 在用户确认后，实现阶段 6 的最小 Conversation HTTP 查询接口，并复用当前 Bearer 认证；本次不开始该任务。

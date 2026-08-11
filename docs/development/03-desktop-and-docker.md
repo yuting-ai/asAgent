@@ -120,7 +120,7 @@ Token 不作为命令行参数。首选由 Main 通过仅连接到该子进程�
 uv run asagent serve ...
 ```
 
-阶段 6 当前已实现最小开发入口：`uv run asagent serve --port 0`。Backend 仅接受 `127.0.0.1`，自己绑定端口并在 Uvicorn 启动后向 stdout 输出一次 `ASAGENT_READY ` 前缀的 JSON，其中包含 `host`、实际 `port`、`pid` 和 `protocol_version`。该记录尚不携带 Token、AppPaths、Workspace、Runtime 状态或认证结论；Electron Main 的 Bootstrap 管道、PID/协议校验与 Health 轮询仍待阶段 7 组合。
+阶段 6 当前已实现最小开发入口：`uv run asagent serve --bootstrap-stdin --port 0`。调用方在 stdin 写入一行 `{"token":"..."}` Bootstrap JSON；该参数只声明读取管道，Token 本身不出现在命令行。Backend 仅接受 `127.0.0.1`，自己绑定端口并在 Uvicorn 启动后向 stdout 输出一次 `ASAGENT_READY ` 前缀的 JSON，其中包含 `host`、实际 `port`、`pid` 和 `protocol_version`，不包含 Token。此阶段 Health 已要求同一 Token 的 Bearer Header；AppPaths、Workspace、Runtime 状态及 Electron Main 的 PID/协议校验、Health 轮询仍待阶段 7 组合。
 
 发布环境命令为：
 
@@ -199,7 +199,7 @@ Authorization: Bearer <token>
 
 Token 只保存在 Main、Backend 和当前 Renderer 的内存中，不进入命令行、URL、localStorage 或日志。Local API 校验 Origin Allowlist；生产 Renderer 与开发服务器分别配置明确 Origin。FastAPI 只为这些来源开放 CORS，并处理携带 Authorization Header 所需的 OPTIONS 预检，不使用 `*` 来源。
 
-Health Endpoint 只返回最少状态，可以免认证或使用单独 Bootstrap 机制。Backend 只监听 `127.0.0.1`。
+Health Endpoint 只返回最少状态，并与当前其他 API 一样要求本次启动的 Bearer Token。Backend 只监听 `127.0.0.1`。
 
 ## 6. Backend 生命周期
 
