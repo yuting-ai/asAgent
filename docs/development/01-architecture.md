@@ -77,6 +77,8 @@ asAgent/
 
 阶段 7 的后续只读接入已完成：`BackendLauncher` 以自身持有的 loopback endpoint 和仅 Main 可见的 Token 提供两个固定操作——列出 Conversation、读取指定 Conversation 的可见 Message。受来源校验的窄 Preload 只暴露这两个操作与无敏感的 Backend 状态；Renderer 没有 Token、端口、通用 HTTP、写入 API 或 SSE 能力。此前关于 Renderer 尚不能调用业务 API 的描述由此更新；提交 Message、Run 状态观察与 SSE 仍是后续独立任务。
 
+阶段 7 的最小写入接入也已完成：同一 `BackendLauncher` 额外提供创建空 Conversation 与向指定 Conversation 提交非空 Message 的固定操作。Main 在调用前验证 IPC 参数，并继续检查 Renderer 来源；提交成功后 Renderer 仅显示 API 返回的 USER Message 和“等待响应”状态。运行中的 Run 仍未被 Renderer 查询或订阅，AssistantMessage 只会在后续手动重新读取历史时出现。
+
 ## 4. 核心身份模型
 
 ### 4.1 ID 层级

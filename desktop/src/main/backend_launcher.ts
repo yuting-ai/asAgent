@@ -23,11 +23,13 @@ export type ConversationMessage = {
   created_at: string
 }
 
+export type CreatedConversation = ConversationSummary
+
 type BackendLauncherOptions = {
   projectRoot: string
   appHome: string
   spawnBackend?: typeof spawn
-  fetchHealth?: typeof fetch
+  fetchBackend?: typeof fetch
   startupTimeoutMs?: number
   healthTimeoutMs?: number
   healthRetryIntervalMs?: number
@@ -84,7 +86,7 @@ export class BackendLauncher {
   private readonly projectRoot: string
   private readonly appHome: string
   private readonly spawnBackend: typeof spawn
-  private readonly fetchHealth: typeof fetch
+  private readonly fetchBackend: typeof fetch
   private readonly startupTimeoutMs: number
   private readonly healthTimeoutMs: number
   private readonly healthRetryIntervalMs: number
@@ -97,7 +99,7 @@ export class BackendLauncher {
     this.projectRoot = options.projectRoot
     this.appHome = options.appHome
     this.spawnBackend = options.spawnBackend ?? spawn
-    this.fetchHealth = options.fetchHealth ?? fetch
+    this.fetchBackend = options.fetchBackend ?? fetch
     this.startupTimeoutMs = options.startupTimeoutMs ?? 5_000
     this.healthTimeoutMs = options.healthTimeoutMs ?? 5_000
     this.healthRetryIntervalMs = options.healthRetryIntervalMs ?? 100
@@ -109,25 +111,52 @@ export class BackendLauncher {
   }
 
   async listConversations(): Promise<ConversationSummary[]> {
-    return this.getJson('/api/v1/conversations')
+    return this.requestJson('/api/v1/conversations', 'GET')
   }
 
   async listConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
-    return this.getJson(`/api/v1/conversations/${encodeURIComponent(conversationId)}/messages`)
+    return this.requestJson(
+      `/api/v1/conversations/${encodeURIComponent(conversationId)}/messages`,
+      'GET'
+    )
   }
 
-  private async getJson<T>(path: string): Promise<T> {
+  async createConversation(): Promise<CreatedConversation> {
+    return this.requestJson('/api/v1/conversations', 'POST', {})
+  }
+
+  async submitMessage(conversationId: string, content: string): Promise<ConversationMessage> {
+    if (!content.trim()) {
+      throw new Error('Message content is invalid.')
+    }
+
+    const result = await this.requestJson<{ message: ConversationMessage }>(
+      `/api/v1/conversations/${encodeURIComponent(conversationId)}/messages`,
+      'POST',
+      { content }
+    )
+
+    return result.message
+  }
+
+  private async requestJson<T>(path: string, method: 'GET' | 'POST', body?: unknown): Promise<T> {
     if (this.ready === undefined || this.token === undefined) {
       throw new Error('Backend is not ready.')
     }
 
-    const response = await this.fetchHealth(`http://${this.ready.host}:${this.ready.port}${path}`, {
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${this.token}`
-      },
-      signal: AbortSignal.timeout(5_000)
-    })
+    const response = await this.fetchBackend(
+      `http://${this.ready.host}:${this.ready.port}${path}`,
+      {
+        method,
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${this.token}`,
+          ...(body === undefined ? {} : { 'Content-Type': 'application/json' })
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: AbortSignal.timeout(5_000)
+      }
+    )
 
     if (!response.ok) {
       throw new Error(`Backend API request failed with status ${response.status}.`)
@@ -266,7 +295,7 @@ export class BackendLauncher {
 
     while (Date.now() < deadline) {
       try {
-        const response = await this.fetchHealth(healthUrl, {
+        const response = await this.fetchBackend(healthUrl, {
           headers: {
             Authorization: `Bearer ${token}`
           },

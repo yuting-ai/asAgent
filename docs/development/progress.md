@@ -2627,3 +2627,30 @@
 ### 下一步
 
 - 在用户确认后，实现 Electron 的最小 Conversation 创建与 Message 提交：仍由 Main 持有 Token，Renderer 只调用固定 Preload 操作；随后再单独接入 Run 状态和 SSE。本次不提前开始该任务。
+
+## 2026-08-11 阶段 7 Electron 最小 Conversation 与 Message 提交工作记录
+
+### 完成
+
+- `BackendLauncher` 的私有认证连接新增两个固定 `POST` 操作：创建空 Conversation，以及向指定 Conversation 提交非空 Message；所有请求仍由 Main 持有 Bearer Token。
+- Main 对两个 IPC 操作继续验证 Renderer 来源，并验证 Conversation ID 和 Message 内容；Preload 只暴露具名操作，不提供 Token、端口、任意 URL 或通用 IPC 转发。
+- Renderer 可创建并自动选择新 Conversation，提交后立即显示 API 返回的 USER Message 与 `Message submitted. Waiting for a response.`。发送期间禁用会改变选择的操作，避免异步响应写入错误 Conversation。
+- Launcher Vitest 覆盖创建和提交请求的 POST 方法、JSON 正文与 Bearer Header；本任务未改动 Python Core/API 契约。
+
+### 验证
+
+- 检查：在 `desktop/` 运行 Prettier、TypeScript 类型检查、ESLint、Vitest、生产构建及真实 `npm run dev`。
+- 结果：通过；TypeScript、ESLint 和生产构建成功，Vitest 4 个测试通过；Electron 开发窗口已人工确认创建新 Conversation、显示提交的 `hi` 与等待提示。
+
+### 决策变化
+
+- 补充 DEC-062：写入也通过 Main 持有 Token 的固定操作完成；提交与异步 Run 观察仍为两个独立职责。
+
+### 风险或问题
+
+- 后端会立刻在后台执行 Run，但当前 Renderer 没有 Run ID、状态轮询或 SSE，因此不会自动显示 AssistantMessage。
+- `npm run dev` 是常驻开发服务，必须先以 `Ctrl+C` 结束，才能在同一终端执行后续命令；粘贴时勿附带终端的 bracketed-paste 控制字符或 `~`。
+
+### 下一步
+
+- 在用户确认后，接入最小 Run 状态观察：提交后保留 Run ID，查询终态并重新读取历史；SSE 实时事件作为紧随其后的独立任务。本次不提前开始。

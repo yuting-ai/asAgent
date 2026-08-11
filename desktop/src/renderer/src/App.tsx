@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 
 type AppInfo = {
   appName: string
@@ -31,6 +31,10 @@ export default function App(): React.JSX.Element {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [isCreatingConversation, setIsCreatingConversation] = useState(false)
+  const [isSubmittingMessage, setIsSubmittingMessage] = useState(false)
+  const [submissionNotice, setSubmissionNotice] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -68,6 +72,9 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     if (selectedConversationId === null) {
+      queueMicrotask(() => {
+        setMessages([])
+      })
       return
     }
 
@@ -101,6 +108,54 @@ export default function App(): React.JSX.Element {
   )
   const visibleMessages = selectedConversationId === null ? [] : messages
 
+  const isBusy = isCreatingConversation || isSubmittingMessage
+
+  async function createConversation(): Promise<void> {
+    if (isBusy) {
+      return
+    }
+
+    setIsCreatingConversation(true)
+    setErrorMessage(null)
+    setSubmissionNotice(null)
+
+    try {
+      const conversation = await window.desktop.createConversation()
+      setConversations((current) => [...current, conversation])
+      setSelectedConversationId(conversation.conversation_id)
+    } catch {
+      setErrorMessage('A new conversation could not be created.')
+    } finally {
+      setIsCreatingConversation(false)
+    }
+  }
+
+  async function submitMessage(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+
+    const conversationId = selectedConversationId
+    const content = draft
+
+    if (conversationId === null || !content.trim() || isBusy) {
+      return
+    }
+
+    setIsSubmittingMessage(true)
+    setErrorMessage(null)
+    setSubmissionNotice(null)
+
+    try {
+      const message = await window.desktop.submitMessage(conversationId, content)
+      setMessages((current) => [...current, message])
+      setDraft('')
+      setSubmissionNotice('Message submitted. Waiting for a response.')
+    } catch {
+      setErrorMessage('Message submission failed.')
+    } finally {
+      setIsSubmittingMessage(false)
+    }
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -109,8 +164,13 @@ export default function App(): React.JSX.Element {
           <h1>asAgent</h1>
         </div>
 
-        <button className="new-conversation" disabled type="button">
-          + New conversation
+        <button
+          className="new-conversation"
+          disabled={isBusy}
+          onClick={() => void createConversation()}
+          type="button"
+        >
+          {isCreatingConversation ? 'Creating…' : '+ New conversation'}
         </button>
 
         <nav aria-label="Conversations">
@@ -124,6 +184,7 @@ export default function App(): React.JSX.Element {
                 className={`conversation ${
                   conversation.conversation_id === selectedConversationId ? 'active' : ''
                 }`}
+                disabled={isBusy}
                 key={conversation.conversation_id}
                 onClick={() => setSelectedConversationId(conversation.conversation_id)}
                 type="button"
@@ -173,20 +234,31 @@ export default function App(): React.JSX.Element {
           )}
         </div>
 
-        <form className="composer">
+        <form className="composer" onSubmit={(event) => void submitMessage(event)}>
           <label className="sr-only" htmlFor="message">
             Message
           </label>
           <textarea
-            disabled
+            disabled={selectedConversationId === null || isBusy}
             id="message"
-            placeholder="Sending messages will be available next."
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder={
+              selectedConversationId === null
+                ? 'Create or select a conversation first.'
+                : 'Type a message…'
+            }
             rows={3}
+            value={draft}
           />
           <div className="composer-footer">
-            <span>Conversation history is read-only in this build.</span>
-            <button disabled type="submit">
-              Send
+            <span>
+              {submissionNotice ?? 'Responses will appear after run updates are connected.'}
+            </span>
+            <button
+              disabled={selectedConversationId === null || !draft.trim() || isBusy}
+              type="submit"
+            >
+              {isSubmittingMessage ? 'Sending…' : 'Send'}
             </button>
           </div>
         </form>

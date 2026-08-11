@@ -21,7 +21,11 @@ const desktopBridge = {
   listConversations: (): Promise<ConversationSummary[]> =>
     ipcRenderer.invoke('desktop:list-conversations'),
   listConversationMessages: (conversationId: string): Promise<ConversationMessage[]> =>
-    ipcRenderer.invoke('desktop:list-conversation-messages', conversationId)
+    ipcRenderer.invoke('desktop:list-conversation-messages', conversationId),
+  createConversation: (): Promise<ConversationSummary> =>
+    ipcRenderer.invoke('desktop:create-conversation'),
+  submitMessage: (conversationId: string, content: string): Promise<ConversationMessage> =>
+    ipcRenderer.invoke('desktop:submit-message', conversationId, content)
 }
 
 contextBridge.exposeInMainWorld('desktop', desktopBridge)

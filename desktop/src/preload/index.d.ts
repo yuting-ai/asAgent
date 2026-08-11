@@ -21,6 +21,8 @@ interface DesktopBridge {
   getBackendStatus(): Promise<{ status: 'ready' | 'unavailable' }>
   listConversations(): Promise<ConversationSummary[]>
   listConversationMessages(conversationId: string): Promise<ConversationMessage[]>
+  createConversation(): Promise<ConversationSummary>
+  submitMessage(conversationId: string, content: string): Promise<ConversationMessage>
 }
 
 declare global {

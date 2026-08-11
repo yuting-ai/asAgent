@@ -564,6 +564,15 @@
 - 影响：当前固定操作为 Conversation 列表与指定 Conversation 的 Message 历史读取。创建、提交、Run 查询、取消和 SSE 将在各自独立任务中按同一原则增加，且每项都需经过来源校验。
 - 替代方案：将 Token/端口交给 Renderer、暴露通用 fetch 或 `ipcRenderer.invoke(channel, payload)` 转发器；当前均不采用。
 
+### DEC-062 实施补充：固定写入操作沿用 Main 私有 Token
+
+- 日期：2026-08-11
+- 状态：已确认
+- 决策：创建空 Conversation 与提交非空 Message 同样只由 `BackendLauncher` 经 Main 持有的私有 Token 请求；Main 先验证来自受信任 Renderer 的参数，Preload 只暴露两个具名方法。提交后 Renderer 只消费 API 返回的用户 Message，不把后台 Run 的执行、状态轮询或 SSE 混入本次写入操作。
+- 原因：这让用户可以真实开始对话，同时把一次 HTTP 提交与后续异步 Run 观察明确分开，避免先引入通用 IPC/HTTP 转发器或半成品轮询器。
+- 影响：UI 可以显示“已提交、等待响应”，刷新或重新选择 Conversation 后才能读取已持久化的助手回答。下一项应独立接入 Run 状态与 SSE，而不是在提交函数中等待模型。
+- 替代方案：Renderer 直接持有 Token、提交 HTTP 请求同步等待最终模型回答、或在本次引入通用后台轮询；当前均不采用。
+
 ### DEC-063：以独立生命周期和失败语义控制抽象粒度
 
 - 日期：2026-08-11

@@ -126,6 +126,8 @@ uv run asagent serve ...
 
 阶段 7 已进一步完成只读 Renderer 接入：Electron Main 仍独占 Token 和 endpoint，`BackendLauncher` 复用该私有连接请求固定的 Conversation 列表和 Message 历史。Preload 只向受信任 Renderer 暴露这两个固定读取操作；它不暴露 Token、端口、任意 URL、写入 API 或 SSE。此前“Renderer 尚不能调用业务 API”的阶段性描述以此为准更新；创建 Conversation、提交 Message、Run 观察和 SSE 仍待后续独立任务。
 
+阶段 7 现已允许 Renderer 经两个额外固定操作创建空 Conversation 与提交非空 Message。Main 保持来源检查并持有 Token；Renderer 不直接构造认证 HTTP 请求。提交请求立即返回已持久化的 USER Message 与后台 `created` Run，当前 UI 只显示前者及等待状态；Run 查询和 SSE 不在本次范围内。
+
 发布环境命令为：
 
 ```text

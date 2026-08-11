@@ -153,6 +153,35 @@ app.whenReady().then(async () => {
     return getReadyBackendLauncher().listConversationMessages(conversationId)
   })
 
+  ipcMain.handle('desktop:create-conversation', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().createConversation()
+  })
+
+  ipcMain.handle('desktop:submit-message', (event, conversationId: unknown, content: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+
+    if (typeof conversationId !== 'string' || !conversationId.trim()) {
+      throw new Error('Conversation ID is invalid.')
+    }
+
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new Error('Message content is invalid.')
+    }
+
+    return getReadyBackendLauncher().submitMessage(conversationId, content)
+  })
+
   createWindow()
 
   app.on('activate', () => {
