@@ -560,9 +560,9 @@
 - 日期：2026-08-11
 - 状态：已确认
 - 背景：asAgent 同时承担学习与产品开发。随着 Submission、Runtime、Dispatcher 等组件出现，过度拆分“仅转发一次调用”的薄包装层会使数据流更难理解、测试夹具膨胀，且延迟真实体验；反过来，把原子提交、后台生命周期和模型/工具执行混在一个入口中又会掩盖取消、失败持久化和 UI 观察责任。
-- 决策：只在对象拥有独立调用者、生命周期、失败处理或可验证业务规则之一时新增边界。当前 Run 路径保持 Submission Service（原子创建）、PersistentAgentRuntime（模型/工具执行与终态）和 Dispatcher（后台 Task/协作式取消/清理）三层；“只包一层 Runtime、没有独立调用者或规则”的 PersistentRunExecutor 不实现。意外执行异常的 FAILED 终态属于 Runtime 的执行责任，而不是新增包装器。
+- 决策：这是一条全项目约定，适用于 Python Core、Local API、Electron Main/Preload/Renderer、构建和测试。只在对象拥有独立调用者、生命周期、失败处理或可验证业务规则之一时新增边界。当前 Run 路径保持 Submission Service（原子创建）、PersistentAgentRuntime（模型/工具执行与终态）和 Dispatcher（后台 Task/协作式取消/清理）三层；“只包一层 Runtime、没有独立调用者或规则”的 PersistentRunExecutor 不实现。意外执行异常的 FAILED 终态属于 Runtime 的执行责任，而不是新增包装器。已验证的现有模块保持不动，除非真实问题或新范围使其需要改变。
 - 原因：三层分别对应 API/CLI 提交、Agent 执行和后台生命周期，具有可独立测试的失败模式；薄包装器不能改善替换性或可观察性时只会增加认知成本。
-- 影响：后续设计需先写清数据流与失败归属，再决定是否新增 Protocol、Service 或 Adapter。优先实现最小可体验闭环；Provider、SSE、桌面和未来多进程需求出现前，不为假设场景预建层次。
+- 影响：后续设计需先写清数据流与失败归属，再决定是否新增 Protocol、Service、Adapter、前端 store、React hook、IPC Bridge 或组件层。优先实现最小可体验闭环；Provider、SSE、桌面和未来多进程需求出现前，不为假设场景预建层次。该约定指导未来增量，不作为对既有已验证代码的重构命令。
 - 替代方案：把所有逻辑塞入 FastAPI 路由或 Runtime；为每一步都建立 Service/Executor/Adapter/Protocol 包装；当前均不采用。
 
 ## 2. 技术选型

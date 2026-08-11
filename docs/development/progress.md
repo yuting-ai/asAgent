@@ -2370,9 +2370,9 @@
 
 ### 完成
 
-- 确认后续设计以简单、清晰、可验证为优先，不为“架构感”或未经证实的未来需求继续细拆包装层。
+- 确认全项目后续设计（Python、Local API、Electron 前端、构建与测试）以简单、清晰、可验证为优先，不为“架构感”或未经证实的未来需求继续细拆包装层。
 - 新增对象前必须能说明它独立的调用者、生命周期、失败处理或业务规则；若仅有单一调用者且只转发，默认合并到现有边界。
-- 当前 Run 路径固定为 Submission Service、PersistentAgentRuntime、InProcessRunDispatcher 三层；不实现仅包裹 Runtime 的 PersistentRunExecutor。意外执行异常的失败终态归 PersistentAgentRuntime。
+- 当前 Run 路径固定为 Submission Service、PersistentAgentRuntime、InProcessRunDispatcher 三层；不实现仅包裹 Runtime 的 PersistentRunExecutor。意外执行异常的失败终态归 PersistentAgentRuntime。该约定只指导后续增量，已验证的既有实现不因抽象偏好单独重构。
 
 ### 验证
 
