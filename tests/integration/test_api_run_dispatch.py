@@ -70,6 +70,7 @@ async def test_submit_message_dispatches_background_execution(tmp_path: Path) ->
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=conversations,
+        runs=runs,
         run_submission=run_submission,
         dispatch_submitted_run=dispatcher.dispatch,
     )

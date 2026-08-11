@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import httpx
 import pytest
@@ -12,6 +13,7 @@ from asagent.api.auth import LocalApiToken
 from asagent.core.conversation import Conversation
 from asagent.core.ids import ConversationId, MessageId, RunId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
+from asagent.core.repositories import RunRepository
 from asagent.core.run import Run
 from asagent.core.run_status import RunStatus
 from asagent.storage.sqlite.conversation_repository import (
@@ -19,6 +21,8 @@ from asagent.storage.sqlite.conversation_repository import (
 )
 from asagent.storage.sqlite.run_repository import SqliteRunRepository
 from asagent.storage.sqlite.run_starter import SqliteRunStarter
+
+_UNUSED_RUNS = cast(RunRepository, object())
 
 
 class UnusedRunStarter:
@@ -98,6 +102,7 @@ async def test_list_conversations_returns_only_local_user_metadata(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
     )
@@ -149,6 +154,7 @@ async def test_list_conversations_requires_the_current_local_api_token(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
     )
@@ -197,6 +203,7 @@ async def test_list_conversation_messages_returns_visible_messages_in_sequence_o
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
     )
@@ -263,6 +270,7 @@ async def test_list_conversation_messages_hides_unknown_or_other_user_conversati
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
     )
@@ -297,6 +305,7 @@ async def test_list_conversation_messages_requires_the_current_local_api_token(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
     )
@@ -330,6 +339,7 @@ async def test_create_conversation_persists_an_empty_local_conversation(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
         conversation_id_factory=lambda: conversation_id,
@@ -379,6 +389,7 @@ async def test_create_conversation_rejects_unknown_request_fields(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
     )
@@ -414,6 +425,7 @@ async def test_create_conversation_requires_the_current_local_api_token(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=repository,
+        runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
     )
@@ -455,6 +467,7 @@ async def test_submit_message_creates_a_visible_message_and_created_run(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=conversations,
+        runs=runs,
         run_submission=RunSubmissionService(
             conversations=conversations,
             run_starter=starter,
@@ -545,6 +558,7 @@ async def test_submit_message_rejects_invalid_request_bodies(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=conversations,
+        runs=runs,
         run_submission=RunSubmissionService(
             conversations=conversations,
             run_starter=starter,
@@ -610,6 +624,7 @@ async def test_submit_message_hides_unknown_or_other_user_conversations(
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=conversations,
+        runs=runs,
         run_submission=RunSubmissionService(
             conversations=conversations,
             run_starter=starter,

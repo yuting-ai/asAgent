@@ -542,6 +542,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                 create_app(
                     access_token=access_token,
                     conversations=conversations,
+                    runs=runs,
                     run_submission=run_submission,
                     dispatch_submitted_run=dispatcher.dispatch,
                 ),

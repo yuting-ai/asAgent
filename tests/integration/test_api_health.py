@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import cast
 
 import httpx
 import pytest
@@ -9,10 +10,13 @@ from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
 from asagent.core.ids import MessageId, RunId
 from asagent.core.messages import UserMessage
+from asagent.core.repositories import RunRepository
 from asagent.core.run import Run
 from asagent.storage.in_memory_conversation_repository import (
     InMemoryConversationRepository,
 )
+
+_UNUSED_RUNS = cast(RunRepository, object())
 
 _TOKEN = LocalApiToken("test-token")
 
@@ -49,6 +53,7 @@ def _create_app() -> FastAPI:
     return create_app(
         access_token=_TOKEN,
         conversations=conversations,
+        runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(conversations),
         dispatch_submitted_run=_discard_submission,
     )

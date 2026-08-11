@@ -14,10 +14,11 @@ from asagent.agent.run_submission import (
 )
 from asagent.api.auth import BearerTokenAuthenticator, LocalApiToken
 from asagent.core.conversation import Conversation
-from asagent.core.ids import ConversationId, UserId
+from asagent.core.ids import ConversationId, RunId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
-from asagent.core.repositories import ConversationRepository
+from asagent.core.repositories import ConversationRepository, RunRepository
 from asagent.core.run import Run
+from asagent.core.run_status import RunStatus
 
 _LOCAL_USER_ID: Final = UserId("local-user")
 
@@ -84,7 +85,7 @@ class CreateMessageRequest(BaseModel):
 
 class RunResponse(BaseModel):
     run_id: str
-    status: Literal["created"]
+    status: RunStatus
     created_at: datetime
     updated_at: datetime
 
@@ -92,7 +93,7 @@ class RunResponse(BaseModel):
     def from_run(cls, run: Run) -> "RunResponse":
         return cls(
             run_id=str(run.run_id),
-            status="created",
+            status=run.status,
             created_at=run.created_at,
             updated_at=run.updated_at,
         )
@@ -107,6 +108,7 @@ def create_app(
     *,
     access_token: LocalApiToken,
     conversations: ConversationRepository,
+    runs: RunRepository,
     run_submission: RunSubmissionService,
     dispatch_submitted_run: Callable[[SubmittedRun], object],
     conversation_id_factory: Callable[[], ConversationId] | None = None,
@@ -193,6 +195,28 @@ def create_app(
             message=MessageResponse.from_message(submission.user_message),
             run=RunResponse.from_run(submission.run),
         )
+
+    @app.get(
+        "/api/v1/runs/{run_id}",
+        response_model=RunResponse,
+        dependencies=[Depends(authenticate)],
+    )
+    async def get_run(run_id: str) -> RunResponse:
+        stored_run = await runs.get(RunId(run_id))
+        if stored_run is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="run not found",
+            )
+
+        conversation = await conversations.get(stored_run.conversation_id)
+        if conversation is None or conversation.user_id != _LOCAL_USER_ID:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="run not found",
+            )
+
+        return RunResponse.from_run(stored_run)
 
     @app.get(
         "/api/v1/conversations/{conversation_id}/messages",

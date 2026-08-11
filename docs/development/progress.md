@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 6 进行中；阶段 0–5 的 Core、Agent Loop、SQLite 持久化、Context Builder 基础与受控 Workspace Tool 边界已完成，当前正在建立 Electron 未来使用的 Local API 与 SSE 入口。
-- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建与可见 Message 查询；运行、取消与 SSE 尚未实现。
+- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建、可见 Message 查询/提交，以及按 Run ID 查询状态；HTTP 取消与 SSE 尚未实现。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-11
-- 当前目标：Local API 已能在后台执行已提交 Run 并持久化最终回答；下一项在用户确认后，设计 Run 查询与取消的最小 HTTP 契约，随后再接入 SSE。
+- 当前目标：客户端可用 POST 返回的 `run_id` 查询 `created → completed/failed/...`；下一项在用户确认后实现最小 HTTP 取消，随后再接入 SSE。
 
 ## 2. 已完成
 
@@ -2443,3 +2443,28 @@
 ### 下一步
 
 - 在用户确认后，实现阶段 6 最小 Run 查询 API：按 local-user 与 Conversation 归属返回稳定 Run 身份、状态和时间；本次不开始 HTTP 取消或 SSE。
+
+## 2026-08-11 阶段 6 Run 查询 Local API 工作记录
+
+### 完成
+
+- 新增 `GET /api/v1/runs/{run_id}`：经既有 `RunRepository.get` 读取 Run，再经所属 Conversation 校验固定 `local-user` 归属；缺失或其他用户统一 404 `run not found`，不泄露跨用户存在性。
+- `RunResponse.status` 改为完整 `RunStatus`，使查询可反映 `created → completed/failed/...` 等已持久化状态；App Factory 必填注入 `runs: RunRepository`，不新增 RunService、缓存或轮询器。
+- `serve` 传入既有 SQLite `runs`；Run 资源集成测试放在独立的 `tests/integration/test_api_runs.py`；OpenAPI 契约路径集合同步包含该 GET。
+
+### 验证
+
+- 检查：运行 Run 查询、OpenAPI、conversations/health/server 与 dispatch 相关测试，随后 Ruff、strict mypy 与完整 `scripts/check.sh`。
+- 结果：通过；定向 31 个测试、完整 269 个测试通过，Ruff 格式化与检查、strict mypy、锁文件检查均通过；mypy 检查 135 个源码文件。
+
+### 决策变化
+
+- 无；归属检查复用 Conversation Repository，不在 Run 上引入 `user_id` 或新 Core 类型。
+
+### 风险或问题
+
+- 客户端仍需轮询 GET 才能观察状态变化；尚无 HTTP 取消与 SSE，长时间 Run 的协作中断与事件流续传仍待后续任务。
+
+### 下一步
+
+- 在用户确认后，实现最小 HTTP 取消（对活跃 Run 请求协作取消）；本次不开始 SSE。

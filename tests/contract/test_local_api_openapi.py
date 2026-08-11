@@ -1,14 +1,18 @@
 from datetime import UTC, datetime
+from typing import cast
 
 from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
 from asagent.core.ids import MessageId, RunId
 from asagent.core.messages import UserMessage
+from asagent.core.repositories import RunRepository
 from asagent.core.run import Run
 from asagent.storage.in_memory_conversation_repository import (
     InMemoryConversationRepository,
 )
+
+_UNUSED_RUNS = cast(RunRepository, object())
 
 
 class UnusedRunStarter:
@@ -31,6 +35,7 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=conversations,
+        runs=_UNUSED_RUNS,
         run_submission=RunSubmissionService(
             conversations=conversations,
             run_starter=UnusedRunStarter(),
@@ -57,6 +62,7 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
         "/api/v1/health",
         "/api/v1/conversations",
         "/api/v1/conversations/{conversation_id}/messages",
+        "/api/v1/runs/{run_id}",
     }
 
     expected_operations = (
@@ -69,6 +75,7 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
             "post",
             "201",
         ),
+        ("/api/v1/runs/{run_id}", "get", "200"),
     )
     for path, method, success_status in expected_operations:
         operation = paths[path][method]
