@@ -2390,3 +2390,29 @@
 ### 下一步
 
 - 在用户确认后，增强 `PersistentAgentRuntime.execute_submitted()` 对意外执行异常的 FAILED 终态持久化；随后再将现有 Dispatcher 接到 Runtime。本次不开始该任务。
+
+## 2026-08-11 Persistent Runtime 意外异常失败终态工作记录
+
+### 完成
+
+- `execute_submitted()` 在读取历史或执行 AgentLoop 出现意外 `Exception` 时，先通过既有 RunFinisher 持久化同一 Run 的 `FAILED` 终态且不写 AssistantMessage，再原样抛出异常。
+- 正常的 AgentLoop 结果路径保持不变，仍由 Loop 返回的 `COMPLETED`、`FAILED`、`CANCELLED` 或 `LIMIT_REACHED` 状态统一完成。
+- 正常路径最后一次 RunFinisher 写入不纳入异常捕获；若 SQLite/Finisher 本身不可写，错误直接传播，不假装已经保存 FAILED。
+
+### 验证
+
+- 检查：运行 Persistent Runtime 集成测试，其中 Provider 以未分类 RuntimeError 模拟 Loop 外泄异常；随后运行 Ruff、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；定向 7 个测试、完整 263 个测试通过，Ruff 格式化与检查、strict mypy、锁文件检查均通过；mypy 检查 133 个源码文件。
+
+### 决策变化
+
+- 无；这是 DEC-063 下 Runtime 已有终态职责的补全，不新增包装器或改变 Dispatcher/AgentLoop 的边界。
+
+### 风险或问题
+
+- 这是一项尽力而为的持久化：如果 Finisher 同样失败，原始/存储异常仍会传播，Run 可能保留 CREATED；后续恢复、事件补齐和用户可见错误仍需单独设计。
+- 意外异常路径当前不额外生成 `run.failed` Event；Run 状态的持久化与事件流补齐必须在后续 SSE/恢复任务中一起确定，不能伪造连续事件序列。
+
+### 下一步
+
+- 在用户确认后，将 InProcessRunDispatcher 以一个简单的组合根执行函数接到 PersistentAgentRuntime，并保持异常由 Dispatcher Outcome 观察；不新增 PersistentRunExecutor。本次不开始该任务。

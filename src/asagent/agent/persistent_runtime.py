@@ -74,15 +74,29 @@ class PersistentAgentRuntime:
         if initial_run.status is not RunStatus.CREATED:
             raise ValueError("can only execute a created run")
 
-        history = await self._conversations.list_messages(conversation_id)
-        loop_result = await self._loop.run(
-            model_name=model_name,
-            system_prompt=system_prompt,
-            messages=tuple(self._to_model_message(message) for message in history),
-            cancellation_token=cancellation_token,
-            run_id=initial_run.run_id,
-            conversation_id=conversation_id,
-        )
+        try:
+            history = await self._conversations.list_messages(conversation_id)
+            loop_result = await self._loop.run(
+                model_name=model_name,
+                system_prompt=system_prompt,
+                messages=tuple(self._to_model_message(message) for message in history),
+                cancellation_token=cancellation_token,
+                run_id=initial_run.run_id,
+                conversation_id=conversation_id,
+            )
+        except Exception:
+            failed_at = self._now()
+            await self._run_finisher.finish(
+                run=Run(
+                    run_id=initial_run.run_id,
+                    conversation_id=conversation_id,
+                    status=RunStatus.FAILED,
+                    created_at=initial_run.created_at,
+                    updated_at=failed_at,
+                ),
+                assistant_message=None,
+            )
+            raise
 
         finished_at = self._now()
         finished_run = Run(

@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from itertools import count
 from pathlib import Path
@@ -22,8 +23,15 @@ from asagent.core.messages import UserMessage
 from asagent.core.run import Run
 from asagent.core.run_lifecycle import RunFinisher, RunStarter
 from asagent.core.run_status import RunStatus
-from asagent.models.contracts import ModelMessageRole, ModelResponse, ModelToolCall
+from asagent.models.contracts import (
+    ModelEvent,
+    ModelMessageRole,
+    ModelRequest,
+    ModelResponse,
+    ModelToolCall,
+)
 from asagent.models.fake_provider import FakeModelProvider
+from asagent.models.provider import ModelProvider
 from asagent.models.tool_names import openai_compatible_tool_name
 from asagent.storage.event_publisher import RepositoryEventPublisher
 from asagent.storage.sqlite.conversation_repository import (
@@ -37,6 +45,20 @@ from asagent.tools.builtin.echo import EchoTool
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.registry import ToolRegistry
 from asagent.tools.snapshot import ToolSnapshot
+
+
+class CrashingModelProvider:
+    def __init__(self, error: Exception) -> None:
+        self.requests: list[ModelRequest] = []
+        self._error = error
+
+    async def complete(self, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        raise self._error
+
+    def stream(self, request: ModelRequest) -> AsyncIterator[ModelEvent]:
+        del request
+        raise AssertionError("stream is not used by PersistentAgentRuntime")
 
 
 def _upgrade(database_path: Path) -> None:
@@ -61,7 +83,7 @@ def _clock() -> datetime:
 
 def _loop(
     *,
-    provider: FakeModelProvider,
+    provider: ModelProvider,
     runs: SqliteRunRepository,
 ) -> AgentLoop:
     tool = EchoTool()
@@ -97,7 +119,7 @@ def _runtime(
     runs: SqliteRunRepository,
     starter: SqliteRunStarter,
     finisher: SqliteRunFinisher,
-    provider: FakeModelProvider,
+    provider: ModelProvider,
 ) -> PersistentAgentRuntime:
     message_numbers = count(1)
 
@@ -440,6 +462,58 @@ async def test_execute_submitted_rejects_non_created_runs(
         assert provider.requests == ()
         assert await runs.list_for_conversation(conversation_id) == ()
         assert await conversations.list_messages(conversation_id) == ()
+    finally:
+        await finisher.aclose()
+        await starter.aclose()
+        await runs.aclose()
+        await conversations.aclose()
+
+
+@pytest.mark.asyncio
+async def test_persists_failed_run_when_unexpected_execution_error_escapes_loop(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    conversation_id = ConversationId("conversation-1")
+    conversations = SqliteConversationRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    starter = SqliteRunStarter(database_path)
+    finisher = SqliteRunFinisher(database_path)
+    expected_error = RuntimeError("model crashed")
+    provider = CrashingModelProvider(expected_error)
+
+    try:
+        await conversations.save(_conversation(conversation_id))
+
+        with pytest.raises(RuntimeError) as captured:
+            await _runtime(
+                conversations=conversations,
+                runs=runs,
+                starter=starter,
+                finisher=finisher,
+                provider=provider,
+            ).run(
+                conversation_id=conversation_id,
+                content="Hello",
+                model_name="fake-model",
+                system_prompt="Be helpful.",
+            )
+
+        assert captured.value is expected_error
+        assert len(provider.requests) == 1
+        assert await runs.get(RunId("run-1")) == Run(
+            run_id=RunId("run-1"),
+            conversation_id=conversation_id,
+            status=RunStatus.FAILED,
+            created_at=_clock(),
+            updated_at=_clock(),
+        )
+        assert tuple(
+            message.content
+            for message in await conversations.list_messages(conversation_id)
+        ) == ("Hello",)
     finally:
         await finisher.aclose()
         await starter.aclose()
