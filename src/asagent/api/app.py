@@ -1,9 +1,12 @@
-from collections.abc import Callable
+import asyncio
+import json
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
-from typing import Final, Literal
+from typing import Annotated, Final, Literal
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from asagent.agent.run_submission import (
@@ -18,9 +21,11 @@ from asagent.core.ids import ConversationId, RunId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.repositories import ConversationRepository, RunRepository
 from asagent.core.run import Run
+from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
 
 _LOCAL_USER_ID: Final = UserId("local-user")
+_EVENT_POLL_INTERVAL_SECONDS: Final = 0.1
 
 
 class HealthResponse(BaseModel):
@@ -145,6 +150,54 @@ def create_app(
 
         return stored_run
 
+    def event_frame(event: RunEvent) -> str:
+        payload = {
+            "event_id": str(event.event_id),
+            "run_id": str(event.run_id),
+            "conversation_id": str(event.conversation_id),
+            "sequence": event.sequence,
+            "event_type": event.event_type,
+            "created_at": event.created_at.astimezone(UTC)
+            .isoformat()
+            .replace("+00:00", "Z"),
+            "data": dict(event.data),
+        }
+        serialized = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return (
+            f"id: {event.sequence}\nevent: {event.event_type}\ndata: {serialized}\n\n"
+        )
+
+    async def stream_events(
+        *,
+        request: Request,
+        run_id: RunId,
+        after_sequence: int,
+    ) -> AsyncIterator[str]:
+        current_sequence = after_sequence
+
+        while True:
+            events = await runs.list_events(
+                run_id,
+                after_sequence=current_sequence,
+            )
+            for event in events:
+                current_sequence = event.sequence
+                yield event_frame(event)
+
+            stored_run = await runs.get(run_id)
+            if stored_run is None or stored_run.status.is_terminal:
+                return
+
+            if await request.is_disconnected():
+                return
+
+            await asyncio.sleep(_EVENT_POLL_INTERVAL_SECONDS)
+
     @app.get(
         "/api/v1/health",
         response_model=HealthResponse,
@@ -227,6 +280,27 @@ def create_app(
     async def get_run(run_id: str) -> RunResponse:
         stored_run = await get_local_run(RunId(run_id))
         return RunResponse.from_run(stored_run)
+
+    @app.get(
+        "/api/v1/runs/{run_id}/events",
+        dependencies=[Depends(authenticate)],
+    )
+    async def stream_run_events(
+        request: Request,
+        run_id: str,
+        after_sequence: Annotated[int, Query(ge=0)] = 0,
+    ) -> StreamingResponse:
+        stored_run = await get_local_run(RunId(run_id))
+
+        return StreamingResponse(
+            stream_events(
+                request=request,
+                run_id=stored_run.run_id,
+                after_sequence=after_sequence,
+            ),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @app.post(
         "/api/v1/runs/{run_id}/cancel",

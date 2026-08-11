@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 6 进行中；阶段 0–5 的 Core、Agent Loop、SQLite 持久化、Context Builder 基础与受控 Workspace Tool 边界已完成，当前正在建立 Electron 未来使用的 Local API 与 SSE 入口。
-- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建、可见 Message 查询/提交、按 Run ID 查询状态与协作取消请求；SSE 尚未实现。
+- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建、可见 Message 查询/提交、按 Run ID 查询状态、协作取消，以及基于持久化 RunEvent 的认证 SSE 回放/实时观察。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-11
-- 当前目标：客户端可提交、查询并协作取消本地 Run；下一项在用户确认后设计持久化 RunEvent 的最小 SSE 回放与实时订阅，保持 API 与 Runtime 的职责分离。
+- 当前目标：阶段 6 Local API 最小闭环（提交、后台执行、查询、取消、SSE）已可用；下一项在用户确认后推进 Electron 接入，或补 `Last-Event-ID` 兼容与真实 Provider 服务端配置。
 
 ## 2. 已完成
 
@@ -2495,3 +2495,30 @@
 ### 下一步
 
 - 在用户确认后，实现阶段 6 最小认证 SSE：先从持久化 `RunEvent` 按 sequence 回放，再为活跃 Run 连接实时事件；本次不改变 Dispatcher 或引入 Electron。
+
+## 2026-08-11 阶段 6 认证 RunEvent SSE 工作记录
+
+### 完成
+
+- 新增 `GET /api/v1/runs/{run_id}/events`：复用 local-user 归属检查后，以 `text/event-stream` 按 `sequence` 回放持久化 `RunEvent`；`after_sequence`（`>=0`）支持重连不重复。
+- 活跃 Run 用进程内短轮询观察 Repository 新增事件，直到 Run 进入终态或客户端断开；终态后自然结束流。不新增 SSE Service、事件总线或多播层。
+- SSE 帧使用事件 `sequence` 作为 `id`，`event_type` 作为 `event`，`data` 为稳定排序的 JSON object；帧组装与轮询留在 `create_app()` 同文件私有辅助函数内。
+- ASGI 回放测试位于 `test_api_runs.py`；真实 TCP 流式验证放在 `test_api_server.py`，覆盖事件追加后帧到达与终态耗尽。
+
+### 验证
+
+- 检查：运行 Run API、Server、OpenAPI 定向测试，随后 Ruff、strict mypy 与完整 `scripts/check.sh`。
+- 结果：通过；定向 17 个测试、完整 277 个测试通过，Ruff 格式化与检查、strict mypy、锁文件检查均通过；mypy 检查 135 个源码文件。
+
+### 决策变化
+
+- 无；观察层只读 `RunRepository.list_events` / `get`，不改变 Runtime、Dispatcher 或事件写入路径。
+
+### 风险或问题
+
+- 当前是 Repository 轮询而非推送；活跃连接有约 100ms 观察延迟，高并发长连接时需再评估。
+- 尚未支持 `Last-Event-ID` Header；客户端暂以查询参数 `after_sequence` 续传。Electron fetch-based SSE 与 Origin/CORS 仍待后续。
+
+### 下一步
+
+- 在用户确认后，推进 Electron Main/Renderer 接入本 Local API，或补 `Last-Event-ID` 与真实 Provider `serve` 配置；本次不自动开始。

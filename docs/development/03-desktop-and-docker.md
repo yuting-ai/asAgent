@@ -120,7 +120,7 @@ Token 不作为命令行参数。首选由 Main 通过仅连接到该子进程�
 uv run asagent serve ...
 ```
 
-阶段 6 当前已实现最小开发入口：`uv run asagent serve --bootstrap-stdin --app-home <root> --port 0`。调用方在 stdin 写入一行 `{"token":"..."}` Bootstrap JSON；该参数只声明读取管道，Token 本身不出现在命令行。Backend 以 `AppPaths.from_root(app_home)` 定位并升级 `<root>/data/asagent.sqlite3`，在整个服务生命周期组合 SQLite Conversation/Run Repository、Starter、Finisher、离线 `development-tools` Runtime 与进程内 Dispatcher；每个 API 提交会立即返回 CREATED Run 并在后台执行，客户端可通过 `GET /api/v1/runs/{run_id}` 查询其稳定状态与时间，或通过 `POST /api/v1/runs/{run_id}/cancel` 请求协作取消。取消请求不直接终止模型调用或写入终态，Runtime 在安全检查点完成收口。退出时先关闭 Dispatcher，再关闭 Finisher、Starter 和 Repository，避免后台任务使用已关闭的数据库。App Factory 仍只接收注入的 Repository、Submission Service 与调度/取消回调。Backend 仅接受 `127.0.0.1`，自己绑定端口并在 Uvicorn 启动后向 stdout 输出一次 `ASAGENT_READY ` 前缀的 JSON，其中包含 `host`、实际 `port`、`pid` 和 `protocol_version`，不包含 Token。当前 `serve` 不接受真实 Provider 配置；真实模型服务端组合、Workspace、SSE，以及 Electron Main 的 PID/协议校验、Health 轮询仍待后续阶段。
+阶段 6 当前已实现最小开发入口：`uv run asagent serve --bootstrap-stdin --app-home <root> --port 0`。调用方在 stdin 写入一行 `{"token":"..."}` Bootstrap JSON；该参数只声明读取管道，Token 本身不出现在命令行。Backend 以 `AppPaths.from_root(app_home)` 定位并升级 `<root>/data/asagent.sqlite3`，在整个服务生命周期组合 SQLite Conversation/Run Repository、Starter、Finisher、离线 `development-tools` Runtime 与进程内 Dispatcher；每个 API 提交会立即返回 CREATED Run 并在后台执行，客户端可通过 `GET /api/v1/runs/{run_id}` 查询其稳定状态、通过 `POST /api/v1/runs/{run_id}/cancel` 请求协作取消，并通过 `GET /api/v1/runs/{run_id}/events?after_sequence=<n>` 回放/观察安全 RunEvent。事件流先从 SQLite 按 sequence 补发，再在 Run 活跃期间短轮询新增事件；Run 终态或客户端断开时结束。取消请求不直接终止模型调用或写入终态，Runtime 在安全检查点完成收口。退出时先关闭 Dispatcher，再关闭 Finisher、Starter 和 Repository，避免后台任务使用已关闭的数据库。App Factory 仍只接收注入的 Repository、Submission Service 与调度/取消回调。Backend 仅接受 `127.0.0.1`，自己绑定端口并在 Uvicorn 启动后向 stdout 输出一次 `ASAGENT_READY ` 前缀的 JSON，其中包含 `host`、实际 `port`、`pid` 和 `protocol_version`，不包含 Token。当前 `serve` 不接受真实 Provider 配置；真实模型服务端组合、Workspace，以及 Electron Main 的 PID/协议校验、Health 轮询仍待后续阶段。
 
 发布环境命令为：
 
@@ -150,6 +150,7 @@ API 使用版本前缀：
 /api/v1/runs
 /api/v1/runs/{run_id}
 /api/v1/runs/{run_id}/cancel
+/api/v1/runs/{run_id}/events?after_sequence=<n>
 ```
 
 ### SSE
@@ -174,7 +175,7 @@ GET /api/v1/runs/{run_id}/events
 }
 ```
 
-后端在 SSE 帧中写入 `id: <sequence>`。Renderer 记录最后确认的 `sequence`，断线后通过 `Last-Event-ID` 或 `after_sequence` 重连；后端先从持久化事件补发，再继续发送实时事件。`event_id` 用于去重，`sequence` 用于排序和续传。
+后端在 SSE 帧中写入 `id: <sequence>`，并以 `event_type` 作为 SSE `event`。Renderer 记录最后确认的 `sequence`，断线后通过查询参数 `after_sequence` 重连；后端先从持久化事件补发，再对活跃 Run 短轮询新增事件。Run 终态或客户端断开时自然结束流。`event_id` 用于去重，`sequence` 用于排序和续传。`Last-Event-ID` 兼容仍是后续工作，不能作为当前客户端契约。
 
 ### 动态端口
 

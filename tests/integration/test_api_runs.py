@@ -10,9 +10,10 @@ from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
 from asagent.core.conversation import Conversation
-from asagent.core.ids import ConversationId, MessageId, RunId, UserId
+from asagent.core.ids import ConversationId, EventId, MessageId, RunId, UserId
 from asagent.core.messages import UserMessage
 from asagent.core.run import Run
+from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
 from asagent.storage.sqlite.conversation_repository import (
     SqliteConversationRepository,
@@ -415,3 +416,168 @@ async def test_cancel_run_returns_conflict_when_run_is_not_active(
 
     assert response.status_code == 409
     assert response.json() == {"detail": "run is not active"}
+
+
+@pytest.mark.asyncio
+async def test_stream_run_events_replays_persisted_frames_and_supports_resume(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    created_at = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    completed_at = datetime(2026, 8, 11, 12, 0, 1, tzinfo=UTC)
+    conversations = SqliteConversationRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=conversations,
+        runs=runs,
+        run_submission=_unused_run_submission(conversations),
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        await conversations.save(
+            _conversation(
+                ConversationId("conv-local"),
+                UserId("local-user"),
+                created_at,
+                created_at,
+            ),
+        )
+        await runs.save(
+            Run(
+                run_id=RunId("run-completed"),
+                conversation_id=ConversationId("conv-local"),
+                status=RunStatus.COMPLETED,
+                created_at=created_at,
+                updated_at=completed_at,
+            ),
+        )
+        await runs.append_event(
+            RunEvent(
+                event_id=EventId("event-1"),
+                run_id=RunId("run-completed"),
+                conversation_id=ConversationId("conv-local"),
+                sequence=1,
+                event_type="run.started",
+                created_at=created_at,
+                data={},
+            ),
+        )
+        await runs.append_event(
+            RunEvent(
+                event_id=EventId("event-2"),
+                run_id=RunId("run-completed"),
+                conversation_id=ConversationId("conv-local"),
+                sequence=2,
+                event_type="run.completed",
+                created_at=completed_at,
+                data={"steps_used": 1},
+            ),
+        )
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            response = await client.get(
+                "/api/v1/runs/run-completed/events",
+                headers={"Authorization": "Bearer test-token"},
+            )
+            resumed = await client.get(
+                "/api/v1/runs/run-completed/events?after_sequence=1",
+                headers={"Authorization": "Bearer test-token"},
+            )
+    finally:
+        await runs.aclose()
+        await conversations.aclose()
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.text == (
+        "id: 1\n"
+        "event: run.started\n"
+        'data: {"conversation_id":"conv-local","created_at":"2026-08-11T12:00:00Z","data":{},"event_id":"event-1","event_type":"run.started","run_id":"run-completed","sequence":1}\n'
+        "\n"
+        "id: 2\n"
+        "event: run.completed\n"
+        'data: {"conversation_id":"conv-local","created_at":"2026-08-11T12:00:01Z","data":{"steps_used":1},"event_id":"event-2","event_type":"run.completed","run_id":"run-completed","sequence":2}\n'
+        "\n"
+    )
+    assert resumed.status_code == 200
+    assert resumed.text == (
+        "id: 2\n"
+        "event: run.completed\n"
+        'data: {"conversation_id":"conv-local","created_at":"2026-08-11T12:00:01Z","data":{"steps_used":1},"event_id":"event-2","event_type":"run.completed","run_id":"run-completed","sequence":2}\n'
+        "\n"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("url", "expected_status"),
+    [
+        ("/api/v1/runs/run-missing/events", 404),
+        ("/api/v1/runs/run-other/events", 404),
+        ("/api/v1/runs/run-missing/events?after_sequence=-1", 422),
+    ],
+)
+async def test_stream_run_events_rejects_unknown_foreign_or_invalid_resume(
+    tmp_path: Path,
+    url: str,
+    expected_status: int,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    created_at = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    conversations = SqliteConversationRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=conversations,
+        runs=runs,
+        run_submission=_unused_run_submission(conversations),
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        await conversations.save(
+            _conversation(
+                ConversationId("conv-other"),
+                UserId("other-user"),
+                created_at,
+                created_at,
+            ),
+        )
+        await runs.save(
+            Run(
+                run_id=RunId("run-other"),
+                conversation_id=ConversationId("conv-other"),
+                status=RunStatus.COMPLETED,
+                created_at=created_at,
+                updated_at=created_at,
+            ),
+        )
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            response = await client.get(
+                url,
+                headers={"Authorization": "Bearer test-token"},
+            )
+    finally:
+        await runs.aclose()
+        await conversations.aclose()
+
+    assert response.status_code == expected_status
+    if expected_status == 404:
+        assert response.json() == {"detail": "run not found"}
