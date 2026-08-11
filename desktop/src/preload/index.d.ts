@@ -1,6 +1,7 @@
 interface DesktopAppInfo {
   appName: string
   version: string
+  dataProcessingMode: 'local' | 'external'
 }
 
 interface ConversationSummary {

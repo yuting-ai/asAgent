@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react'
 type AppInfo = {
   appName: string
   version: string
+  dataProcessingMode: 'local' | 'external'
 }
 
 type ConversationSummary = {
@@ -298,7 +299,9 @@ export default function App(): React.JSX.Element {
 
   const backendLabel =
     backendStatus === 'ready'
-      ? 'RUNNING LOCALLY · NO DATA LEAVES THIS DEVICE'
+      ? appInfo?.dataProcessingMode === 'external'
+        ? 'RUNNING · EXTERNAL MODEL ENABLED'
+        : 'RUNNING LOCALLY · NO DATA LEAVES THIS DEVICE'
       : backendStatus === 'checking'
         ? 'CHECKING LOCAL BACKEND…'
         : 'BACKEND UNAVAILABLE'
@@ -309,6 +312,8 @@ export default function App(): React.JSX.Element {
       : activeRun !== null
         ? '● Working on a run'
         : '● Idle — ready for chat'
+
+  const usesExternalModel = appInfo?.dataProcessingMode === 'external'
 
   function appendRunActivity(runId: string, entry: string): void {
     setRunActivity((current) => {
@@ -1040,7 +1045,9 @@ export default function App(): React.JSX.Element {
             </div>
             <div className="privacy-banner">
               <Icon path="M12 2 3 6v6c0 5 4 8.5 9 10 5-1.5 9-5 9-10V6l-9-4Z" />
-              All processing stays on this device. Nothing here is uploaded or shared by default.
+              {usesExternalModel
+                ? 'External model enabled. Conversation content and tool results needed for a request may be sent to the selected provider.'
+                : 'All processing stays on this device. No conversation content is sent to an external model provider.'}
             </div>
             <div className="placeholder-banner">
               Permission rows below are sample layout only. Revoke / grant is not wired yet.
@@ -1099,8 +1106,10 @@ export default function App(): React.JSX.Element {
                 <span className="stat-value">0</span>
               </div>
               <div className="stat-row">
-                <span className="stat-label">Data sent externally</span>
-                <span className="stat-value">0</span>
+                <span className="stat-label">External model access</span>
+                <span className={`stat-value${usesExternalModel ? ' warn' : ''}`}>
+                  {usesExternalModel ? 'Enabled' : 'Off'}
+                </span>
               </div>
             </div>
             <div className="trust-note">

@@ -39,8 +39,11 @@ type RunStreamError = {
 }
 
 const desktopBridge = {
-  getAppInfo: (): Promise<{ appName: string; version: string }> =>
-    ipcRenderer.invoke('desktop:get-app-info'),
+  getAppInfo: (): Promise<{
+    appName: string
+    version: string
+    dataProcessingMode: 'local' | 'external'
+  }> => ipcRenderer.invoke('desktop:get-app-info'),
   getBackendStatus: (): Promise<{ status: 'ready' | 'unavailable' }> =>
     ipcRenderer.invoke('desktop:get-backend-status'),
   listConversations: (): Promise<ConversationSummary[]> =>

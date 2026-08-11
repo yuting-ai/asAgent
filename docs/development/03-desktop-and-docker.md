@@ -132,6 +132,8 @@ uv run asagent serve ...
 
 阶段 7 现支持可选的真实 Provider 开发验收。默认 `npm run dev` 仍只启动离线 `development-tools` Runtime；`npm run dev:deepseek` 仅向 Electron Main 提供非敏感的 Profile 名和 Secret 环境变量名。Main 将 `.env` 文件路径、`--profile` 与 `--secret-env` 交给自身启动的 Python Sidecar；Sidecar 使用既有 Profile Loader、EnvironmentSecretProvider、Provider Factory 和生命周期内的 HTTP Client 创建真实 Runtime。API Key 仅由启动时加载 `.env` 的 Python 进程读取，不进入 Renderer、Preload、IPC、URL、ready 记录或日志。真实配置或调用失败时不得降级为离线 Provider；正式发行版仍应以系统 Secret Store 取代开发 `.env`。
 
+Electron Main 还会向 Renderer 暴露一个无敏感信息的处理模式：`local` 或 `external`。它只反映本次 Sidecar 的启动配置，不包含 Provider 名、端口、Token 或 API Key；顶栏与 Privacy 页面据此准确说明是否可能将请求内容发送到外部模型服务。默认离线模式明确不外发对话内容，真实 Provider 模式明确请求所需的对话内容和工具结果可能发送至选定服务商。
+
 发布环境命令为：
 
 ```text

@@ -2708,3 +2708,25 @@
 ### 下一步
 
 - 在用户确认后，进行一次阶段 7 体验回顾并选择下一条真实用户价值路径（例如 Conversation 标题，或受限文件工具的桌面权限交互）；不提前实现设置页或正式打包。
+
+## 2026-08-11 阶段 7 Provider-aware Privacy Disclosure 工作记录
+
+### 完成
+
+- Electron Main 依据当前 Sidecar 启动配置向 Renderer 提供仅含 `local` / `external` 的处理模式；该数据不包含 Provider 名、端口、Token 或 API Key。
+- 顶栏和 Privacy 页面在离线模式显示本地处理承诺，在真实 Provider 模式显示外部模型已启用以及请求内容、必要工具结果可能发送给选定 Provider 的说明。
+- Privacy 统计将误导性的固定 “Data sent externally: 0” 改为 “External model access: Off / Enabled”。
+
+### 验证
+
+- 检查：在 `desktop/` 执行 Prettier、TypeScript 类型检查、ESLint、Vitest、生产构建及 `git diff --check`。
+- 结果：通过；桌面 Vitest 6 个测试、全部静态检查和构建成功。
+- 人工验收：分别以 `npm run dev` 和 `npm run dev:deepseek` 启动，确认顶栏与 Privacy 页面在本地和外部模型模式下显示相应的准确披露。
+
+### 决策变化
+
+- 补充 DEC-062：Privacy 披露由 Main 持有的安全处理模式驱动。
+
+### 下一步
+
+- 在用户确认后，实现 Conversation 标题的最小持久化/API/桌面展示闭环；不与权限设置、全文搜索或长期 Memory 合并。

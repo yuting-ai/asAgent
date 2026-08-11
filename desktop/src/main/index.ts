@@ -8,6 +8,7 @@ import { BackendLauncher, type SubmittedMessage } from './backend_launcher'
 let backendLauncher: BackendLauncher | undefined
 let isQuitting = false
 const runWatchers = new Map<string, () => void>()
+let dataProcessingMode: 'local' | 'external' = 'local'
 
 function rendererUrl(): string {
   if (is.dev) {
@@ -87,6 +88,7 @@ function createDevelopmentBackendLauncher(): BackendLauncher {
   const secretEnvironmentName = process.env['ASAGENT_DESKTOP_SECRET_ENV']
 
   if (providerProfile === undefined && secretEnvironmentName === undefined) {
+    dataProcessingMode = 'local'
     return new BackendLauncher({
       projectRoot,
       appHome: join(projectRoot, '.local-data')
@@ -97,6 +99,7 @@ function createDevelopmentBackendLauncher(): BackendLauncher {
     throw new Error('Desktop real Provider configuration is incomplete.')
   }
 
+  dataProcessingMode = 'external'
   return new BackendLauncher({
     projectRoot,
     appHome: join(projectRoot, '.local-data'),
@@ -180,7 +183,11 @@ app.whenReady().then(async () => {
       throw new Error('Untrusted renderer IPC request.')
     }
     assertTrustedRenderer(frame.url)
-    return { appName: 'asAgent', version: app.getVersion() }
+    return {
+      appName: 'asAgent',
+      version: app.getVersion(),
+      dataProcessingMode
+    }
   })
 
   ipcMain.handle('desktop:get-backend-status', (event) => {
