@@ -72,6 +72,14 @@ function assertTrustedRenderer(url: string): void {
   }
 }
 
+function getReadyBackendLauncher(): BackendLauncher {
+  if (backendLauncher === undefined || !backendLauncher.isReady) {
+    throw new Error('Backend is unavailable.')
+  }
+
+  return backendLauncher
+}
+
 function createDevelopmentBackendLauncher(): BackendLauncher {
   const projectRoot = join(app.getAppPath(), '..')
 
@@ -118,6 +126,31 @@ app.whenReady().then(async () => {
     }
     assertTrustedRenderer(frame.url)
     return { status: backendLauncher?.isReady ? 'ready' : 'unavailable' }
+  })
+
+  ipcMain.handle('desktop:list-conversations', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().listConversations()
+  })
+
+  ipcMain.handle('desktop:list-conversation-messages', (event, conversationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+
+    if (typeof conversationId !== 'string' || !conversationId.trim()) {
+      throw new Error('Conversation ID is invalid.')
+    }
+
+    return getReadyBackendLauncher().listConversationMessages(conversationId)
   })
 
   createWindow()

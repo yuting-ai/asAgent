@@ -555,6 +555,15 @@
 - 影响：源码开发需向 stdin 提供 Bootstrap JSON 后才能运行 `serve`；未来 Electron Main 负责生成随机 Token、写入自己的 Backend 子进程 stdin，并仅在 Main/Backend/当前 Renderer 内存中保存。CORS/Origin、Conversation/Run 路由、SSE、Token 轮换、Shutdown Endpoint 和 Electron 的进程管道管理仍是后续独立任务。
 - 替代方案：Health 永久免认证、固定或持久化 Token、通过 `--token` 传参、将 Token 放入 ready JSON/URL、或仅依赖回环地址；当前均不采用。
 
+### DEC-062 实施补充：Token 保持在 Main，Renderer 使用固定能力
+
+- 日期：2026-08-11
+- 状态：已确认
+- 决策：Electron 开发 Sidecar 的启动 Token 仅存在于 Python Backend 与 Electron Main。`BackendLauncher` 可使用该私有连接实现固定的最小业务操作；Renderer 只经来源校验的 Preload/Main IPC 调用允许的操作，不获得 Token、端口、通用 HTTP 或任意 URL 访问能力。
+- 原因：既能让桌面界面读取真实本地数据，又不把 Renderer 变成可滥用本地 API 能力的持有者；固定调用也避免为单一调用者增加通用客户端或 IPC 代理层。
+- 影响：当前固定操作为 Conversation 列表与指定 Conversation 的 Message 历史读取。创建、提交、Run 查询、取消和 SSE 将在各自独立任务中按同一原则增加，且每项都需经过来源校验。
+- 替代方案：将 Token/端口交给 Renderer、暴露通用 fetch 或 `ipcRenderer.invoke(channel, payload)` 转发器；当前均不采用。
+
 ### DEC-063：以独立生命周期和失败语义控制抽象粒度
 
 - 日期：2026-08-11

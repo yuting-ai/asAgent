@@ -2600,3 +2600,30 @@
 ### 下一步
 
 - 在用户确认后，让 Electron Renderer 通过保持 Token 私有的窄 Preload API 读取真实 Conversation 列表与 Message 历史；本次不提交消息、不创建 Run 或订阅 SSE。
+
+## 2026-08-11 阶段 7 Electron 真实对话历史只读工作记录
+
+### 完成
+
+- `BackendLauncher` 复用自身持有的 loopback endpoint 与仅 Main 可见的 Bearer Token，新增两个固定只读操作：列出 Conversation 与读取指定 Conversation 的用户可见 Message；没有新增通用 HTTP 客户端模块。
+- Main 只为这两个操作增加来源校验后的 IPC handler；Preload 仅暴露对应的窄方法。Renderer 不能读取 Token、端口、任意 URL、写入 API 或 SSE。
+- Renderer 已显示 SQLite 中真实的 Conversation 列表与 Message 历史；选择 Conversation 会加载其历史。新建 Conversation 与发送 Message 仍明确禁用，因此这次读取不会创建 Message 或 Run。
+- Launcher 测试新增私有认证连接的 Conversation 读取覆盖，确认请求仍携带 Bearer Header。
+
+### 验证
+
+- 检查：在 `desktop/` 运行 Prettier、TypeScript 类型检查、ESLint、Vitest 和生产构建，并以真实 `npm run dev` 查看本地历史。
+- 结果：通过；TypeScript、ESLint 和生产构建成功，Vitest 3 个测试通过；Electron 开发窗口已人工确认显示真实 Conversation 和 Message 数据。
+
+### 决策变化
+
+- 补充 DEC-062：Token 仅保存在 Electron Main 与 Backend；Renderer 通过固定、来源校验的 Preload/Main 操作取得允许的只读数据，而非获得 Token 或通用本地 HTTP 权限。
+
+### 风险或问题
+
+- Conversation 当前没有标题，因此界面只能显示稳定 ID 的短后缀；标题生成或编辑必须随其对应的持久化/API 任务单独设计。
+- 当前只读历史不会随其他运行中的写入自动刷新，也不显示 Run 状态或实时 Event；这些能力应在 Message 提交后，通过既有 Run 查询和 SSE 契约以一个独立任务接入。
+
+### 下一步
+
+- 在用户确认后，实现 Electron 的最小 Conversation 创建与 Message 提交：仍由 Main 持有 Token，Renderer 只调用固定 Preload 操作；随后再单独接入 Run 状态和 SSE。本次不提前开始该任务。

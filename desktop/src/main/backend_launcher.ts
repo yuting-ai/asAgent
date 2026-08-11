@@ -10,6 +10,19 @@ type ServerReady = {
   protocolVersion: number
 }
 
+export type ConversationSummary = {
+  conversation_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type ConversationMessage = {
+  message_id: string
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+}
+
 type BackendLauncherOptions = {
   projectRoot: string
   appHome: string
@@ -78,6 +91,7 @@ export class BackendLauncher {
   private readonly stopTimeoutMs: number
   private child: ChildProcess | undefined
   private ready: ServerReady | undefined
+  private token: string | undefined
 
   constructor(options: BackendLauncherOptions) {
     this.projectRoot = options.projectRoot
@@ -92,6 +106,34 @@ export class BackendLauncher {
 
   get isReady(): boolean {
     return this.ready !== undefined
+  }
+
+  async listConversations(): Promise<ConversationSummary[]> {
+    return this.getJson('/api/v1/conversations')
+  }
+
+  async listConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
+    return this.getJson(`/api/v1/conversations/${encodeURIComponent(conversationId)}/messages`)
+  }
+
+  private async getJson<T>(path: string): Promise<T> {
+    if (this.ready === undefined || this.token === undefined) {
+      throw new Error('Backend is not ready.')
+    }
+
+    const response = await this.fetchHealth(`http://${this.ready.host}:${this.ready.port}${path}`, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${this.token}`
+      },
+      signal: AbortSignal.timeout(5_000)
+    })
+
+    if (!response.ok) {
+      throw new Error(`Backend API request failed with status ${response.status}.`)
+    }
+
+    return (await response.json()) as T
   }
 
   async start(): Promise<void> {
@@ -115,6 +157,7 @@ export class BackendLauncher {
     }
 
     this.child = child
+    this.token = token
     child.stderr?.resume()
     child.stdin.end(`${JSON.stringify({ token })}\n`)
 
@@ -132,6 +175,7 @@ export class BackendLauncher {
     const child = this.child
     this.child = undefined
     this.ready = undefined
+    this.token = undefined
 
     if (child === undefined || child.exitCode !== null || child.killed) {
       return

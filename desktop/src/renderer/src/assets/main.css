@@ -113,8 +113,11 @@ h2 {
 
 .messages {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
+  gap: 14px;
   padding: 32px;
+  overflow-y: auto;
 }
 
 .message {
@@ -124,6 +127,21 @@ h2 {
   border-radius: 14px;
   background: #1b2334;
   line-height: 1.6;
+}
+
+.message.user {
+  align-self: flex-end;
+  background: #263b55;
+}
+
+.empty-state,
+.error-state {
+  margin: 0;
+  color: #8e9ab5;
+}
+
+.error-state {
+  color: #f4a6a6;
 }
 
 .message p:last-child {
