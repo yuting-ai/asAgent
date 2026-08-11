@@ -450,6 +450,14 @@ config_dir/mcp.json
 回退到 `2025-11-25` 及以前的 `initialize` 生命周期。回退不能复用被未知探测请求
 影响过的 stdin/stdout 会话。稳定后再支持 Streamable HTTP、OAuth 和工具检索。
 
+阶段 8 的首个对端为 `tests/fixtures/mcp_test_server.py`，不是产品 Server 或运行时
+依赖。它仅支持现代 `2026-07-28` 请求：要求每条请求带完整 `_meta`，以
+`server/discover` 报告 `tools` 能力，并以 `tools/list` 暴露确定性的 `add` 工具、
+以 `tools/call` 返回结果。协议格式错误、未知方法和未知工具使用 JSON-RPC error；
+可由模型修正的 `add` 参数错误返回 `result.isError=true`。它严格让 stdout 只承载
+一行一个 JSON-RPC 消息，启动日志写入 stderr，为未来 Client 的传输、错误和 fallback
+测试提供可控对端。
+
 MCP Server 的权限独立于宿主工具权限：stdio Server 使用显式工作目录、最小环境变量和自身配置；远程 Server 仅使用为该 Server 配置的 Token 与能力。它们不继承 asAgent 的文件范围、浏览器 Profile 或其他账户 Token。
 
 MCP 工具内部 ID：

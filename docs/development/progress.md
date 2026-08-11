@@ -2858,3 +2858,27 @@
 - 先实现仅支持 MCP `2026-07-28` 的最小测试 stdio Server，覆盖 `server/discover`、
   `tools/list`、`tools/call`、JSON-RPC 错误和 stderr 日志；不在本任务接入 Client、
   fallback、真实第三方 Server 或 Tool Registry。
+
+## 2026-08-12 阶段 8 现代 stdio MCP 测试 Server 工作记录
+
+### 完成
+
+- 新增测试专用、无外部依赖的 stdio JSON-RPC Server：
+  `tests/fixtures/mcp_test_server.py`。
+- Server 只接受带完整现代 `_meta` 的 MCP `2026-07-28` 请求；实现
+  `server/discover`、`tools/list` 和 `tools/call`，并提供确定性 `add` 工具与 JSON
+  Schema。
+- stdout 只输出换行分隔的 JSON-RPC Response；启动诊断写入 stderr。集成测试覆盖现代
+  发现、工具列举、正常调用、无效 JSON、工具执行参数错误和未知工具的协议错误边界。
+- 不实现产品 MCP Server、McpClient、旧版 fallback、外部进程配置或 Tool Registry 接入。
+
+### 验证
+
+- `tests/integration/test_mcp_test_server.py` 通过；完整 `scripts/check.sh` 为 283 passed。
+- Ruff、strict mypy（137 个 source files）与锁文件检查均通过。
+
+### 下一步
+
+- 实现最小现代 stdio `McpClient`：启动该测试 Server、写入有界 JSON-RPC 请求、读取并按
+  request id 配对 Response、执行 `server/discover` 与 `tools/list`；先不接入 ToolRegistry、
+  AgentLoop、legacy fallback 或真实第三方 Server。
