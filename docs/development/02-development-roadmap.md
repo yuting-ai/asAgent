@@ -277,7 +277,8 @@ asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不
 
 ### 学习目标
 
-- MCP 协议版本协商、能力协商、initialize、notifications/initialized、tools/list、tools/call。
+- MCP `2026-07-28` 的 `server/discover`、每请求元数据、tools/list、tools/call，及对旧
+  stdio Server 的隔离 legacy fallback（`initialize`、`notifications/initialized`）。
 - stdio 子进程协议和 JSON-RPC。
 - Server 生命周期、tools/list 分页与 listChanged、工具错误和协议错误的区别。
 - 工具 Schema 和 Provider 名称映射的稳定性。
@@ -288,7 +289,8 @@ asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不
 - 实现 stdio McpClient。
 - 实现 Server Manager 和名称空间。
 - 为每个 MCP Server 配置独立的资源范围、工作目录、最小环境变量和 Secret 引用；不得继承 asAgent 的文件范围、浏览器 Profile 或其他账户 Token。
-- 实现版本/能力协商、tools/list 分页和超时取消。
+- 实现 modern-first 的版本/能力发现、有界探测、旧 stdio Server 的全新进程 fallback、
+  tools/list 分页和超时取消。
 - 将 MCP 工具映射到统一 Tool Registry。
 - 实现 Tool Snapshot 和错误隔离。
 - 增加配置刷新；热更新只影响后续 Run。
@@ -296,6 +298,8 @@ asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不
 ### 验收
 
 - 测试 Server 的工具可以被模型调用。
+- 现代测试 Server 使用 `2026-07-28`；旧 Server 的探测失败不会污染其正式 stdio
+  会话，并能安全回退或给出明确不兼容错误。
 - Server 崩溃、超时和无效 JSON 不影响其他工具。
 - 同名工具不会覆盖。
 

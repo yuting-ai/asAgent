@@ -2840,3 +2840,21 @@
 - 进入阶段 8：先实现最小测试 stdio MCP Server 的 JSON-RPC `initialize`、
   `notifications/initialized`、`tools/list` 与 `tools/call` 闭环；不先接入生产 MCP
   Server、Streamable HTTP、Electron 设置页或真实外部服务。
+
+## 2026-08-11 阶段 8 MCP 协议基线决策
+
+### 完成
+
+- 阶段 8 的协议基线由旧版握手调整为 MCP `2026-07-28` modern-first：使用可选
+  `server/discover` 发现版本/能力，后续请求携带自身协议版本、Client 身份和能力元数据。
+- 为兼容已有 stdio 生态，确认保留受限 legacy fallback：现代探测失败或超时时必须关闭
+  探测进程，再以全新子进程走旧版 `initialize` / `notifications/initialized`；不得在同一
+  已被未知请求影响的 stdio 会话内直接回退。
+- 该差异仅位于未来 `McpClient` 传输边界；AgentLoop、ToolExecutor、Tool Snapshot 与
+  Provider 工具调用契约不因协议版本改变。
+
+### 下一步
+
+- 先实现仅支持 MCP `2026-07-28` 的最小测试 stdio Server，覆盖 `server/discover`、
+  `tools/list`、`tools/call`、JSON-RPC 错误和 stderr 日志；不在本任务接入 Client、
+  fallback、真实第三方 Server 或 Tool Registry。

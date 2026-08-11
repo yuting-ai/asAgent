@@ -437,14 +437,18 @@ ToolCall
 config_dir/mcp.json
 → McpServerManager
 → McpClient
-→ initialize（协议版本和能力协商）
-→ notifications/initialized
+→ `server/discover`（现代协议版本与能力发现）
+→ 每次请求携带协议版本、Client 身份与能力元数据
+→ 仅对旧 stdio Server：隔离探测进程后回退 `initialize` / `notifications/initialized`
 → tools/list（处理分页和 listChanged）
 → 每个远程工具包装为 ToolDefinition + Tool
 → 注册到 ToolRegistry
 ```
 
-第一版只支持 stdio。稳定后再支持 Streamable HTTP、OAuth 和工具检索。
+第一版只支持 stdio。首选 MCP `2026-07-28` 的无会话请求格式；`McpClient` 对
+未知或仅支持旧生命周期的 stdio Server 采用有界的 modern 探测，然后以全新子进程
+回退到 `2025-11-25` 及以前的 `initialize` 生命周期。回退不能复用被未知探测请求
+影响过的 stdin/stdout 会话。稳定后再支持 Streamable HTTP、OAuth 和工具检索。
 
 MCP Server 的权限独立于宿主工具权限：stdio Server 使用显式工作目录、最小环境变量和自身配置；远程 Server 仅使用为该 Server 配置的 Token 与能力。它们不继承 asAgent 的文件范围、浏览器 Profile 或其他账户 Token。
 
