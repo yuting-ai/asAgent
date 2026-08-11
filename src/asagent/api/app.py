@@ -1,8 +1,10 @@
-from datetime import datetime
+from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Final, Literal
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from asagent.api.auth import BearerTokenAuthenticator, LocalApiToken
 from asagent.core.conversation import Conversation
@@ -15,6 +17,10 @@ _LOCAL_USER_ID: Final = UserId("local-user")
 
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
+
+
+class CreateConversationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 class ConversationResponse(BaseModel):
@@ -60,12 +66,16 @@ def create_app(
     *,
     access_token: LocalApiToken,
     conversations: ConversationRepository,
+    conversation_id_factory: Callable[[], ConversationId] | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="asAgent Local API",
         version="0.1.0",
     )
     authenticate = BearerTokenAuthenticator(access_token)
+    create_conversation_id = conversation_id_factory or _new_conversation_id
+    current_time = clock or _now
 
     @app.get(
         "/api/v1/health",
@@ -86,6 +96,28 @@ def create_app(
             ConversationResponse.from_conversation(conversation)
             for conversation in stored_conversations
         ]
+
+    @app.post(
+        "/api/v1/conversations",
+        response_model=ConversationResponse,
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(authenticate)],
+    )
+    async def create_conversation(
+        request: CreateConversationRequest,
+    ) -> ConversationResponse:
+        del request
+
+        created_at = current_time()
+        conversation = Conversation(
+            conversation_id=create_conversation_id(),
+            user_id=_LOCAL_USER_ID,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+        await conversations.save(conversation)
+
+        return ConversationResponse.from_conversation(conversation)
 
     @app.get(
         "/api/v1/conversations/{conversation_id}/messages",
@@ -111,3 +143,11 @@ def create_app(
         return [MessageResponse.from_message(message) for message in stored_messages]
 
     return app
+
+
+def _new_conversation_id() -> ConversationId:
+    return ConversationId(f"conv_{uuid4().hex}")
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)

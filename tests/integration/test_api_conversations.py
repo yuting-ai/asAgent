@@ -273,3 +273,115 @@ async def test_list_conversation_messages_requires_the_current_local_api_token(
 
     assert response.status_code == 401
     assert response.json() == {"detail": "invalid local API credentials"}
+
+
+@pytest.mark.asyncio
+async def test_create_conversation_persists_an_empty_local_conversation(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    created_at = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    conversation_id = ConversationId("conv-created")
+    repository = SqliteConversationRepository(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=repository,
+        conversation_id_factory=lambda: conversation_id,
+        clock=lambda: created_at,
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            response = await client.post(
+                "/api/v1/conversations",
+                headers={"Authorization": "Bearer test-token"},
+                json={},
+            )
+
+        stored = await repository.get(conversation_id)
+        messages = await repository.list_messages(conversation_id)
+    finally:
+        await repository.aclose()
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "conversation_id": "conv-created",
+        "created_at": "2026-08-11T12:00:00Z",
+        "updated_at": "2026-08-11T12:00:00Z",
+    }
+    assert stored == _conversation(
+        conversation_id,
+        UserId("local-user"),
+        created_at,
+        created_at,
+    )
+    assert messages == ()
+
+
+@pytest.mark.asyncio
+async def test_create_conversation_rejects_unknown_request_fields(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    repository = SqliteConversationRepository(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=repository,
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            response = await client.post(
+                "/api/v1/conversations",
+                headers={"Authorization": "Bearer test-token"},
+                json={"title": "not supported yet"},
+            )
+
+        stored = await repository.list_for_user(UserId("local-user"))
+    finally:
+        await repository.aclose()
+
+    assert response.status_code == 422
+    assert stored == ()
+
+
+@pytest.mark.asyncio
+async def test_create_conversation_requires_the_current_local_api_token(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    repository = SqliteConversationRepository(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=repository,
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            response = await client.post("/api/v1/conversations", json={})
+
+        stored = await repository.list_for_user(UserId("local-user"))
+    finally:
+        await repository.aclose()
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "invalid local API credentials"}
+    assert stored == ()

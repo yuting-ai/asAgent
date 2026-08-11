@@ -2203,3 +2203,32 @@
 ### 下一步
 
 - 在用户确认后，实现阶段 6 的最小创建 Conversation HTTP 接口，并明确请求验证、ID/时钟生成及成功状态码；本次不开始该任务。
+
+## 2026-08-11 阶段 6 创建 Conversation Local API 工作记录
+
+### 完成
+
+- 新增认证后的 `POST /api/v1/conversations`。请求体当前只允许空 JSON object；未知字段明确以 422 拒绝，避免在尚无标题或设置模型时静默接受无效客户端状态。
+- API 服务端生成 `conv_` Conversation ID 与 UTC 创建/更新时间，固定保存到 `local-user`；新 Conversation 没有 Message、Run 或内部事件。
+- App Factory 为测试可注入 ID 工厂和时钟，生产默认使用随机 UUID 与 UTC 当前时间；成功响应为 201，并只返回 Conversation 元数据。
+- 真实 API 请求确认 stdin Bootstrap 认证后可创建 Conversation，返回 `conv_fb3f6b2692bc4c549c630f98ca53f5da` 及 UTC ISO 8601 时间。
+
+### 验证
+
+- 检查：运行 API Health、实际 TCP Server 与 Conversation API 定向集成测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 245 个测试通过，132 个文件格式正确，128 个源码文件 Ruff 与 strict mypy 无问题，锁定依赖解析为 42 个包。
+- 检查：通过有效 Bearer Token 向 `/api/v1/conversations` POST 空 JSON object。
+- 结果：通过；HTTP 201 返回新 Conversation ID、创建时间和更新时间，未创建 Message 或 Run。
+
+### 决策变化
+
+- 无；本次复用既有单用户、Repository 注入、服务端 ID/时间生成与 DEC-062 API 认证边界。
+
+### 风险或问题
+
+- `ConversationRepository.save()` 是既有稳定 ID 的覆盖保存接口；生产 UUID 生成使碰撞可忽略，但尚无专用的 API 幂等键或 create-only Repository 原语。请求幂等和并发创建语义须在 API 契约中单独确定。
+- 继续逐条即兴增加路由会使 API 语义分散；下一项应先整理阶段 6 Local API v1 契约，明确已实现与计划中的资源、状态码、错误、分页、Run 与 SSE 续传规则，再继续业务端点。
+
+### 下一步
+
+- 在用户确认后，定义阶段 6 Local API v1 契约与 OpenAPI 验收规则；本次不开始该任务。
