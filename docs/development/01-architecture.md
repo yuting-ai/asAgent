@@ -77,6 +77,8 @@ asAgent/
 
 阶段 7 的后续只读接入已完成：`BackendLauncher` 以自身持有的 loopback endpoint 和仅 Main 可见的 Token 提供两个固定操作——列出 Conversation、读取指定 Conversation 的可见 Message。受来源校验的窄 Preload 只暴露这两个操作与无敏感的 Backend 状态；Renderer 没有 Token、端口、通用 HTTP、写入 API 或 SSE 能力。此前关于 Renderer 尚不能调用业务 API 的描述由此更新；提交 Message、Run 状态观察与 SSE 仍是后续独立任务。
 
+Conversation 元数据现包含可空 `title`。创建 Conversation 的请求体仍严格为空对象；首次 `POST /api/v1/conversations/{conversation_id}/messages` 时，`RunSubmissionService` 将该用户文本规范化为空格分隔的单行，并生成至多 60 个字符的确定性标题（超出时以前 59 个字符加省略号表示）。已有标题不会被后续消息覆盖。更新后的 Conversation、首条 UserMessage 与 CREATED Run 由 `RunStarter` 在同一 SQLite 事务中提交，提交响应和列表响应均返回 `title`，Electron 侧栏立即以该响应更新显示。此标题不是模型生成摘要，也不是可编辑字段。
+
 阶段 7 的最小写入接入也已完成：同一 `BackendLauncher` 额外提供创建空 Conversation 与向指定 Conversation 提交非空 Message 的固定操作。Main 在调用前验证 IPC 参数，并继续检查 Renderer 来源；提交成功后 Renderer 仅显示 API 返回的 USER Message 和“等待响应”状态。运行中的 Run 仍未被 Renderer 查询或订阅，AssistantMessage 只会在后续手动重新读取历史时出现。
 
 阶段 7 的实时观察现已通过 Main 私有的认证 fetch-based SSE 接入：提交返回的 `run_id` 只用于固定的 Main 生命周期管理，Main 将已解析的安全 RunEvent 经窄 Preload 推送给 Renderer；Renderer 不读取 SSE URL、Token 或端口。当前 UI 将本次 Run 的事件保留为临时 Activity 卡片，并在终态后重新读取用户可见 Message 历史以显示 AssistantMessage；Activity 不是持久化 Message，刷新后由已持久化的 RunEvent/Message 历史替代。Stop 只请求既有协作取消，最终状态仍以 RunEvent 为准。聊天布局将 composer 固定在窗口底部，只有消息区滚动。

@@ -29,10 +29,11 @@ class UnusedRunStarter:
     async def start(
         self,
         *,
+        conversation: Conversation,
         user_message: UserMessage,
         run: Run,
     ) -> None:
-        del user_message, run
+        del conversation, user_message, run
         raise AssertionError("run submission is not used by this test")
 
 
@@ -379,6 +380,7 @@ async def test_create_conversation_persists_an_empty_local_conversation(
         "conversation_id": "conv-created",
         "created_at": "2026-08-11T12:00:00Z",
         "updated_at": "2026-08-11T12:00:00Z",
+        "title": None,
     }
     assert stored == _conversation(
         conversation_id,
@@ -510,6 +512,7 @@ async def test_submit_message_creates_a_visible_message_and_created_run(
         persisted_runs = await runs.list_for_conversation(
             conversation.conversation_id,
         )
+        stored_conversation = await conversations.get(conversation.conversation_id)
     finally:
         await starter.aclose()
         await runs.aclose()
@@ -529,6 +532,12 @@ async def test_submit_message_creates_a_visible_message_and_created_run(
             "created_at": "2026-08-11T12:00:00Z",
             "updated_at": "2026-08-11T12:00:00Z",
         },
+        "conversation": {
+            "conversation_id": "conv-local",
+            "created_at": "2026-08-11T11:00:00Z",
+            "updated_at": "2026-08-11T12:00:00Z",
+            "title": "Hello, asAgent.",
+        },
     }
     assert messages == (
         UserMessage(
@@ -541,6 +550,9 @@ async def test_submit_message_creates_a_visible_message_and_created_run(
     assert len(persisted_runs) == 1
     assert persisted_runs[0].run_id == RunId("run-created")
     assert persisted_runs[0].status is RunStatus.CREATED
+    assert stored_conversation is not None
+    assert stored_conversation.title == "Hello, asAgent."
+    assert stored_conversation.updated_at == created_at
 
 
 @pytest.mark.asyncio

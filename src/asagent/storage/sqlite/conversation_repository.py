@@ -65,6 +65,7 @@ class SqliteConversationRepository:
                 .values(
                     conversation_id=str(conversation.conversation_id),
                     user_id=str(conversation.user_id),
+                    title=conversation.title,
                     created_at=_to_utc(conversation.created_at),
                     updated_at=_to_utc(conversation.updated_at),
                 )
@@ -72,6 +73,7 @@ class SqliteConversationRepository:
                     index_elements=[conversations.c.conversation_id],
                     set_={
                         "user_id": str(conversation.user_id),
+                        "title": conversation.title,
                         "created_at": _to_utc(conversation.created_at),
                         "updated_at": _to_utc(conversation.updated_at),
                     },
@@ -130,6 +132,7 @@ def _to_conversation(row: Mapping[str, object]) -> Conversation:
         user_id=UserId(_required_str(row, "user_id")),
         created_at=_required_datetime(row, "created_at"),
         updated_at=_required_datetime(row, "updated_at"),
+        title=_optional_str(row, "title"),
     )
 
 
@@ -162,6 +165,15 @@ def _required_str(row: Mapping[str, object], field: str) -> str:
     value = row[field]
     if not isinstance(value, str):
         raise RuntimeError(f"persisted {field} must be a string")
+    return value
+
+
+def _optional_str(row: Mapping[str, object], field: str) -> str | None:
+    value = row[field]
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise RuntimeError(f"persisted {field} must be a string or null")
     return value
 
 

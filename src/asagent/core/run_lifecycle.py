@@ -1,5 +1,6 @@
 from typing import Protocol, runtime_checkable
 
+from asagent.core.conversation import Conversation
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.run import Run
 
@@ -9,6 +10,7 @@ class RunStarter(Protocol):
     async def start(
         self,
         *,
+        conversation: Conversation,
         user_message: UserMessage,
         run: Run,
     ) -> None: ...

@@ -21,16 +21,17 @@ _LOCAL_USER_ID = UserId("local-user")
 
 class RecordingRunStarter:
     def __init__(self, error: Exception | None = None) -> None:
-        self.calls: list[tuple[UserMessage, Run]] = []
+        self.calls: list[tuple[Conversation, UserMessage, Run]] = []
         self._error = error
 
     async def start(
         self,
         *,
+        conversation: Conversation,
         user_message: UserMessage,
         run: Run,
     ) -> None:
-        self.calls.append((user_message, run))
+        self.calls.append((conversation, user_message, run))
         if self._error is not None:
             raise self._error
 
@@ -38,6 +39,8 @@ class RecordingRunStarter:
 def _conversation(
     conversation_id: ConversationId,
     user_id: UserId = _LOCAL_USER_ID,
+    *,
+    title: str | None = None,
 ) -> Conversation:
     created_at = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
     return Conversation(
@@ -45,6 +48,7 @@ def _conversation(
         user_id=user_id,
         created_at=created_at,
         updated_at=created_at,
+        title=title,
     )
 
 
@@ -87,7 +91,55 @@ async def test_submit_creates_a_user_message_and_created_run() -> None:
     assert submission.run.status is RunStatus.CREATED
     assert submission.user_message.created_at == submission.run.created_at
     assert submission.run.created_at == submission.run.updated_at
-    assert starter.calls == [(submission.user_message, submission.run)]
+    assert submission.conversation.title == "Hello, asAgent."
+    assert submission.conversation.updated_at == submission.run.created_at
+    assert starter.calls == [
+        (submission.conversation, submission.user_message, submission.run),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_submit_generates_a_normalized_and_truncated_title() -> None:
+    conversations = InMemoryConversationRepository()
+    starter = RecordingRunStarter()
+    conversation_id = ConversationId("conversation-1")
+    await conversations.save(_conversation(conversation_id))
+
+    long_content = "  ".join(["word"] * 40)
+    submission = await _service(
+        conversations=conversations,
+        starter=starter,
+    ).submit(
+        conversation_id=conversation_id,
+        content=f"  {long_content}  ",
+        user_id=_LOCAL_USER_ID,
+    )
+
+    normalized = " ".join(long_content.split())
+    assert submission.conversation.title == f"{normalized[:59]}…"
+    assert len(submission.conversation.title) == 60
+
+
+@pytest.mark.asyncio
+async def test_submit_keeps_an_existing_conversation_title() -> None:
+    conversations = InMemoryConversationRepository()
+    starter = RecordingRunStarter()
+    conversation_id = ConversationId("conversation-1")
+    await conversations.save(
+        _conversation(conversation_id, title="Existing title"),
+    )
+
+    submission = await _service(
+        conversations=conversations,
+        starter=starter,
+    ).submit(
+        conversation_id=conversation_id,
+        content="A newer message that should not replace the title.",
+        user_id=_LOCAL_USER_ID,
+    )
+
+    assert submission.conversation.title == "Existing title"
+    assert starter.calls[0][0].title == "Existing title"
 
 
 @pytest.mark.asyncio

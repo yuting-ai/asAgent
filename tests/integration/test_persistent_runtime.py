@@ -441,6 +441,7 @@ async def test_execute_submitted_rejects_non_created_runs(
             created_at=created_at,
             updated_at=created_at,
         ),
+        conversation=_conversation(conversation_id),
     )
 
     try:

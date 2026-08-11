@@ -40,6 +40,7 @@ class ConversationResponse(BaseModel):
     conversation_id: str
     created_at: datetime
     updated_at: datetime
+    title: str | None
 
     @classmethod
     def from_conversation(cls, conversation: Conversation) -> "ConversationResponse":
@@ -47,6 +48,7 @@ class ConversationResponse(BaseModel):
             conversation_id=str(conversation.conversation_id),
             created_at=conversation.created_at,
             updated_at=conversation.updated_at,
+            title=conversation.title,
         )
 
 
@@ -112,6 +114,7 @@ class CancelRunResponse(BaseModel):
 class SubmitMessageResponse(BaseModel):
     message: MessageResponse
     run: RunResponse
+    conversation: ConversationResponse
 
 
 def create_app(
@@ -270,6 +273,9 @@ def create_app(
         return SubmitMessageResponse(
             message=MessageResponse.from_message(submission.user_message),
             run=RunResponse.from_run(submission.run),
+            conversation=ConversationResponse.from_conversation(
+                submission.conversation,
+            ),
         )
 
     @app.get(

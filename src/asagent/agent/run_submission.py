@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from asagent.core.conversation import Conversation
@@ -9,6 +9,8 @@ from asagent.core.repositories import ConversationRepository
 from asagent.core.run import Run
 from asagent.core.run_lifecycle import RunStarter
 from asagent.core.run_status import RunStatus
+
+_MAX_CONVERSATION_TITLE_LENGTH = 60
 
 
 class UnknownConversationError(ValueError):
@@ -23,6 +25,14 @@ class ConversationAccessDeniedError(ValueError):
 class SubmittedRun:
     user_message: UserMessage
     run: Run
+    conversation: Conversation
+
+
+def _initial_conversation_title(content: str) -> str:
+    normalized = " ".join(content.split())
+    if len(normalized) <= _MAX_CONVERSATION_TITLE_LENGTH:
+        return normalized
+    return f"{normalized[: _MAX_CONVERSATION_TITLE_LENGTH - 1]}…"
 
 
 class RunSubmissionService:
@@ -50,8 +60,14 @@ class RunSubmissionService:
     ) -> SubmittedRun:
         conversation = await self._conversations.get(conversation_id)
         self._require_access(conversation, user_id)
+        assert conversation is not None
 
         started_at = self._now()
+        updated_conversation = replace(
+            conversation,
+            title=conversation.title or _initial_conversation_title(content),
+            updated_at=started_at,
+        )
         user_message = UserMessage(
             message_id=self._new_message_id(),
             conversation_id=conversation_id,
@@ -66,6 +82,7 @@ class RunSubmissionService:
             updated_at=started_at,
         )
         await self._run_starter.start(
+            conversation=updated_conversation,
             user_message=user_message,
             run=run,
         )
@@ -73,6 +90,7 @@ class RunSubmissionService:
         return SubmittedRun(
             user_message=user_message,
             run=run,
+            conversation=updated_conversation,
         )
 
     @staticmethod

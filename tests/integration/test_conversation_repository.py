@@ -26,6 +26,7 @@ def _conversation(
     *,
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
+    title: str | None = None,
 ) -> Conversation:
     creation_time = created_at or datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
     return Conversation(
@@ -33,6 +34,7 @@ def _conversation(
         user_id=user_id,
         created_at=creation_time,
         updated_at=updated_at or creation_time,
+        title=title,
     )
 
 
@@ -120,6 +122,41 @@ async def test_normalizes_persisted_datetimes_to_utc(tmp_path: Path) -> None:
         )
     finally:
         await repository.aclose()
+
+
+@pytest.mark.asyncio
+async def test_persists_optional_conversation_titles_across_instances(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    titled = _conversation(
+        ConversationId("conversation-titled"),
+        UserId("local-user"),
+        title="Plan the week",
+    )
+    untitled = _conversation(
+        ConversationId("conversation-untitled"),
+        UserId("local-user"),
+    )
+    repository = SqliteConversationRepository(database_path)
+
+    try:
+        await repository.save(titled)
+        await repository.save(untitled)
+    finally:
+        await repository.aclose()
+
+    reopened = SqliteConversationRepository(database_path)
+    try:
+        assert await reopened.get(titled.conversation_id) == titled
+        assert await reopened.get(untitled.conversation_id) == untitled
+        stored_untitled = await reopened.get(untitled.conversation_id)
+        assert stored_untitled is not None
+        assert stored_untitled.title is None
+    finally:
+        await reopened.aclose()
 
 
 @pytest.mark.asyncio

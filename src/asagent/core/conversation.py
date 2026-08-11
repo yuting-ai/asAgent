@@ -10,3 +10,4 @@ class Conversation:
     user_id: UserId
     created_at: datetime
     updated_at: datetime
+    title: str | None = None

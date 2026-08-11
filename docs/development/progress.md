@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 7 进行中；阶段 0–6 的 Core、Agent Loop、SQLite 持久化、Context Builder 基础、受控 Workspace Tool 边界与 Local API/SSE 已完成，当前开始 Electron 最小集成。
-- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建、可见 Message 查询/提交、按 Run ID 查询状态、协作取消，以及基于持久化 RunEvent 的认证 SSE 回放/实时观察。
+- 项目阶段：阶段 7 进行中；阶段 0–6 的 Core、Agent Loop、SQLite 持久化、Context Builder 基础、受控 Workspace Tool 边界与 Local API/SSE 已完成，当前继续 Electron 最小集成。
+- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建（响应含可空 title，创建请求仍禁止 title）、可见 Message 查询/提交、按 Run ID 查询状态、协作取消，以及基于持久化 RunEvent 的认证 SSE 回放/实时观察。首条消息提交会在 RunStarter 同事务中生成会话标题。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-11
-- 当前目标：Electron 开发模式已能安全启动、验证并停止离线 Python Backend；下一项在用户确认后让 Renderer 通过受限接口读取真实 Conversation 与 Message 历史，不直接暴露 Token 或端口。
+- 当前目标：桌面 Chat 侧栏已能在首条消息提交后立即显示截断标题；下一项在用户确认后继续阶段 7 体验回顾与下一真实用户价值路径。
 
 ## 2. 已完成
 
@@ -2729,4 +2729,31 @@
 
 ### 下一步
 
-- 在用户确认后，实现 Conversation 标题的最小持久化/API/桌面展示闭环；不与权限设置、全文搜索或长期 Memory 合并。
+- Conversation 标题闭环已实现；在用户确认后继续阶段 7 体验回顾并选择下一条真实用户价值路径，不提前实现设置页或正式打包。
+
+## 2026-08-11 阶段 7 Conversation 标题最小闭环工作记录
+
+### 完成
+
+- `Conversation` 增加可选 `title`；标题生成留在 `RunSubmissionService`，首条消息规范化截断至 60 字符，已有标题不被覆盖。
+- `RunStarter` 接收完整 Conversation，在同一事务中更新 title/`updated_at` 并写入用户消息与 CREATED Run。
+- SQLite schema/Alembic `20260811_02`、Repository、Local API `ConversationResponse`/`SubmitMessageResponse`，以及桌面 Main/Preload/Renderer 类型均已携带 `title`；提交成功后侧栏立即用返回的 conversation 刷新显示。
+
+### 验证
+
+- 检查：定向 pytest、`ruff format`/`check`、`mypy`、`scripts/check.sh`，以及 `desktop/` 的 format、typecheck、lint、test、build。
+- 结果：通过；Python 280 个测试、桌面 Vitest 6 个测试与桌面构建成功。
+- 人工验收：用户已以桌面端新建会话并发送消息，确认侧栏立即显示规范化、截断后的标题。
+
+### 决策变化
+
+- 补充 DEC-062：标题由首条消息确定性生成，且与初始 Message/Run 原子持久化。
+
+### 风险或问题
+
+- 既有本地数据库需通过 Alembic 升级至 `20260811_02`；桌面 Sidecar 启动时会执行既有升级路径。
+- Create Conversation 仍禁止请求体携带 `title`；标题只由首条消息提交产生。
+
+### 下一步
+
+- 在用户确认后，继续阶段 7 体验回顾并领取下一项真实用户价值路径；不提前实现手动标题编辑、模型摘要标题或设置页。

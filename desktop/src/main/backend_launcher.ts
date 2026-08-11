@@ -14,6 +14,7 @@ export type ConversationSummary = {
   conversation_id: string
   created_at: string
   updated_at: string
+  title: string | null
 }
 
 export type ConversationMessage = {
@@ -33,6 +34,7 @@ export type RunSummary = {
 export type SubmittedMessage = {
   message: ConversationMessage
   run: RunSummary
+  conversation: ConversationSummary
 }
 
 export type RunEvent = {

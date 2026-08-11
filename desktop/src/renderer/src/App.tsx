@@ -10,6 +10,7 @@ type ConversationSummary = {
   conversation_id: string
   created_at: string
   updated_at: string
+  title: string | null
 }
 
 type ConversationMessage = {
@@ -52,8 +53,8 @@ type AppView =
 
 type ActivityTab = 'approvals' | 'schedule'
 
-function conversationLabel(conversationId: string): string {
-  return `Conversation ${conversationId.slice(-8)}`
+function conversationLabel(title: string | null): string {
+  return title ?? 'New conversation'
 }
 
 function formatThreadTime(iso: string): string {
@@ -386,6 +387,13 @@ export default function App(): React.JSX.Element {
     try {
       const submitted = await window.desktop.submitMessage(conversationId, content)
       setMessages((current) => [...current, submitted.message])
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.conversation_id === submitted.conversation.conversation_id
+            ? submitted.conversation
+            : conversation
+        )
+      )
       setDraft('')
       setActiveRun({
         runId: submitted.run.run_id,
@@ -721,7 +729,7 @@ export default function App(): React.JSX.Element {
                       type="button"
                     >
                       <div className="chat-thread-name">
-                        {conversationLabel(conversation.conversation_id)}
+                        {conversationLabel(conversation.title)}
                       </div>
                       <div className="chat-thread-preview">Local conversation</div>
                       <div className="chat-thread-time">
@@ -736,7 +744,7 @@ export default function App(): React.JSX.Element {
                 <div className="chat-thread-header">
                   <div className="chat-thread-header-title">
                     {selectedConversation
-                      ? conversationLabel(selectedConversation.conversation_id)
+                      ? conversationLabel(selectedConversation.title)
                       : 'No conversation selected'}
                   </div>
                   <div className="chat-file-chip">

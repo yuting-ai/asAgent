@@ -30,6 +30,7 @@ conversations = Table(
         ForeignKey("users.user_id", ondelete="RESTRICT"),
         nullable=False,
     ),
+    Column("title", String),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )

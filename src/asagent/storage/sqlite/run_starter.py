@@ -3,6 +3,7 @@ from pathlib import Path
 
 from sqlalchemy import func, select
 
+from asagent.core.conversation import Conversation
 from asagent.core.messages import UserMessage
 from asagent.core.run import Run
 from asagent.storage.sqlite.connection import create_sqlite_async_engine
@@ -19,12 +20,16 @@ class SqliteRunStarter:
     async def start(
         self,
         *,
+        conversation: Conversation,
         user_message: UserMessage,
         run: Run,
     ) -> None:
-        if user_message.conversation_id != run.conversation_id:
+        if (
+            conversation.conversation_id != user_message.conversation_id
+            or conversation.conversation_id != run.conversation_id
+        ):
             raise ValueError(
-                "user message and run must belong to the same conversation",
+                "conversation, user message, and run must belong together",
             )
 
         next_sequence = (
@@ -42,6 +47,17 @@ class SqliteRunStarter:
             if conversation_exists is None:
                 raise ValueError("cannot start a run for an unknown conversation")
 
+            await connection.execute(
+                conversations.update()
+                .where(
+                    conversations.c.conversation_id
+                    == str(conversation.conversation_id),
+                )
+                .values(
+                    title=conversation.title,
+                    updated_at=_to_utc(conversation.updated_at),
+                ),
+            )
             await connection.execute(
                 messages.insert().values(
                     message_id=str(user_message.message_id),

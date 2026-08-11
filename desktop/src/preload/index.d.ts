@@ -8,6 +8,7 @@ interface ConversationSummary {
   conversation_id: string
   created_at: string
   updated_at: string
+  title: string | null
 }
 
 interface ConversationMessage {
@@ -25,6 +26,7 @@ interface SubmittedMessage {
     created_at: string
     updated_at: string
   }
+  conversation: ConversationSummary
 }
 
 interface RunUpdate {

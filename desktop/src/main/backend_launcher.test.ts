@@ -144,7 +144,8 @@ describe('BackendLauncher', () => {
             {
               conversation_id: 'conv-1',
               created_at: '2026-08-11T00:00:00Z',
-              updated_at: '2026-08-11T00:00:00Z'
+              updated_at: '2026-08-11T00:00:00Z',
+              title: null
             }
           ]),
           { status: 200 }
@@ -169,7 +170,8 @@ describe('BackendLauncher', () => {
       {
         conversation_id: 'conv-1',
         created_at: '2026-08-11T00:00:00Z',
-        updated_at: '2026-08-11T00:00:00Z'
+        updated_at: '2026-08-11T00:00:00Z',
+        title: null
       }
     ])
 
@@ -194,7 +196,8 @@ describe('BackendLauncher', () => {
           JSON.stringify({
             conversation_id: 'conv-1',
             created_at: '2026-08-11T00:00:00Z',
-            updated_at: '2026-08-11T00:00:00Z'
+            updated_at: '2026-08-11T00:00:00Z',
+            title: null
           }),
           { status: 201 }
         )
@@ -213,6 +216,12 @@ describe('BackendLauncher', () => {
               status: 'created',
               created_at: '2026-08-11T00:00:01Z',
               updated_at: '2026-08-11T00:00:01Z'
+            },
+            conversation: {
+              conversation_id: 'conv-1',
+              created_at: '2026-08-11T00:00:00Z',
+              updated_at: '2026-08-11T00:00:01Z',
+              title: 'Hello.'
             }
           }),
           { status: 201 }

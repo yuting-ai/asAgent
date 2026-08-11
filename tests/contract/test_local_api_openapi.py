@@ -4,6 +4,7 @@ from typing import cast
 from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
+from asagent.core.conversation import Conversation
 from asagent.core.ids import MessageId, RunId
 from asagent.core.messages import UserMessage
 from asagent.core.repositories import RunRepository
@@ -19,10 +20,11 @@ class UnusedRunStarter:
     async def start(
         self,
         *,
+        conversation: Conversation,
         user_message: UserMessage,
         run: Run,
     ) -> None:
-        del user_message, run
+        del conversation, user_message, run
         raise AssertionError("run submission is not used by this test")
 
 

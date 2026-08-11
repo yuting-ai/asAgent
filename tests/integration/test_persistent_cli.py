@@ -76,7 +76,10 @@ async def test_persistent_cli_reuses_conversation_across_instances(
             conversations=conversations,
             conversation_id=conversation.conversation_id,
         )
-        assert reused == conversation
+        assert reused.conversation_id == conversation.conversation_id
+        assert reused.user_id == conversation.user_id
+        assert reused.created_at == conversation.created_at
+        assert reused.title == "calculate 2 * (3 + 4)"
 
         inputs = iter(("hello", "exit"))
         await run_persistent_agent_chat(

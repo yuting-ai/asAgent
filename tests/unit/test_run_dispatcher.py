@@ -6,7 +6,8 @@ import pytest
 from asagent.agent.cancellation import RunCancellationToken
 from asagent.agent.run_dispatcher import InProcessRunDispatcher
 from asagent.agent.run_submission import SubmittedRun
-from asagent.core.ids import ConversationId, MessageId, RunId
+from asagent.core.conversation import Conversation
+from asagent.core.ids import ConversationId, MessageId, RunId, UserId
 from asagent.core.messages import UserMessage
 from asagent.core.run import Run
 from asagent.core.run_status import RunStatus
@@ -30,6 +31,13 @@ def _submission(run_id: RunId = _DEFAULT_RUN_ID) -> SubmittedRun:
             status=RunStatus.CREATED,
             created_at=created_at,
             updated_at=created_at,
+        ),
+        conversation=Conversation(
+            conversation_id=conversation_id,
+            user_id=UserId("local-user"),
+            created_at=created_at,
+            updated_at=created_at,
+            title="Hello",
         ),
     )
 

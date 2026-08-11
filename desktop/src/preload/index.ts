@@ -4,6 +4,7 @@ type ConversationSummary = {
   conversation_id: string
   created_at: string
   updated_at: string
+  title: string | null
 }
 
 type ConversationMessage = {
@@ -21,6 +22,7 @@ type SubmittedMessage = {
     created_at: string
     updated_at: string
   }
+  conversation: ConversationSummary
 }
 
 type RunUpdate = {

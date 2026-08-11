@@ -25,10 +25,11 @@ class UnusedRunStarter:
     async def start(
         self,
         *,
+        conversation: Conversation,
         user_message: UserMessage,
         run: Run,
     ) -> None:
-        del user_message, run
+        del conversation, user_message, run
         raise AssertionError("run submission is not used by this test")
 
 
