@@ -1,8 +1,16 @@
-import { ElectronAPI } from '@electron-toolkit/preload'
+interface DesktopAppInfo {
+  appName: string
+  version: string
+}
+
+interface DesktopBridge {
+  getAppInfo(): Promise<DesktopAppInfo>
+}
 
 declare global {
   interface Window {
-    electron: ElectronAPI
-    api: unknown
+    desktop: DesktopBridge
   }
 }
+
+export {}

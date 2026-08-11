@@ -2547,3 +2547,29 @@
 ### 下一步
 
 - 在用户确认后，收紧 BrowserWindow/Preload 边界并替换示例 Renderer 为最小 asAgent 聊天壳；本次不连接 Backend。
+
+## 2026-08-11 阶段 7 安全桌面壳工作记录
+
+### 完成
+
+- `BrowserWindow` 现在显式启用 `contextIsolation: true`、`nodeIntegration: false` 与 `sandbox: true`；阻止新窗口，并拒绝导航到非当前开发/生产 Renderer 来源。
+- 删除模板暴露的通用 `window.electron.ipcRenderer` 与 ping 通道；Preload 只暴露 `window.desktop.getAppInfo()`，Main 在返回只读应用名和版本前校验 IPC 发起 Frame 的来源。
+- 删除 Electron 模板素材与示例组件，替换为响应式 asAgent 聊天壳：侧栏、当前 Conversation、消息区、输入框和显式的“Backend 未连接”状态。输入仅在 Renderer 内显示未发送提示，不会伪造模型调用。
+
+### 验证
+
+- 检查：在 `desktop/` 运行 Prettier、TypeScript 类型检查、ESLint、生产构建和 `npm run dev`。
+- 结果：通过；Main、Preload 和 Renderer 均成功构建，Electron 开发窗口显示新的 asAgent 聊天壳。
+
+### 决策变化
+
+- 无；本次落实既有 Main/Preload/Renderer 最小权限边界，不新增前端状态库、IPC 泛化层、Backend 生命周期管理或 API 客户端。
+
+### 风险或问题
+
+- 当前 `getAppInfo()` 只是验证窄 IPC 的只读示例；它不提供端口、Token、文件访问、Shell 或通用消息转发。
+- 页面仍是本地静态预览；未启动 Python Sidecar，不能加载 Conversation、提交 Message、查询 Run 或订阅 SSE。
+
+### 下一步
+
+- 在用户确认后，实现 Electron Main 启动/停止开发 Python Backend、通过 stdin 传递一次性 Token、解析 ready 记录并轮询认证 Health；本次不让 Renderer 直接取得 Token 或请求业务 API。

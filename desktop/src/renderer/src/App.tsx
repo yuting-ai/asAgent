@@ -1,35 +1,92 @@
-import Versions from './components/Versions'
-import electronLogo from './assets/electron.svg'
+import { FormEvent, useEffect, useState } from 'react'
 
-function App(): React.JSX.Element {
-  const ipcHandle = (): void => window.electron.ipcRenderer.send('ping')
-
-  return (
-    <>
-      <img alt="logo" className="logo" src={electronLogo} />
-      <div className="creator">Powered by electron-vite</div>
-      <div className="text">
-        Build an Electron app with <span className="react">React</span>
-        &nbsp;and <span className="ts">TypeScript</span>
-      </div>
-      <p className="tip">
-        Please try pressing <code>F12</code> to open the devTool
-      </p>
-      <div className="actions">
-        <div className="action">
-          <a href="https://electron-vite.org/" target="_blank" rel="noreferrer">
-            Documentation
-          </a>
-        </div>
-        <div className="action">
-          <a target="_blank" rel="noreferrer" onClick={ipcHandle}>
-            Send IPC
-          </a>
-        </div>
-      </div>
-      <Versions></Versions>
-    </>
-  )
+type AppInfo = {
+  appName: string
+  version: string
 }
 
-export default App
+export default function App(): React.JSX.Element {
+  const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
+  const [draft, setDraft] = useState('')
+  const [notice, setNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    void window.desktop.getAppInfo().then(setAppInfo)
+  }, [])
+
+  function submitDraft(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault()
+
+    if (!draft.trim()) {
+      return
+    }
+
+    setNotice('Backend is not connected; this message was not sent.')
+    setDraft('')
+  }
+
+  return (
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div>
+          <p className="eyebrow">LOCAL PERSONAL ASSISTANT</p>
+          <h1>asAgent</h1>
+        </div>
+
+        <button className="new-conversation" type="button">
+          + New conversation
+        </button>
+
+        <nav aria-label="Conversations">
+          <p className="section-label">Conversations</p>
+          <button className="conversation active" type="button">
+            <span>Welcome to asAgent</span>
+            <small>Just now</small>
+          </button>
+        </nav>
+
+        <p className="version">
+          {appInfo ? `${appInfo.appName} ${appInfo.version}` : 'Loading app info…'}
+        </p>
+      </aside>
+
+      <section className="chat">
+        <header className="chat-header">
+          <div>
+            <p className="eyebrow">Current conversation</p>
+            <h2>Welcome to asAgent</h2>
+          </div>
+          <span className="connection-status">Backend not connected</span>
+        </header>
+
+        <div className="messages">
+          <article className="message assistant">
+            <p className="message-role">asAgent</p>
+            <p>
+              Welcome. The desktop UI is ready; next we will connect it to the local Agent Backend.
+            </p>
+          </article>
+        </div>
+
+        <form className="composer" onSubmit={submitDraft}>
+          <label className="sr-only" htmlFor="message">
+            Message
+          </label>
+          <textarea
+            id="message"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Type a message…"
+            rows={3}
+          />
+          <div className="composer-footer">
+            <span>{notice ?? 'Messages stay in this UI and are not sent yet.'}</span>
+            <button disabled={!draft.trim()} type="submit">
+              Send
+            </button>
+          </div>
+        </form>
+      </section>
+    </main>
+  )
+}
