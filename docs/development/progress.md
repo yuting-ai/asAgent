@@ -2174,3 +2174,32 @@
 ### 下一步
 
 - 在用户确认后，实现阶段 6 的最小单条 Conversation 消息查询接口，并明确 404、用户可见消息边界与响应排序；本次不开始该任务。
+
+## 2026-08-11 阶段 6 Conversation 消息查询 Local API 工作记录
+
+### 完成
+
+- 新增认证后的 `GET /api/v1/conversations/{conversation_id}/messages`，在读取前确认 Conversation 存在且属于固定 `local-user`。
+- 响应仅映射用户可见的 USER/ASSISTANT Message：稳定 `message_id`、角色、正文与创建时间；它不暴露 Conversation 身份、user_id、内部 Tool message、Run、RunEvent 或 ToolCall。
+- Message 顺序直接沿用 Repository 的 Conversation 内持久化 sequence，而不是按时间猜测；其他用户 Conversation 与不存在的 Conversation 统一返回 `404 {"detail":"conversation not found"}`，避免泄露存在性。
+- 真实 API 查询确认一段已有多轮工具对话以用户/助手交替顺序完整返回，其中模型工具调用细节只体现为最终可见回答，不进入此端点。
+
+### 验证
+
+- 检查：运行 API Health、实际 TCP Server 与 Conversation API 定向集成测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 242 个测试通过，132 个文件格式正确，128 个源码文件 Ruff 与 strict mypy 无问题，锁定依赖解析为 42 个包。
+- 检查：通过有效 Bearer Token 查询持久化 Conversation `conv_3a3ad645dc6040798920d6c9ee019e3d` 的 messages。
+- 结果：通过；返回四组用户/助手可见消息及其 UTC ISO 8601 时间，未包含内部运行材料。
+
+### 决策变化
+
+- 无；本次复用既有单用户、Repository 注入与 DEC-062 API 认证边界。
+
+### 风险或问题
+
+- 当前消息接口没有分页、单条 Message 查询、Conversation 创建、编辑或删除；长 Conversation 的增量/分页读取要与 UI 滚动体验一并单独设计。
+- 当前返回正文是预期的聊天显示契约；响应不得被写入 RunEvent、日志或其他审计材料，日志脱敏策略仍保持不变。
+
+### 下一步
+
+- 在用户确认后，实现阶段 6 的最小创建 Conversation HTTP 接口，并明确请求验证、ID/时钟生成及成功状态码；本次不开始该任务。
