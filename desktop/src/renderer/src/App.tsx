@@ -7,11 +7,20 @@ type AppInfo = {
 
 export default function App(): React.JSX.Element {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'ready' | 'unavailable'>(
+    'checking'
+  )
   const [draft, setDraft] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
     void window.desktop.getAppInfo().then(setAppInfo)
+  }, [])
+
+  useEffect(() => {
+    void window.desktop.getBackendStatus().then((result) => {
+      setBackendStatus(result.status)
+    })
   }, [])
 
   function submitDraft(event: FormEvent<HTMLFormElement>): void {
@@ -56,7 +65,9 @@ export default function App(): React.JSX.Element {
             <p className="eyebrow">Current conversation</p>
             <h2>Welcome to asAgent</h2>
           </div>
-          <span className="connection-status">Backend not connected</span>
+          <span className={`connection-status ${backendStatus}`}>
+            {backendStatus === 'ready' ? 'Backend ready' : 'Checking backend…'}
+          </span>
         </header>
 
         <div className="messages">

@@ -6,7 +6,7 @@
 - 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建、可见 Message 查询/提交、按 Run ID 查询状态、协作取消，以及基于持久化 RunEvent 的认证 SSE 回放/实时观察。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-11
-- 当前目标：已生成并验证可运行的 Electron + React + TypeScript 开发骨架；下一项在用户确认后将模板默认权限收紧为安全的 Main/Preload/Renderer 边界，并替换为最小 asAgent 聊天壳。
+- 当前目标：Electron 开发模式已能安全启动、验证并停止离线 Python Backend；下一项在用户确认后让 Renderer 通过受限接口读取真实 Conversation 与 Message 历史，不直接暴露 Token 或端口。
 
 ## 2. 已完成
 
@@ -2573,3 +2573,30 @@
 ### 下一步
 
 - 在用户确认后，实现 Electron Main 启动/停止开发 Python Backend、通过 stdin 传递一次性 Token、解析 ready 记录并轮询认证 Health；本次不让 Renderer 直接取得 Token 或请求业务 API。
+
+## 2026-08-11 阶段 7 开发 Python Sidecar 生命周期工作记录
+
+### 完成
+
+- 新增 Electron Main 的 `BackendLauncher`，在开发模式从仓库根以 `uv run asagent serve --bootstrap-stdin --app-home .local-data --port 0` 启动 Python Backend；Token 在 Main 内生成，只经该子进程 stdin 传递。
+- Launcher 读取并校验立即刷新的 `ASAGENT_READY` 记录，再以 Bearer Token 轮询认证 Health；失败时停止自己持有的子进程，成功后才显示 BrowserWindow。退出时先请求 Launcher 停止其子进程。
+- Preload 仅新增无敏感的 `getBackendStatus()`；Renderer 显示 `Backend ready`，没有取得 Token、端口、通用 IPC、文件访问或业务 API 能力。
+- 新增 Vitest 与 Launcher 单元测试，覆盖私有 Bootstrap、ready/Health 成功路径和非法 ready 记录时终止自有子进程。Python CLI ready 输出改为 `flush=True`，保证管道握手不会被 stdout 缓冲阻塞。
+
+### 验证
+
+- 检查：Python Ruff、strict mypy 和完整 `scripts/check.sh`；桌面 TypeScript、ESLint、Vitest、生产构建与真实 `npm run dev`。
+- 结果：通过；Python 完整 277 个测试通过，140 个文件格式正确，135 个 Python 源码文件 Ruff 与 strict mypy 无问题；Vitest 2 个测试通过，Electron 生产构建和真实启动均显示 `Backend ready`。
+
+### 决策变化
+
+- 无；实现既有临时 Token、动态端口、ready 握手与 Health Check 策略，不新增 Renderer Token 传递、通用 IPC 或独立 Backend 服务层。
+
+### 风险或问题
+
+- 当前 Launcher 仅适用于源码开发的 `uv` 命令和仓库 `.local-data/`；发布版必须改用 PyInstaller Sidecar 与 Electron `userData`，不能复用此开发路径假设。
+- Launcher 当前只在启动时把 ready 状态提供给 Renderer；Backend 运行后崩溃的实时 UI 状态、受限业务 HTTP 客户端、Conversation/Message 读取和 SSE 仍待后续独立任务。
+
+### 下一步
+
+- 在用户确认后，让 Electron Renderer 通过保持 Token 私有的窄 Preload API 读取真实 Conversation 列表与 Message 历史；本次不提交消息、不创建 Run 或订阅 SSE。

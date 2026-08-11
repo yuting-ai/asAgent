@@ -551,7 +551,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                 port=args.port,
             )
             ready = await server.start()
-            print(f"{READY_PREFIX}{ready.to_json()}")
+            print(f"{READY_PREFIX}{ready.to_json()}", flush=True)
             await server.wait_closed()
         finally:
             await dispatcher.aclose()

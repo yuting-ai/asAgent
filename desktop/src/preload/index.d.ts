@@ -5,6 +5,7 @@ interface DesktopAppInfo {
 
 interface DesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>
+  getBackendStatus(): Promise<{ status: 'ready' | 'unavailable' }>
 }
 
 declare global {

@@ -1,8 +1,12 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { BackendLauncher } from './backend_launcher'
+
+let backendLauncher: BackendLauncher | undefined
+let isQuitting = false
 
 function rendererUrl(): string {
   if (is.dev) {
@@ -62,23 +66,58 @@ function createWindow(): void {
   void mainWindow.loadURL(rendererUrl())
 }
 
-app.whenReady().then(() => {
+function assertTrustedRenderer(url: string): void {
+  if (!isTrustedRendererUrl(url)) {
+    throw new Error('Untrusted renderer IPC request.')
+  }
+}
+
+function createDevelopmentBackendLauncher(): BackendLauncher {
+  const projectRoot = join(app.getAppPath(), '..')
+
+  return new BackendLauncher({
+    projectRoot,
+    appHome: join(projectRoot, '.local-data')
+  })
+}
+
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.asagent.desktop')
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  backendLauncher = createDevelopmentBackendLauncher()
+
+  try {
+    await backendLauncher.start()
+  } catch (error) {
+    dialog.showErrorBox(
+      'asAgent backend unavailable',
+      error instanceof Error ? error.message : 'Backend startup failed.'
+    )
+    await backendLauncher.stop()
+    app.quit()
+    return
+  }
+
   ipcMain.handle('desktop:get-app-info', (event) => {
     const frame = event.senderFrame
-    if (frame === null || !isTrustedRendererUrl(frame.url)) {
+    if (frame === null) {
       throw new Error('Untrusted renderer IPC request.')
     }
+    assertTrustedRenderer(frame.url)
+    return { appName: 'asAgent', version: app.getVersion() }
+  })
 
-    return {
-      appName: 'asAgent',
-      version: app.getVersion()
+  ipcMain.handle('desktop:get-backend-status', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
     }
+    assertTrustedRenderer(frame.url)
+    return { status: backendLauncher?.isReady ? 'ready' : 'unavailable' }
   })
 
   createWindow()
@@ -87,6 +126,19 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
     }
+  })
+})
+
+app.on('before-quit', (event) => {
+  if (isQuitting) {
+    return
+  }
+
+  event.preventDefault()
+  isQuitting = true
+
+  void (backendLauncher?.stop() ?? Promise.resolve()).finally(() => {
+    app.quit()
   })
 })
 
