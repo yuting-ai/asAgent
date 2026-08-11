@@ -30,6 +30,11 @@ def _discard_submission(submission: SubmittedRun) -> None:
     del submission
 
 
+def _cancel_nothing(run_id: RunId) -> bool:
+    del run_id
+    return False
+
+
 def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
     conversations = InMemoryConversationRepository()
     app = create_app(
@@ -44,6 +49,7 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
             new_message_id=lambda: MessageId("unused-message"),
         ),
         dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
     )
 
     schema = app.openapi()
@@ -63,6 +69,7 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
         "/api/v1/conversations",
         "/api/v1/conversations/{conversation_id}/messages",
         "/api/v1/runs/{run_id}",
+        "/api/v1/runs/{run_id}/cancel",
     }
 
     expected_operations = (
@@ -76,6 +83,7 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
             "201",
         ),
         ("/api/v1/runs/{run_id}", "get", "200"),
+        ("/api/v1/runs/{run_id}/cancel", "post", "202"),
     )
     for path, method, success_status in expected_operations:
         operation = paths[path][method]

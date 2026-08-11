@@ -40,6 +40,11 @@ def _discard_submission(submission: SubmittedRun) -> None:
     del submission
 
 
+def _cancel_nothing(run_id: RunId) -> bool:
+    del run_id
+    return False
+
+
 def _unused_run_submission(
     conversations: SqliteConversationRepository,
 ) -> RunSubmissionService:
@@ -105,6 +110,7 @@ async def test_list_conversations_returns_only_local_user_metadata(
         runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -157,6 +163,7 @@ async def test_list_conversations_requires_the_current_local_api_token(
         runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -206,6 +213,7 @@ async def test_list_conversation_messages_returns_visible_messages_in_sequence_o
         runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -273,6 +281,7 @@ async def test_list_conversation_messages_hides_unknown_or_other_user_conversati
         runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -308,6 +317,7 @@ async def test_list_conversation_messages_requires_the_current_local_api_token(
         runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -342,6 +352,7 @@ async def test_create_conversation_persists_an_empty_local_conversation(
         runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
         conversation_id_factory=lambda: conversation_id,
         clock=lambda: created_at,
     )
@@ -392,6 +403,7 @@ async def test_create_conversation_rejects_unknown_request_fields(
         runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -428,6 +440,7 @@ async def test_create_conversation_requires_the_current_local_api_token(
         runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -476,6 +489,7 @@ async def test_submit_message_creates_a_visible_message_and_created_run(
             new_message_id=lambda: MessageId("msg-created"),
         ),
         dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -567,6 +581,7 @@ async def test_submit_message_rejects_invalid_request_bodies(
             new_message_id=lambda: MessageId("msg-created"),
         ),
         dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -633,6 +648,7 @@ async def test_submit_message_hides_unknown_or_other_user_conversations(
             new_message_id=lambda: MessageId("msg-created"),
         ),
         dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
     )
     transport = httpx.ASGITransport(app=app)
 

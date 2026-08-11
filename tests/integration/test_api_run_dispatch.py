@@ -73,6 +73,7 @@ async def test_submit_message_dispatches_background_execution(tmp_path: Path) ->
         runs=runs,
         run_submission=run_submission,
         dispatch_submitted_run=dispatcher.dispatch,
+        cancel_run=dispatcher.cancel,
     )
     transport = httpx.ASGITransport(app=app)
 

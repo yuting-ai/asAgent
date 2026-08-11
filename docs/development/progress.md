@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 6 进行中；阶段 0–5 的 Core、Agent Loop、SQLite 持久化、Context Builder 基础与受控 Workspace Tool 边界已完成，当前正在建立 Electron 未来使用的 Local API 与 SSE 入口。
-- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建、可见 Message 查询/提交，以及按 Run ID 查询状态；HTTP 取消与 SSE 尚未实现。
+- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建、可见 Message 查询/提交、按 Run ID 查询状态与协作取消请求；SSE 尚未实现。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-11
-- 当前目标：客户端可用 POST 返回的 `run_id` 查询 `created → completed/failed/...`；下一项在用户确认后实现最小 HTTP 取消，随后再接入 SSE。
+- 当前目标：客户端可提交、查询并协作取消本地 Run；下一项在用户确认后设计持久化 RunEvent 的最小 SSE 回放与实时订阅，保持 API 与 Runtime 的职责分离。
 
 ## 2. 已完成
 
@@ -2468,3 +2468,30 @@
 ### 下一步
 
 - 在用户确认后，实现最小 HTTP 取消（对活跃 Run 请求协作取消）；本次不开始 SSE。
+
+## 2026-08-11 阶段 6 HTTP Run 协作取消工作记录
+
+### 完成
+
+- 新增认证后的 `POST /api/v1/runs/{run_id}/cancel`。路由先复用既有 Run/Conversation 的 local-user 归属检查，再调用注入的 `cancel_run` 回调请求现有 Dispatcher 协作取消。
+- 活跃 Run 返回 202 及稳定 Run ID 和 `cancellation_requested: true`；不存在或其他用户 Run 统一为 404，已不活跃 Run 返回 409。取消请求不直接写 SQLite 状态，也不强制终止模型或工具调用。
+- 开发 `serve` 将既有 `dispatcher.cancel` 注入 App Factory。Runtime 与 AgentLoop 保持最终状态职责：它们在已有安全检查点观察 Token 后持久化 `CANCELLED`。
+- OpenAPI 和 Run API 集成测试已覆盖成功、非活跃、未知/跨用户与 Bearer 认证路径；没有新增取消 Service、状态机或缓存。
+
+### 验证
+
+- 检查：运行 Run API、OpenAPI 与既有 API 定向测试，随后运行 Ruff、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；定向 34 个测试、完整 272 个测试通过，Ruff 格式化与检查、strict mypy、锁文件检查均通过。
+
+### 决策变化
+
+- 无；本次直接桥接已验证的 `InProcessRunDispatcher.cancel()`，未改变协作取消、Runtime 终态持久化或 SSE 的既有边界。
+
+### 风险或问题
+
+- 202 仅表示 Backend 已接受协作取消请求；Provider 或 Tool 若尚未到达安全检查点，Run 不会立即变为 `cancelled`，客户端仍需查询状态。
+- 当前仍缺少 SSE 事件帧、断线续传和实时订阅；轮询只是临时可观察方式，不是最终聊天体验。
+
+### 下一步
+
+- 在用户确认后，实现阶段 6 最小认证 SSE：先从持久化 `RunEvent` 按 sequence 回放，再为活跃 Run 连接实时事件；本次不改变 Dispatcher 或引入 Electron。

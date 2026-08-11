@@ -545,6 +545,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     runs=runs,
                     run_submission=run_submission,
                     dispatch_submitted_run=dispatcher.dispatch,
+                    cancel_run=dispatcher.cancel,
                 ),
                 host=args.host,
                 port=args.port,

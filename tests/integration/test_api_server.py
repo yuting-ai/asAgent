@@ -39,6 +39,11 @@ def _discard_submission(submission: SubmittedRun) -> None:
     del submission
 
 
+def _cancel_nothing(run_id: RunId) -> bool:
+    del run_id
+    return False
+
+
 def _unused_run_submission(
     conversations: InMemoryConversationRepository,
 ) -> RunSubmissionService:
@@ -59,6 +64,7 @@ def _create_app() -> FastAPI:
         runs=_UNUSED_RUNS,
         run_submission=_unused_run_submission(conversations),
         dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
     )
 
 

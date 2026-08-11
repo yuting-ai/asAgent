@@ -99,6 +99,11 @@ class RunResponse(BaseModel):
         )
 
 
+class CancelRunResponse(BaseModel):
+    run_id: str
+    cancellation_requested: Literal[True] = True
+
+
 class SubmitMessageResponse(BaseModel):
     message: MessageResponse
     run: RunResponse
@@ -111,6 +116,7 @@ def create_app(
     runs: RunRepository,
     run_submission: RunSubmissionService,
     dispatch_submitted_run: Callable[[SubmittedRun], object],
+    cancel_run: Callable[[RunId], bool],
     conversation_id_factory: Callable[[], ConversationId] | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
@@ -121,6 +127,23 @@ def create_app(
     authenticate = BearerTokenAuthenticator(access_token)
     create_conversation_id = conversation_id_factory or _new_conversation_id
     current_time = clock or _now
+
+    async def get_local_run(run_id: RunId) -> Run:
+        stored_run = await runs.get(run_id)
+        if stored_run is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="run not found",
+            )
+
+        conversation = await conversations.get(stored_run.conversation_id)
+        if conversation is None or conversation.user_id != _LOCAL_USER_ID:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="run not found",
+            )
+
+        return stored_run
 
     @app.get(
         "/api/v1/health",
@@ -202,21 +225,25 @@ def create_app(
         dependencies=[Depends(authenticate)],
     )
     async def get_run(run_id: str) -> RunResponse:
-        stored_run = await runs.get(RunId(run_id))
-        if stored_run is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="run not found",
-            )
-
-        conversation = await conversations.get(stored_run.conversation_id)
-        if conversation is None or conversation.user_id != _LOCAL_USER_ID:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="run not found",
-            )
-
+        stored_run = await get_local_run(RunId(run_id))
         return RunResponse.from_run(stored_run)
+
+    @app.post(
+        "/api/v1/runs/{run_id}/cancel",
+        response_model=CancelRunResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(authenticate)],
+    )
+    async def cancel_run_request(run_id: str) -> CancelRunResponse:
+        stored_run = await get_local_run(RunId(run_id))
+
+        if not cancel_run(stored_run.run_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="run is not active",
+            )
+
+        return CancelRunResponse(run_id=str(stored_run.run_id))
 
     @app.get(
         "/api/v1/conversations/{conversation_id}/messages",
