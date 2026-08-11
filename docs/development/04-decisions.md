@@ -592,6 +592,15 @@
 - 补充：`ConversationRepository.list_for_user()` 以 `updated_at` 倒序、`conversation_id` 倒序提供稳定的最近活跃排序；提交服务在写入初始 Message/Run 时同步更新时间，桌面以同一规则立即重排本地列表。
 - 替代方案：创建时由客户端提供 title、每轮消息重写标题、用模型异步生成摘要标题、或仅在桌面内保留未持久化标题；当前均不采用。
 
+### DEC-062 实施补充：仅安全渲染 Assistant Markdown
+
+- 日期：2026-08-11
+- 状态：已确认
+- 决策：桌面 Renderer 只将 AssistantMessage 的文本作为 Markdown 显示，UserMessage 继续原样呈现。解析不启用原始 HTML 或危险 DOM 注入；消息存储和 Local API 保留模型返回的原始文本。
+- 原因：模型自然倾向使用 Markdown 组织回答，原样显示会降低列表和代码示例的可读性；同时模型输出不应被信任为可执行 HTML。
+- 影响：支持常见文本 Markdown 和代码块显示，但不在本任务引入 HTML、脚本、富文本编辑、代码高亮或链接预览。
+- 替代方案：全局 Prompt 禁止 Markdown、对所有用户/模型文本使用 `dangerouslySetInnerHTML`、或在后端将 Markdown 转为 HTML；当前均不采用。
+
 ### DEC-062 实施补充：固定写入操作沿用 Main 私有 Token
 
 - 日期：2026-08-11

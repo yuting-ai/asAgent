@@ -134,6 +134,8 @@ uv run asagent serve ...
 
 Electron Main 还会向 Renderer 暴露一个无敏感信息的处理模式：`local` 或 `external`。它只反映本次 Sidecar 的启动配置，不包含 Provider 名、端口、Token 或 API Key；顶栏与 Privacy 页面据此准确说明是否可能将请求内容发送到外部模型服务。默认离线模式明确不外发对话内容，真实 Provider 模式明确请求所需的对话内容和工具结果可能发送至选定服务商。
 
+桌面 Chat 仅对 AssistantMessage 使用安全 Markdown 渲染，以显示标题、列表、引用和代码块；UserMessage 保持原始文本。Renderer 使用不启用原始 HTML 的解析配置，因此模型文本不会直接成为 DOM HTML。消息数据库仍保存原始 Markdown 文本，显示规则不改变 API 或持久化契约。
+
 发布环境命令为：
 
 ```text

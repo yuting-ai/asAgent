@@ -2773,3 +2773,21 @@
 ### 下一步
 
 - 在用户确认后，选择下一条阶段 7 真实用户价值路径；优先评估持久化 Activity 总览，而不提前实现权限设置、搜索或 Connector。
+
+## 2026-08-11 阶段 7 Assistant Markdown 显示工作记录
+
+### 完成
+
+- 桌面 Chat 对 AssistantMessage 接入安全 Markdown 渲染，支持标题、列表、引用、行内代码和代码块；UserMessage 保持原样显示。
+- 新增 `react-markdown` 前端依赖，未启用原始 HTML 解析；模型输出不会直接注入 DOM。
+- 当前 UI 其余功能占位保持冻结，后续统一在产品完善阶段接线，不阻塞阶段 7 收尾和阶段 8 MCP。
+
+### 验证
+
+- 检查：在 `desktop/` 执行 Prettier、TypeScript 类型检查、ESLint、Vitest、生产构建及 `git diff --check`。
+- 结果：通过；桌面 Vitest 6 个测试、全部静态检查和构建成功。
+- 人工验收：真实 DeepSeek 返回的 Markdown 标题、清单、引用与 Python 代码块均已正确显示。
+
+### 下一步
+
+- 先完成阶段 7 的 PyInstaller Sidecar 打包冒烟测试；通过后进入阶段 8 的测试 stdio MCP Server，不再继续扩展当前 UI 占位页面。

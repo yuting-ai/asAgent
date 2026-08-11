@@ -1296,6 +1296,7 @@
   border-radius: 0;
   background: transparent;
   color: var(--text);
+  white-space: normal;
 }
 
 .msg.user .msg-bubble {
@@ -1308,6 +1309,89 @@
   border: 1px dashed var(--line);
   background: var(--bg-raised);
   color: var(--text-dim);
+}
+
+.markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content p,
+.markdown-content ul,
+.markdown-content ol,
+.markdown-content blockquote,
+.markdown-content pre {
+  margin: 0 0 10px;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 22px;
+}
+
+.markdown-content li + li {
+  margin-top: 3px;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  margin: 16px 0 8px;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.markdown-content h1 {
+  font-size: 20px;
+}
+
+.markdown-content h2 {
+  font-size: 17px;
+}
+
+.markdown-content h3,
+.markdown-content h4 {
+  font-size: 14px;
+}
+
+.markdown-content code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-inset);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+.markdown-content pre {
+  overflow-x: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-inset);
+}
+
+.markdown-content pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.markdown-content blockquote {
+  padding-left: 12px;
+  border-left: 3px solid var(--brass);
+  color: var(--text-dim);
+}
+
+.markdown-content a {
+  color: var(--brass-dim);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .run-activity-msg {

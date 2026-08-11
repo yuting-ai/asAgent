@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
 
 type AppInfo = {
   appName: string
@@ -877,7 +878,15 @@ export default function App(): React.JSX.Element {
                                 <div
                                   className={`msg ${message.role === 'assistant' ? 'agent' : 'user'}`}
                                 >
-                                  <div className="msg-bubble">{message.content}</div>
+                                  <div className="msg-bubble">
+                                    {message.role === 'assistant' ? (
+                                      <div className="markdown-content">
+                                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                                      </div>
+                                    ) : (
+                                      message.content
+                                    )}
+                                  </div>
                                 </div>
                                 {visibleActivity !== null && index === activityAnchorIndex
                                   ? renderRunActivity(visibleActivity)
