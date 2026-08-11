@@ -2338,3 +2338,30 @@
 ### 下一步
 
 - 在用户确认后，设计并实现阶段 6 的最小进程内 Run Dispatcher：从 API 收到 SubmittedRun 后创建受控后台 Task、持有并按 run_id 释放取消令牌、调用 `execute_submitted()`，但暂不实现 SSE；本次不开始该任务。
+
+## 2026-08-11 最小进程内 Run Dispatcher 工作记录
+
+### 完成
+
+- 新增 `InProcessRunDispatcher`：对一个 SubmittedRun 创建以 `run_id` 命名的后台 Task 和协作式 `RunCancellationToken`，`dispatch()` 立即返回可等待的 Handle。
+- 同一活跃 Run 被明确拒绝重复调度；`cancel(run_id)` 只标记同一 Token，返回是否找到活跃 Run，不强制终止协程。
+- 正常完成、已请求取消和执行函数异常均会清理活跃 Token；异常转换为 `RunDispatchOutcome.error`，因此调用方可观察且不会产生未取回的 Task 异常警告。
+- Dispatcher 不读取模型上下文、不选择工具、不执行工具、不写 SQLite、不更新 Run 终态，也没有接入 FastAPI 或 SSE。
+
+### 验证
+
+- 检查：运行 Dispatcher 定向单元测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；定向 4 个测试、完整 262 个测试通过，Ruff 格式化与检查、strict mypy、锁文件检查均通过；mypy 检查 133 个源码文件。
+
+### 决策变化
+
+- 无；本次使用既有 RunCancellationToken 与 Runtime 执行边界，未改变 AgentLoop/ToolExecutor 的模型决策与安全执行职责。
+
+### 风险或问题
+
+- Dispatcher 目前只适合单个 Backend 进程；重启即丢失活跃 Task 与内存 Token。CREATED Run 的崩溃恢复、执行 claim、失败终态持久化和主动 shutdown 仍待后续设计。
+- `RunDispatchOutcome` 仅向持有 Handle 的进程内调用方报告异常；它不是持久化审计、API 查询或 SSE 事件。
+
+### 下一步
+
+- 在用户确认后，为 PersistentAgentRuntime 建立最小 Dispatcher 执行适配与失败终态持久化边界；在这之前不让 Local API 自动调度，以免后台异常使 Run 长期停留在 CREATED。本次不开始该任务。
