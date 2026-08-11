@@ -6,7 +6,7 @@
 - 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建与可见 Message 查询；运行、取消与 SSE 尚未实现。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-11
-- 当前目标：当前 Local API v1 已有文档化与 OpenAPI 验收；下一项在用户确认后，按契约实现“提交用户消息并创建 Run”的最小 HTTP 入口。
+- 当前目标：原子 Run 提交已收束为可复用应用层服务；下一项在用户确认后，按 Local API v1 契约实现“提交用户消息并创建 Run”的最小 HTTP 入口。
 
 ## 2. 已完成
 
@@ -2258,3 +2258,29 @@
 ### 下一步
 
 - 在用户确认后，实现阶段 6 的最小“提交用户消息并原子创建 Run”HTTP 入口，并先明确请求幂等、Run 身份和失败响应；本次不开始该任务。
+
+## 2026-08-11 原子 Run 提交应用服务工作记录
+
+### 完成
+
+- 新增 `agent.run_submission.RunSubmissionService` 与不可变 `SubmittedRun`，统一负责读取 Conversation、可选校验预期用户、生成用户 Message 与 `CREATED` Run，并通过既有 `RunStarter` 原子提交。
+- 未知 Conversation、其他用户不可访问的 Conversation 与 Starter 写入失败均不会伪造成功；Service 不调用模型、不发布事件、不完成 Run，也不依赖 SQLite/FastAPI。
+- `PersistentAgentRuntime` 与两种持久化 CLI 组合路径已改为复用 Submission Service；Runtime 仅保留生成最终 AssistantMessage 身份的职责，未改变现有模型、工具、事件与终态语义。
+
+### 验证
+
+- 检查：运行 Submission Service 单元测试与持久化 Runtime 集成测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；定向 7 个测试、完整 249 个测试通过，135 个文件格式正确，131 个源码文件 Ruff 与 strict mypy 无问题，锁定依赖解析为 42 个包。
+
+### 决策变化
+
+- 无；本次复用已有 RunStarter 原子事务边界，避免 Future Local API 与持久化 CLI 重复构造用户消息/初始 Run 生命周期。
+
+### 风险或问题
+
+- Service 的可选 `user_id` 用于入口层的资源归属校验；当前持久化 CLI 不传该值，保持其既有“按显式 Conversation ID 运行”的开发语义。Local API 必须固定传入 `local-user`，并将未知与无权访问统一映射为 404。
+- 该 Service 不包含幂等键、后台执行器、取消注册、SSE 或模型调用。HTTP 客户端请求丢失响应后的安全去重仍需单独设计和持久化支持。
+
+### 下一步
+
+- 在用户确认后，实现阶段 6 的最小 `POST /api/v1/conversations/{conversation_id}/messages`：验证非空内容，调用 Submission Service，返回新 Message 与 `CREATED` Run 的稳定身份；本次不开始该任务。

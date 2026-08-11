@@ -4,11 +4,12 @@ from datetime import datetime
 
 from asagent.agent.cancellation import RunCancellationToken
 from asagent.agent.loop import AgentLoop
-from asagent.core.ids import ConversationId, MessageId, RunId
+from asagent.agent.run_submission import RunSubmissionService
+from asagent.core.ids import ConversationId, MessageId
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.repositories import ConversationRepository
 from asagent.core.run import Run
-from asagent.core.run_lifecycle import RunFinisher, RunStarter
+from asagent.core.run_lifecycle import RunFinisher
 from asagent.core.run_status import RunStatus
 from asagent.models.contracts import ModelMessage, ModelMessageRole
 
@@ -26,19 +27,17 @@ class PersistentAgentRuntime:
         self,
         *,
         conversations: ConversationRepository,
-        run_starter: RunStarter,
+        run_submission: RunSubmissionService,
         run_finisher: RunFinisher,
         loop: AgentLoop,
         now: Callable[[], datetime],
-        new_run_id: Callable[[], RunId],
         new_message_id: Callable[[], MessageId],
     ) -> None:
         self._conversations = conversations
-        self._run_starter = run_starter
+        self._run_submission = run_submission
         self._run_finisher = run_finisher
         self._loop = loop
         self._now = now
-        self._new_run_id = new_run_id
         self._new_message_id = new_message_id
 
     async def run(
@@ -50,28 +49,11 @@ class PersistentAgentRuntime:
         system_prompt: str,
         cancellation_token: RunCancellationToken | None = None,
     ) -> PersistentAgentRunResult:
-        conversation = await self._conversations.get(conversation_id)
-        if conversation is None:
-            raise ValueError("cannot run an unknown conversation")
-
-        started_at = self._now()
-        user_message = UserMessage(
-            message_id=self._new_message_id(),
+        submission = await self._run_submission.submit(
             conversation_id=conversation_id,
             content=content,
-            created_at=started_at,
         )
-        initial_run = Run(
-            run_id=self._new_run_id(),
-            conversation_id=conversation_id,
-            status=RunStatus.CREATED,
-            created_at=started_at,
-            updated_at=started_at,
-        )
-        await self._run_starter.start(
-            user_message=user_message,
-            run=initial_run,
-        )
+        initial_run = submission.run
 
         history = await self._conversations.list_messages(conversation_id)
         loop_result = await self._loop.run(

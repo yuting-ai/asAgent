@@ -8,6 +8,7 @@ from alembic.config import Config
 from alembic import command
 from asagent.agent.loop import AgentLoop
 from asagent.agent.persistent_runtime import PersistentAgentRuntime
+from asagent.agent.run_submission import RunSubmissionService
 from asagent.core.conversation import Conversation
 from asagent.core.ids import (
     ConversationId,
@@ -100,11 +101,16 @@ def _runtime(
 
     return PersistentAgentRuntime(
         conversations=conversations,
-        run_starter=starter,
+        run_submission=RunSubmissionService(
+            conversations=conversations,
+            run_starter=starter,
+            now=_clock,
+            new_run_id=lambda: RunId("run-1"),
+            new_message_id=lambda: MessageId(f"message-{next(message_numbers)}"),
+        ),
         run_finisher=finisher,
         loop=_loop(provider=provider, runs=runs),
         now=_clock,
-        new_run_id=lambda: RunId("run-1"),
         new_message_id=lambda: MessageId(f"message-{next(message_numbers)}"),
     )
 

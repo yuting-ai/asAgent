@@ -191,7 +191,9 @@ Runtime 不直接：
 
 阶段 2 当前的 `agent.loop.AgentLoop` 是最小非流式编排器。它接收 `ModelProvider`、`ToolExecutor`、本次 Run 的 `ToolSnapshot` 和可选取消令牌，在内存中维护模型消息历史，并返回 `AgentLoopResult`。每次 `complete()` 响应消耗一个决策步骤，默认上限为 8；同一响应中的多个工具按稳定顺序执行但不额外消耗步骤。Provider 报告超时时，Loop 返回 `FAILED` 且不计入尚未取得响应的步骤。每次请求始终使用 Snapshot 导出的工具定义，工具结果再作为 TOOL message 进入下一次请求。可选 `ToolCallRecorder` 在已解析内部工具的调用结束后记录不可变 `ToolCall`：内部 `tool_call_id` 与模型 `model_call_id` 分离，原始成功结果不受模型上下文截断影响。若记录失败，Loop 停止后续调用并返回 `FAILED`。若注入 `EventPublisher`，调用方必须同时提供本次 `run_id`、`conversation_id`、事件 ID 工厂和时钟；Loop 从 1 递增发布事件。Publisher 未注入时保持无事件的最小执行；已注入但发布失败时，Loop 立即停止后续模型或工具调用并以 `FAILED` 返回。
 
-阶段 3 的 `agent.persistent_runtime.PersistentAgentRuntime` 是第一个应用层持久化组合：它仅依赖 Core `ConversationRepository`、`RunStarter`、`RunFinisher` Protocol 和预先配置的 `AgentLoop`，不导入 SQLite。一次 `run()` 先验证 Conversation 存在，构造 UserMessage 与 CREATED Run 并交给 Starter 原子创建；随后读取用户可见历史、转换为 ModelMessage 并调用 Loop；最后无论 Loop 成功、失败、取消或达到步骤限制，都用 Finisher 原子保存终态 Run。仅 `COMPLETED` 且有最终文本时创建 AssistantMessage；`LIMIT_REACHED` 的文本可能来自未闭合工具回合，不能伪装为正常对话历史。SQLite 组合根负责把 `SqliteRunStarter`、`SqliteRunFinisher`、`RepositoryEventPublisher` 和 `RepositoryToolCallRecorder` 注入其中。
+阶段 3 的 `agent.run_submission.RunSubmissionService` 是“提交用户输入”这一应用层边界：它读取指定 Conversation，可选校验预期 `user_id`，生成 `UserMessage` 与 `CREATED` Run，并只通过 `RunStarter` 原子写入后返回不可变 `SubmittedRun`。未知 Conversation 与用户不可访问 Conversation 以不同的内部错误表达，入口可按其安全策略映射为同一外部响应；Starter 写入失败原样传播，不伪造成功。它不调用模型、不发布事件、不完成 Run，也不导入 SQLite 或 FastAPI。
+
+`agent.persistent_runtime.PersistentAgentRuntime` 复用该 Submission Service，再读取用户可见历史、转换为 ModelMessage 并调用预先配置的 `AgentLoop`；最后无论 Loop 成功、失败、取消或达到步骤限制，都用 `RunFinisher` 原子保存终态 Run。仅 `COMPLETED` 且有最终文本时创建 AssistantMessage；`LIMIT_REACHED` 的文本可能来自未闭合工具回合，不能伪装为正常对话历史。Runtime 自己仅保留最终助手消息的 ID 工厂，避免 Service 同时负责两类消息身份。SQLite 组合根负责把 `SqliteRunStarter`、`SqliteRunFinisher`、`RepositoryEventPublisher` 和 `RepositoryToolCallRecorder` 注入该链路。
 
 阶段 4 的 Context Builder 在每次模型调用前，从原始 Conversation、已确认的 Conversation Summary、用户记忆和本次工具 Snapshot 生成不可变 `ContextSnapshot`。Snapshot 明确记录模型本次实际可见的 system prompt、模型消息、工具定义、各组成部分的估算 Token 占用、预算、选中的 Message sequence/摘要身份和裁剪原因；Loop 只能消费该快照，不得在请求进行中由后台任务修改它。调试快照默认关闭且脱敏，不把用户文本、工具参数、结果或 Secret 写入 RunEvent。
 
@@ -262,7 +264,7 @@ Loop 对一组 tool calls 按稳定顺序逐个执行。未知工具、参数错
 
 CLI 以显式 `--profile <name> --secret-env <environment-name> --app-home <root>` 启用真实 Provider 路径：入口通过 `AppPaths` 加载 `<root>/config/providers.toml`，将所选 Profile 的 `secret_id` 显式绑定到调用者选择的开发期环境变量，并拥有 `httpx.AsyncClient` 生命周期。源码开发可使用 `uv run --env-file .env asagent ...` 在进程启动前注入该变量；`.env` 仅是被忽略的开发便利文件，正式桌面端仍应使用系统 Secret Store。Profile、Key 或网络错误不会静默降级为离线 Provider。
 
-阶段 3 的 `--persistent` 是 SQLite 持久化开关，可独立使用离线 `DevelopmentToolModelProvider`，也可与成对的 `--profile`、`--secret-env` 显式组合为真实 Provider 持久化开发模式。两种持久化模式都以 `AppPaths.data_dir / "asagent.sqlite3"` 初始化/升级 SQLite，组合 SQLite Conversation/Run Repository、Starter、Finisher、Repository EventPublisher、Repository ToolCallRecorder 和 PersistentAgentRuntime。真实模式把由 Profile 创建的 `ModelProvider` 注入同一 Runtime；`httpx.AsyncClient` 的生命周期覆盖整个交互会话。未给 `--conversation-id` 时创建并打印新 Conversation 身份；提供该参数时只加载既有 Conversation，不存在即在模型调用前拒绝。默认 CLI 仍保持原来的内存态、终端事件开发模式。持久化模式只输出最终回答、错误或终态，安全 RunEvent 通过 SQLite 回放而不在此处实现多播或 SSE。
+阶段 3 的 `--persistent` 是 SQLite 持久化开关，可独立使用离线 `DevelopmentToolModelProvider`，也可与成对的 `--profile`、`--secret-env` 显式组合为真实 Provider 持久化开发模式。两种持久化模式都以 `AppPaths.data_dir / "asagent.sqlite3"` 初始化/升级 SQLite，组合 SQLite Conversation/Run Repository、RunSubmissionService、Starter、Finisher、Repository EventPublisher、Repository ToolCallRecorder 和 PersistentAgentRuntime。真实模式把由 Profile 创建的 `ModelProvider` 注入同一 Runtime；`httpx.AsyncClient` 的生命周期覆盖整个交互会话。未给 `--conversation-id` 时创建并打印新 Conversation 身份；提供该参数时只加载既有 Conversation，不存在即在模型调用前拒绝。默认 CLI 仍保持原来的内存态、终端事件开发模式。持久化模式只输出最终回答、错误或终态，安全 RunEvent 通过 SQLite 回放而不在此处实现多播或 SSE。
 
 CLI、Local API 与未来渠道将通过同一个更完整的入口接口进入：
 

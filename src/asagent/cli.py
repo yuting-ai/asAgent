@@ -12,6 +12,7 @@ import httpx
 
 from asagent.agent.loop import AgentLoop
 from asagent.agent.persistent_runtime import PersistentAgentRuntime
+from asagent.agent.run_submission import RunSubmissionService
 from asagent.api.app import create_app
 from asagent.api.bootstrap import read_local_api_token
 from asagent.api.server import READY_PREFIX, LocalApiServer
@@ -321,7 +322,13 @@ def build_persistent_agent_runtime(
 ) -> PersistentAgentRuntime:
     return PersistentAgentRuntime(
         conversations=conversations,
-        run_starter=starter,
+        run_submission=RunSubmissionService(
+            conversations=conversations,
+            run_starter=starter,
+            now=now,
+            new_run_id=new_run_id,
+            new_message_id=new_message_id,
+        ),
         run_finisher=finisher,
         loop=build_agent_loop(
             model=model,
@@ -329,7 +336,6 @@ def build_persistent_agent_runtime(
             tool_call_recorder=RepositoryToolCallRecorder(runs),
         ),
         now=now,
-        new_run_id=new_run_id,
         new_message_id=new_message_id,
     )
 
@@ -343,14 +349,19 @@ def build_persistent_development_runtime(
 ) -> PersistentAgentRuntime:
     return PersistentAgentRuntime(
         conversations=conversations,
-        run_starter=starter,
+        run_submission=RunSubmissionService(
+            conversations=conversations,
+            run_starter=starter,
+            now=now,
+            new_run_id=new_run_id,
+            new_message_id=new_message_id,
+        ),
         run_finisher=finisher,
         loop=build_development_agent_loop(
             event_publisher=RepositoryEventPublisher(runs),
             tool_call_recorder=RepositoryToolCallRecorder(runs),
         ),
         now=now,
-        new_run_id=new_run_id,
         new_message_id=new_message_id,
     )
 
