@@ -2,7 +2,10 @@ from dataclasses import dataclass
 from secrets import compare_digest, token_urlsafe
 from typing import Annotated
 
-from fastapi import Header, HTTPException, status
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+_BEARER_SECURITY = HTTPBearer(auto_error=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,9 +32,12 @@ class BearerTokenAuthenticator:
 
     async def __call__(
         self,
-        authorization: Annotated[str | None, Header()] = None,
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None,
+            Depends(_BEARER_SECURITY),
+        ],
     ) -> None:
-        candidate = _bearer_token_from(authorization)
+        candidate = None if credentials is None else credentials.credentials
 
         if candidate is None or not self._expected_token.matches(candidate):
             raise HTTPException(
@@ -39,19 +45,3 @@ class BearerTokenAuthenticator:
                 detail="invalid local API credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-
-
-def _bearer_token_from(authorization: str | None) -> str | None:
-    if authorization is None:
-        return None
-
-    scheme, separator, credentials = authorization.partition(" ")
-    if (
-        scheme.lower() != "bearer"
-        or separator != " "
-        or not credentials
-        or any(character.isspace() for character in credentials)
-    ):
-        return None
-
-    return credentials

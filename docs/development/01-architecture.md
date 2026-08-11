@@ -595,3 +595,30 @@ tool_call_id（如适用）
 ```
 
 Run 记录：模型、耗时、Token、工具选择、工具耗时、结束状态和错误代码。日志内容必须脱敏。
+
+## 18. Local API v1 当前契约
+
+Local API 是 Electron Renderer 与 Python Backend 的内部 HTTP 边界，不是公网服务，也不是 Core 的 Adapter。它只监听 `127.0.0.1`，每次 Backend 启动使用一次性、仅内存存在的 Bearer Token；“默认单用户”不免除该进程间访问能力校验。
+
+当前所有 API 路由都要求：
+
+```text
+Authorization: Bearer <本次启动的 token>
+```
+
+缺失、格式错误或不匹配的凭据统一返回 `401` 与 `WWW-Authenticate: Bearer`，不区分具体原因。`api.auth.BearerTokenAuthenticator` 使用 FastAPI 的 `HTTPBearer(auto_error=False)` 只为运行时解析和 OpenAPI 声明共享同一 Bearer 语义；真正的 Token 比较仍由 asAgent 以常量时间函数完成。
+
+当前已实现的 v1 表面如下：
+
+| 方法与路径 | 成功响应 | 行为与数据边界 |
+| --- | --- | --- |
+| `GET /api/v1/health` | `200 {"status":"ok"}` | 仅表示当前 ASGI 应用可响应，不表示模型、Workspace 或完整 Runtime 就绪。 |
+| `GET /api/v1/conversations` | `200 Conversation[]` | 仅列出 `local-user` 的 `conversation_id`、`created_at`、`updated_at`。 |
+| `POST /api/v1/conversations` | `201 Conversation` | 仅接受空 JSON object；服务端创建 `conv_` ID 和 UTC 时间，为 `local-user` 保存空 Conversation；未知字段为 `422`。不创建 Message、Run 或事件。 |
+| `GET /api/v1/conversations/{conversation_id}/messages` | `200 Message[]` | 按持久化 sequence 返回可见 USER/ASSISTANT message 的 ID、角色、正文和时间；不存在或不属于 `local-user` 的 Conversation 一律为 `404 {"detail":"conversation not found"}`。 |
+
+时间以 UTC ISO 8601 JSON 字符串表示；API 不返回 `user_id`、内部 TOOL message、Run、RunEvent、ToolCall、Secret 或 Token。`POST /conversations` 暂无幂等键和 create-only Repository 原语，生产 UUID 碰撞虽可忽略，但重试/并发创建语义不能被假定为已解决。
+
+FastAPI 从 App Factory 的类型化路由和 Pydantic 模型自动生成 `/openapi.json`。契约测试必须至少验证当前路径、方法、成功状态码和 `HTTPBearer` 安全方案；现有 HTTP 集成测试继续负责验证 401、404、422 等运行时行为。OpenAPI 不是第二套 API 或新增 Adapter，而是同一内部接口的机器可读描述。
+
+后续才在此 v1 前缀下单独定义用户消息提交与 Run 创建、Run 查询/取消、分页以及 fetch-based SSE 的事件帧、`sequence` 续传和资源释放语义。Electron 尚未接入前允许通过文档与契约测试审慎调整；Renderer 开始依赖后，任何破坏性修改必须新开版本或给出明确迁移策略。

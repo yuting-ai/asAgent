@@ -2,11 +2,11 @@
 
 ## 1. 当前状态
 
-- 项目阶段：阶段 3 已开始；阶段 2 的最小 ToolRegistry、ToolExecutor、三个内置工具、Agent Loop、安全边界、RunEvent、ToolCall 记录与内存态开发 CLI 垂直切片已完成；阶段 3 已完成 SQLite 初始 Schema、迁移基线、Conversation/Run Repository、Run 启动原子事务与运行时连接/事务基线
-- 代码状态：已创建最小 `src/asagent` 包、Core ID 类型、不可变的 Conversation、用户可见 Message、Run、RunEvent、ToolCall 和 ToolDefinition 数据对象、Provider-neutral 模型交换数据类型、可脚本化的 `FakeModelProvider`、`ModelProvider`、Repository、`Tool`、`EventPublisher` 与 `SecretProvider` Protocol、`RunStatus` 状态枚举及 `AppPaths` 路径契约，并配置 pytest、pytest-asyncio、Ruff、strict mypy 与 `pydantic.mypy`；已提供内存版与 SQLite Conversation/Run Repository、最小 `ChatService`、开发 Agent CLI、OpenAI-compatible Provider、工具与 Agent Loop 能力，以及使用 SQLAlchemy Core、Alembic 与 SQLite 集成测试验证的初始持久化 Schema、连接 PRAGMA、事务行为、Run 回放查询和用户消息/初始 Run 的原子写入
+- 项目阶段：阶段 6 进行中；阶段 0–5 的 Core、Agent Loop、SQLite 持久化、Context Builder 基础与受控 Workspace Tool 边界已完成，当前正在建立 Electron 未来使用的 Local API 与 SSE 入口。
+- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建与可见 Message 查询；运行、取消与 SSE 尚未实现。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
-- 当前日期：2026-08-10
-- 当前目标：SQLite Run 启动原子事务已验证；下一步独立确定持久化 RunEvent 的 EventPublisher 适配边界
+- 当前日期：2026-08-11
+- 当前目标：当前 Local API v1 已有文档化与 OpenAPI 验收；下一项在用户确认后，按契约实现“提交用户消息并创建 Run”的最小 HTTP 入口。
 
 ## 2. 已完成
 
@@ -2232,3 +2232,29 @@
 ### 下一步
 
 - 在用户确认后，定义阶段 6 Local API v1 契约与 OpenAPI 验收规则；本次不开始该任务。
+
+## 2026-08-11 阶段 6 Local API v1 契约与 OpenAPI 验收工作记录
+
+### 完成
+
+- 在架构文档中固定当前 Local API v1 的内部通信定位、Bearer Token 语义、已实现端点、数据暴露边界、错误语义和尚未实现的 Run/SSE 范围。
+- 认证器改用 FastAPI `HTTPBearer(auto_error=False)` 解析 Header，使运行时仍由 asAgent 统一返回 401 的同时，自动生成的 OpenAPI 正确声明 Bearer 安全方案。
+- 新增 OpenAPI 契约测试，验证当前路径、方法、成功状态码与 `HTTPBearer` 安全方案；既有 HTTP 集成测试继续负责 401 等运行时行为。
+
+### 验证
+
+- 检查：运行 API Health 与 OpenAPI 契约定向测试、Ruff 格式化与检查、strict mypy 和完整 `scripts/check.sh`。
+- 结果：通过；完整 246 个测试通过，133 个文件格式正确，129 个源码文件 Ruff 与 strict mypy 无问题，锁定依赖解析为 42 个包。
+
+### 决策变化
+
+- 无；本次落实阶段 6 路线图既有的版本化 API 与 OpenAPI/JSON 契约测试要求，沿用 DEC-018、DEC-061 与 DEC-062。
+
+### 风险或问题
+
+- OpenAPI 是内部 HTTP 接口的机器可读描述，不是第二套 API、公开服务或新增 Adapter；它不能替代真实 HTTP 认证、404/422 行为或未来 SSE 生命周期测试。
+- 当前 v1 仍没有消息提交、Run 创建/查询/取消、分页、Origin/CORS 或 SSE；在 Electron 依赖前可以谨慎演进，但不得继续无契约地新增业务端点。
+
+### 下一步
+
+- 在用户确认后，实现阶段 6 的最小“提交用户消息并原子创建 Run”HTTP 入口，并先明确请求幂等、Run 身份和失败响应；本次不开始该任务。
