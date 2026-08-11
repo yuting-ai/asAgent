@@ -128,6 +128,8 @@ uv run asagent serve ...
 
 阶段 7 现已允许 Renderer 经两个额外固定操作创建空 Conversation 与提交非空 Message。Main 保持来源检查并持有 Token；Renderer 不直接构造认证 HTTP 请求。提交请求立即返回已持久化的 USER Message 与后台 `created` Run，当前 UI 只显示前者及等待状态；Run 查询和 SSE 不在本次范围内。
 
+阶段 7 已接入受限的实时 Run 观察：Main 对每个提交的 Run 保持认证 SSE 连接、解析 `text/event-stream` 帧，并仅把结构化安全事件推送给对应的受信任 Renderer。Preload 不暴露通用事件通道；Renderer 只能订阅具名 Run 更新并请求协作取消。对话内的临时 Activity 卡片保留本次 Run 的状态链，终态后重读 Message 历史显示最终助手回答。窗口内部采用固定 header/composer 与可滚动消息区，长 Activity 不会将输入框推出可视区域。
+
 发布环境命令为：
 
 ```text

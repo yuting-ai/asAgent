@@ -1,12 +1,13 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, type WebContents } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { BackendLauncher } from './backend_launcher'
+import { BackendLauncher, type SubmittedMessage } from './backend_launcher'
 
 let backendLauncher: BackendLauncher | undefined
 let isQuitting = false
+const runWatchers = new Map<string, () => void>()
 
 function rendererUrl(): string {
   if (is.dev) {
@@ -87,6 +88,53 @@ function createDevelopmentBackendLauncher(): BackendLauncher {
     projectRoot,
     appHome: join(projectRoot, '.local-data')
   })
+}
+
+function isTerminalRunEvent(eventType: string): boolean {
+  return ['run.completed', 'run.failed', 'run.cancelled', 'run.limit_reached'].includes(eventType)
+}
+
+function stopRunWatcher(runId: string): void {
+  const stop = runWatchers.get(runId)
+  runWatchers.delete(runId)
+  stop?.()
+}
+
+function watchRun(sender: WebContents, conversationId: string, submitted: SubmittedMessage): void {
+  stopRunWatcher(submitted.run.run_id)
+
+  const stop = getReadyBackendLauncher().watchRunEvents(
+    submitted.run.run_id,
+    (runEvent) => {
+      if (sender.isDestroyed()) {
+        stopRunWatcher(submitted.run.run_id)
+        return
+      }
+
+      sender.send('desktop:run-event', {
+        runId: submitted.run.run_id,
+        conversationId,
+        event: runEvent
+      })
+
+      if (isTerminalRunEvent(runEvent.event_type)) {
+        stopRunWatcher(submitted.run.run_id)
+      }
+    },
+    (error) => {
+      if (!sender.isDestroyed()) {
+        sender.send('desktop:run-stream-error', {
+          runId: submitted.run.run_id,
+          conversationId,
+          message: error.message
+        })
+      }
+
+      stopRunWatcher(submitted.run.run_id)
+    }
+  )
+
+  runWatchers.set(submitted.run.run_id, stop)
 }
 
 app.whenReady().then(async () => {
@@ -179,7 +227,27 @@ app.whenReady().then(async () => {
       throw new Error('Message content is invalid.')
     }
 
-    return getReadyBackendLauncher().submitMessage(conversationId, content)
+    return getReadyBackendLauncher()
+      .submitMessage(conversationId, content)
+      .then((submitted) => {
+        watchRun(event.sender, conversationId, submitted)
+        return submitted
+      })
+  })
+
+  ipcMain.handle('desktop:cancel-run', async (event, runId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+
+    if (typeof runId !== 'string' || !runId.trim()) {
+      throw new Error('Run ID is invalid.')
+    }
+
+    await getReadyBackendLauncher().cancelRun(runId)
   })
 
   createWindow()
@@ -198,6 +266,10 @@ app.on('before-quit', (event) => {
 
   event.preventDefault()
   isQuitting = true
+
+  for (const runId of runWatchers.keys()) {
+    stopRunWatcher(runId)
+  }
 
   void (backendLauncher?.stop() ?? Promise.resolve()).finally(() => {
     app.quit()

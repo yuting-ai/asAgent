@@ -35,6 +35,20 @@ function createChild(): FakeChildProcess {
   return child
 }
 
+function sseResponse(data: string): Response {
+  const encoder = new TextEncoder()
+
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(data))
+        controller.close()
+      }
+    }),
+    { status: 200 }
+  )
+}
+
 describe('BackendLauncher', () => {
   it('passes the token privately, validates readiness, and checks health', async () => {
     const child = createChild()
@@ -176,8 +190,10 @@ describe('BackendLauncher', () => {
       conversation_id: 'conv-1'
     })
     await expect(launcher.submitMessage('conv-1', 'Hello.')).resolves.toMatchObject({
-      message_id: 'msg-1',
-      content: 'Hello.'
+      message: {
+        message_id: 'msg-1',
+        content: 'Hello.'
+      }
     })
 
     expect(fetchBackend).toHaveBeenNthCalledWith(
@@ -201,6 +217,64 @@ describe('BackendLauncher', () => {
         headers: expect.objectContaining({
           Authorization: expect.stringMatching(/^Bearer /),
           'Content-Type': 'application/json'
+        })
+      })
+    )
+  })
+
+  it('streams authenticated run events and requests cancellation', async () => {
+    const child = createChild()
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+    const fetchBackend = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        sseResponse(
+          'id: 1\n' +
+            'event: run.completed\n' +
+            'data: {"event_id":"event-1","run_id":"run-1","conversation_id":"conv-1","sequence":1,"event_type":"run.completed","created_at":"2026-08-11T00:00:00Z","data":{}}\n\n'
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ run_id: 'run-1', cancellation_requested: true }), {
+          status: 202
+        })
+      )
+
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      spawnBackend,
+      fetchBackend
+    })
+
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+    await starting
+
+    const events: string[] = []
+    launcher.watchRunEvents(
+      'run-1',
+      (event) => events.push(event.event_type),
+      (error) => {
+        throw error
+      }
+    )
+
+    await vi.waitFor(() => {
+      expect(events).toEqual(['run.completed'])
+    })
+
+    await launcher.cancelRun('run-1')
+
+    expect(fetchBackend).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:43123/api/v1/runs/run-1/cancel',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /)
         })
       })
     )

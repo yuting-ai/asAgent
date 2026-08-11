@@ -573,6 +573,15 @@
 - 影响：UI 可以显示“已提交、等待响应”，刷新或重新选择 Conversation 后才能读取已持久化的助手回答。下一项应独立接入 Run 状态与 SSE，而不是在提交函数中等待模型。
 - 替代方案：Renderer 直接持有 Token、提交 HTTP 请求同步等待最终模型回答、或在本次引入通用后台轮询；当前均不采用。
 
+### DEC-062 实施补充：实时 Run 事件经 Main 解析并作为临时对话 Activity 显示
+
+- 日期：2026-08-11
+- 状态：已确认
+- 决策：Main 持有每次提交 Run 的认证 SSE 连接并解析事件帧；Preload 只暴露具名 Run 更新订阅和取消操作。Renderer 将当前 Run 的安全事件显示为临时 Activity 卡片，收到终态后重新读取用户可见 Message 历史；不把内部 RunEvent 变成持久化聊天消息。
+- 原因：离线工具 Run 往往在毫秒级完成，单行瞬时状态会被最终状态覆盖；保留 Activity 既使实际执行过程可见，又保持 Message、RunEvent 和模型上下文的既有分离。
+- 影响：刷新后的历史只显示持久化 User/Assistant Message；调试、审计和 SSE 续传仍以 SQLite RunEvent 为准。Activity 的展示不增加 Renderer 的 HTTP、Token 或通用 IPC 权限。
+- 替代方案：把所有事件写成 AssistantMessage、Renderer 直接连接 SSE、或仅显示最后一个状态；当前均不采用。
+
 ### DEC-063：以独立生命周期和失败语义控制抽象粒度
 
 - 日期：2026-08-11

@@ -79,6 +79,8 @@ asAgent/
 
 阶段 7 的最小写入接入也已完成：同一 `BackendLauncher` 额外提供创建空 Conversation 与向指定 Conversation 提交非空 Message 的固定操作。Main 在调用前验证 IPC 参数，并继续检查 Renderer 来源；提交成功后 Renderer 仅显示 API 返回的 USER Message 和“等待响应”状态。运行中的 Run 仍未被 Renderer 查询或订阅，AssistantMessage 只会在后续手动重新读取历史时出现。
 
+阶段 7 的实时观察现已通过 Main 私有的认证 fetch-based SSE 接入：提交返回的 `run_id` 只用于固定的 Main 生命周期管理，Main 将已解析的安全 RunEvent 经窄 Preload 推送给 Renderer；Renderer 不读取 SSE URL、Token 或端口。当前 UI 将本次 Run 的事件保留为临时 Activity 卡片，并在终态后重新读取用户可见 Message 历史以显示 AssistantMessage；Activity 不是持久化 Message，刷新后由已持久化的 RunEvent/Message 历史替代。Stop 只请求既有协作取消，最终状态仍以 RunEvent 为准。聊天布局将 composer 固定在窗口底部，只有消息区滚动。
+
 ## 4. 核心身份模型
 
 ### 4.1 ID 层级

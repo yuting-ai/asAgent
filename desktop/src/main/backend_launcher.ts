@@ -23,6 +23,28 @@ export type ConversationMessage = {
   created_at: string
 }
 
+export type RunSummary = {
+  run_id: string
+  status: 'created' | 'completed' | 'failed' | 'cancelled' | 'limit_reached'
+  created_at: string
+  updated_at: string
+}
+
+export type SubmittedMessage = {
+  message: ConversationMessage
+  run: RunSummary
+}
+
+export type RunEvent = {
+  event_id: string
+  run_id: string
+  conversation_id: string
+  sequence: number
+  event_type: string
+  created_at: string
+  data: Record<string, unknown>
+}
+
 export type CreatedConversation = ConversationSummary
 
 type BackendLauncherOptions = {
@@ -82,6 +104,51 @@ function wait(milliseconds: number): Promise<void> {
   })
 }
 
+function parseSseEvent(frame: string): RunEvent | null {
+  const dataLine = frame.split('\n').find((line) => line.startsWith('data: '))
+
+  if (dataLine === undefined) {
+    return null
+  }
+
+  let payload: unknown
+  try {
+    payload = JSON.parse(dataLine.slice('data: '.length))
+  } catch {
+    throw new Error('Backend SSE event is invalid.')
+  }
+
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    throw new Error('Backend SSE event is invalid.')
+  }
+
+  const event = payload as Record<string, unknown>
+
+  if (
+    typeof event.event_id !== 'string' ||
+    typeof event.run_id !== 'string' ||
+    typeof event.conversation_id !== 'string' ||
+    typeof event.sequence !== 'number' ||
+    typeof event.event_type !== 'string' ||
+    typeof event.created_at !== 'string' ||
+    typeof event.data !== 'object' ||
+    event.data === null ||
+    Array.isArray(event.data)
+  ) {
+    throw new Error('Backend SSE event is invalid.')
+  }
+
+  return {
+    event_id: event.event_id,
+    run_id: event.run_id,
+    conversation_id: event.conversation_id,
+    sequence: event.sequence,
+    event_type: event.event_type,
+    created_at: event.created_at,
+    data: event.data as Record<string, unknown>
+  }
+}
+
 export class BackendLauncher {
   private readonly projectRoot: string
   private readonly appHome: string
@@ -125,21 +192,49 @@ export class BackendLauncher {
     return this.requestJson('/api/v1/conversations', 'POST', {})
   }
 
-  async submitMessage(conversationId: string, content: string): Promise<ConversationMessage> {
+  async submitMessage(conversationId: string, content: string): Promise<SubmittedMessage> {
     if (!content.trim()) {
       throw new Error('Message content is invalid.')
     }
 
-    const result = await this.requestJson<{ message: ConversationMessage }>(
+    return this.requestJson<SubmittedMessage>(
       `/api/v1/conversations/${encodeURIComponent(conversationId)}/messages`,
       'POST',
       { content }
     )
+  }
 
-    return result.message
+  async cancelRun(runId: string): Promise<void> {
+    await this.requestJson(`/api/v1/runs/${encodeURIComponent(runId)}/cancel`, 'POST', {})
+  }
+
+  watchRunEvents(
+    runId: string,
+    onEvent: (event: RunEvent) => void,
+    onError: (error: Error) => void
+  ): () => void {
+    const controller = new AbortController()
+
+    void this.readRunEvents(runId, onEvent, controller.signal).catch((error) => {
+      if (!controller.signal.aborted) {
+        onError(error instanceof Error ? error : new Error('Run event stream failed.'))
+      }
+    })
+
+    return () => controller.abort()
   }
 
   private async requestJson<T>(path: string, method: 'GET' | 'POST', body?: unknown): Promise<T> {
+    const response = await this.request(path, method, body)
+    return (await response.json()) as T
+  }
+
+  private async request(
+    path: string,
+    method: 'GET' | 'POST',
+    body?: unknown,
+    signal?: AbortSignal
+  ): Promise<Response> {
     if (this.ready === undefined || this.token === undefined) {
       throw new Error('Backend is not ready.')
     }
@@ -154,7 +249,7 @@ export class BackendLauncher {
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' })
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        signal: AbortSignal.timeout(5_000)
+        signal: signal ?? AbortSignal.timeout(5_000)
       }
     )
 
@@ -162,7 +257,54 @@ export class BackendLauncher {
       throw new Error(`Backend API request failed with status ${response.status}.`)
     }
 
-    return (await response.json()) as T
+    return response
+  }
+
+  private async readRunEvents(
+    runId: string,
+    onEvent: (event: RunEvent) => void,
+    signal: AbortSignal
+  ): Promise<void> {
+    const response = await this.request(
+      `/api/v1/runs/${encodeURIComponent(runId)}/events`,
+      'GET',
+      undefined,
+      signal
+    )
+
+    if (response.body === null) {
+      throw new Error('Backend SSE response has no body.')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        buffer += decoder.decode(value, { stream: !done }).replaceAll('\r\n', '\n')
+
+        let boundary = buffer.indexOf('\n\n')
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary)
+          buffer = buffer.slice(boundary + 2)
+
+          const event = parseSseEvent(frame)
+          if (event !== null) {
+            onEvent(event)
+          }
+
+          boundary = buffer.indexOf('\n\n')
+        }
+
+        if (done) {
+          return
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
   }
 
   async start(): Promise<void> {

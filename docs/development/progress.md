@@ -2654,3 +2654,30 @@
 ### 下一步
 
 - 在用户确认后，接入最小 Run 状态观察：提交后保留 Run ID，查询终态并重新读取历史；SSE 实时事件作为紧随其后的独立任务。本次不提前开始。
+
+## 2026-08-11 阶段 7 Electron 实时 Run Activity 与协作取消工作记录
+
+### 完成
+
+- `BackendLauncher` 通过 Main 私有 Bearer Token 打开每个提交 Run 的认证 SSE 流，解析安全 RunEvent；Main 只向对应的受信任 Renderer 推送固定 Run 更新，并在终态、错误、窗口销毁或应用退出时关闭自身持有的流。
+- Renderer 在提交后保存 `run_id`，以临时对话内 Activity 卡片保留 `run.started`、模型、工具和终态状态；Run 终态后重读 Message 历史，显示持久化的 AssistantMessage。
+- Stop 按钮调用既有协作取消 API；它只表示取消请求已送达，直到 `run.cancelled` 等终态事件到达才恢复输入。
+- 聊天布局改为固定 header/composer、仅消息区滚动，较长 Activity 不会将输入框推出窗口可视区域。
+
+### 验证
+
+- 检查：在 `desktop/` 运行 Prettier、TypeScript 类型检查、ESLint、Vitest 和生产构建，并以 `npm run dev` 人工发送 `calculate 123 * 456`。
+- 结果：通过；桌面定向 Vitest 5 个测试、类型检查、ESLint 与生产构建成功。人工确认 Activity 保留完整事件序列、Calculator 最终结果为 `56088`，composer 固定在窗口底部。
+
+### 决策变化
+
+- 补充 DEC-062：实时事件由 Main 解析、在 Renderer 作为临时 Activity 展示，仍不突破 Token 与内部事件边界。
+
+### 风险或问题
+
+- 当前 Activity 只属于本次打开的界面会话；刷新或重启后不恢复该卡片，但最终 Message 与可回放 RunEvent 均已持久化。
+- 本次仅支持单个活跃 UI Run，且不做断线自动重连；后续应在真实 Provider 体验后评估是否需要基于 `after_sequence` 的受控续传。
+
+### 下一步
+
+- 在用户确认后，为开发 Electron Sidecar 增加可选的真实 DeepSeek Profile：复用现有 providers.toml 与开发 `.env`，保持离线 `development-tools` 默认值，且不把 API Key 暴露给 Renderer。本次不提前开始。

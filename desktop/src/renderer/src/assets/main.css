@@ -7,7 +7,8 @@
 .app-shell {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -85,8 +86,8 @@ h2 {
 
 .chat {
   display: grid;
-  grid-template-rows: auto 1fr auto;
-  min-height: 100vh;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
   background: #101522;
 }
 
@@ -116,6 +117,7 @@ h2 {
   flex-direction: column;
   align-items: flex-start;
   gap: 14px;
+  min-height: 0;
   padding: 32px;
   overflow-y: auto;
 }
@@ -132,6 +134,19 @@ h2 {
 .message.user {
   align-self: flex-end;
   background: #263b55;
+}
+
+.message.activity {
+  max-width: 420px;
+  background: #182235;
+}
+
+.message.activity ul {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding-left: 20px;
+  color: #b7c5dc;
 }
 
 .empty-state,
@@ -188,6 +203,11 @@ h2 {
 .composer button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.composer button.stop-run {
+  color: #fff;
+  background: #b94b57;
 }
 
 .sr-only {
