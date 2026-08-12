@@ -72,6 +72,11 @@ export type ToolApproval = {
 
 export type CreatedConversation = ConversationSummary
 
+export type TavilySettingsStatus = {
+  enabled: boolean
+  api_key_saved: boolean
+}
+
 type BackendLauncherOptions = {
   projectRoot: string
   appHome: string
@@ -263,6 +268,26 @@ export class BackendLauncher {
     )
   }
 
+  async getTavilySettings(): Promise<TavilySettingsStatus> {
+    return this.requestJson('/api/v1/settings/tavily', 'GET')
+  }
+
+  async enableTavily(apiKey?: string): Promise<TavilySettingsStatus> {
+    return this.requestJson(
+      '/api/v1/settings/tavily',
+      'PUT',
+      apiKey === undefined ? {} : { api_key: apiKey }
+    )
+  }
+
+  async disableTavily(): Promise<TavilySettingsStatus> {
+    return this.requestJson('/api/v1/settings/tavily/disable', 'POST', {})
+  }
+
+  async deleteTavily(): Promise<TavilySettingsStatus> {
+    return this.requestJson('/api/v1/settings/tavily', 'DELETE')
+  }
+
   watchRunEvents(
     runId: string,
     onEvent: (event: RunEvent) => void,
@@ -279,14 +304,18 @@ export class BackendLauncher {
     return () => controller.abort()
   }
 
-  private async requestJson<T>(path: string, method: 'GET' | 'POST', body?: unknown): Promise<T> {
+  private async requestJson<T>(
+    path: string,
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    body?: unknown
+  ): Promise<T> {
     const response = await this.request(path, method, body)
     return (await response.json()) as T
   }
 
   private async request(
     path: string,
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     body?: unknown,
     signal?: AbortSignal
   ): Promise<Response> {

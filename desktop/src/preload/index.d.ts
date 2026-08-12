@@ -55,6 +55,11 @@ interface ToolApproval {
   arguments: Record<string, unknown>
 }
 
+interface TavilySettingsStatus {
+  enabled: boolean
+  api_key_saved: boolean
+}
+
 interface DesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>
   getBackendStatus(): Promise<{ status: 'ready' | 'unavailable' }>
@@ -67,6 +72,10 @@ interface DesktopBridge {
     approvalId: string,
     decision: 'allow_once' | 'allow_conversation' | 'deny'
   ): Promise<void>
+  getTavilySettings(): Promise<TavilySettingsStatus>
+  enableTavily(apiKey?: string): Promise<TavilySettingsStatus>
+  disableTavily(): Promise<TavilySettingsStatus>
+  deleteTavily(): Promise<TavilySettingsStatus>
   onRunEvent(callback: (update: RunUpdate) => void): () => void
   onRunStreamError(callback: (error: RunStreamError) => void): () => void
   onToolApprovalRequested(callback: (approval: ToolApproval) => void): () => void

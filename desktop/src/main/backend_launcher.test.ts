@@ -462,4 +462,197 @@ describe('BackendLauncher', () => {
     await expect(starting).rejects.toThrow('Backend ready record is invalid.')
     expect(child.kill).toHaveBeenCalledWith('SIGTERM')
   })
+
+  it('reads Tavily settings through its private backend connection', async () => {
+    const child = createChild()
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+    const fetchBackend = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ enabled: false, api_key_saved: true }), {
+          status: 200
+        })
+      )
+
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      spawnBackend,
+      fetchBackend
+    })
+
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+    await starting
+
+    await expect(launcher.getTavilySettings()).resolves.toEqual({
+      enabled: false,
+      api_key_saved: true
+    })
+
+    expect(fetchBackend).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:43123/api/v1/settings/tavily',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /)
+        })
+      })
+    )
+  })
+
+  it('enables Tavily with a PUT request and optional API key body', async () => {
+    const child = createChild()
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+    const fetchBackend = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ enabled: true, api_key_saved: true }), {
+          status: 200
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ enabled: true, api_key_saved: true }), {
+          status: 200
+        })
+      )
+
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      spawnBackend,
+      fetchBackend
+    })
+
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+    await starting
+
+    await expect(launcher.enableTavily('tvly-test-key')).resolves.toEqual({
+      enabled: true,
+      api_key_saved: true
+    })
+    await expect(launcher.enableTavily()).resolves.toEqual({
+      enabled: true,
+      api_key_saved: true
+    })
+
+    expect(fetchBackend).toHaveBeenNthCalledWith(
+      2,
+      'http://127.0.0.1:43123/api/v1/settings/tavily',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ api_key: 'tvly-test-key' }),
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /),
+          'Content-Type': 'application/json'
+        })
+      })
+    )
+    expect(fetchBackend).toHaveBeenNthCalledWith(
+      3,
+      'http://127.0.0.1:43123/api/v1/settings/tavily',
+      expect.objectContaining({
+        method: 'PUT',
+        body: '{}',
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /),
+          'Content-Type': 'application/json'
+        })
+      })
+    )
+  })
+
+  it('disables Tavily with a POST request', async () => {
+    const child = createChild()
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+    const fetchBackend = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ enabled: false, api_key_saved: true }), {
+          status: 200
+        })
+      )
+
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      spawnBackend,
+      fetchBackend
+    })
+
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+    await starting
+
+    await expect(launcher.disableTavily()).resolves.toEqual({
+      enabled: false,
+      api_key_saved: true
+    })
+
+    expect(fetchBackend).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:43123/api/v1/settings/tavily/disable',
+      expect.objectContaining({
+        method: 'POST',
+        body: '{}',
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /),
+          'Content-Type': 'application/json'
+        })
+      })
+    )
+  })
+
+  it('deletes Tavily settings with a DELETE request', async () => {
+    const child = createChild()
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+    const fetchBackend = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ enabled: false, api_key_saved: false }), {
+          status: 200
+        })
+      )
+
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      spawnBackend,
+      fetchBackend
+    })
+
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+    await starting
+
+    await expect(launcher.deleteTavily()).resolves.toEqual({
+      enabled: false,
+      api_key_saved: false
+    })
+
+    expect(fetchBackend).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:43123/api/v1/settings/tavily',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /)
+        })
+      })
+    )
+
+    const lastCall = fetchBackend.mock.calls.at(-1)
+    expect(lastCall?.[1]).not.toHaveProperty('body')
+  })
 })

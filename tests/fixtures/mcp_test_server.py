@@ -208,14 +208,24 @@ def _call_tool(
         )
 
     total = left + right
-    return _result(
-        request_id,
-        {
-            "resultType": "complete",
-            "content": [{"type": "text", "text": str(total)}],
-            "isError": False,
-        },
-    )
+    return _tool_call_success_result(request_id, str(total))
+
+
+def _tool_call_success_result(
+    request_id: object,
+    text: str,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "resultType": "complete",
+        "content": [{"type": "text", "text": text}],
+    }
+
+    if "--invalid-is-error" in sys.argv:
+        payload["isError"] = "not-a-bool"
+    elif "--omit-is-error" not in sys.argv:
+        payload["isError"] = False
+
+    return _result(request_id, payload)
 
 
 def _validate_metadata(

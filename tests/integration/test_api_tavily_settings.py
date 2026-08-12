@@ -230,7 +230,7 @@ async def test_put_saves_api_key_and_enables_tavily(
     assert tavily_config.working_directory == tavily_api_context.config_dir.resolve()
     assert tavily_config.connection_id == "connection-tavily"
     assert tavily_config.credential_environment_variable == "TAVILY_API_KEY"
-    assert tavily_config.allowed_tools == ("tavily-search",)
+    assert tavily_config.allowed_tools == ("tavily_search",)
 
     config_text = (tavily_api_context.config_dir / "mcp.json").read_text(
         encoding="utf-8",

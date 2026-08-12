@@ -87,6 +87,23 @@ function getReadyBackendLauncher(): BackendLauncher {
   return backendLauncher
 }
 
+function parseOptionalTavilyApiKey(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+
+  if (typeof value !== 'string') {
+    throw new Error('Tavily API key is invalid.')
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    throw new Error('Tavily API key is invalid.')
+  }
+
+  return trimmed
+}
+
 function createDevelopmentBackendLauncher(): BackendLauncher {
   const projectRoot = join(app.getAppPath(), '..')
   const providerProfile = process.env['ASAGENT_DESKTOP_PROFILE']
@@ -321,6 +338,46 @@ app.whenReady().then(async () => {
       await getReadyBackendLauncher().decideToolApproval(approvalId, decision)
     }
   )
+
+  ipcMain.handle('desktop:get-tavily-settings', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().getTavilySettings()
+  })
+
+  ipcMain.handle('desktop:enable-tavily', (event, apiKey: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().enableTavily(parseOptionalTavilyApiKey(apiKey))
+  })
+
+  ipcMain.handle('desktop:disable-tavily', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().disableTavily()
+  })
+
+  ipcMain.handle('desktop:delete-tavily', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().deleteTavily()
+  })
 
   createWindow()
 

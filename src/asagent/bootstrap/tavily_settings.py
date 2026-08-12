@@ -19,7 +19,7 @@ TAVILY_CONNECTION_ID: Final = ConnectionId("connection-tavily")
 TAVILY_SERVICE_ID: Final = "tavily"
 TAVILY_ACCOUNT_LABEL: Final = "Tavily Web Search"
 TAVILY_CREDENTIAL_ENVIRONMENT_VARIABLE: Final = "TAVILY_API_KEY"
-TAVILY_ALLOWED_TOOLS: Final = ("tavily-search",)
+TAVILY_ALLOWED_TOOLS: Final = ("tavily_search",)
 TAVILY_COMMAND: Final = ("npx", "-y", "tavily-mcp@latest")
 _LOCAL_USER_ID: Final = UserId("local-user")
 

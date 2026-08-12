@@ -6,6 +6,7 @@ import pytest
 
 from asagent.tools.mcp import (
     McpClient,
+    McpProtocolError,
     McpRemoteError,
     McpToolDescription,
 )
@@ -23,6 +24,14 @@ _LEGACY_SERVER_COMMAND: Final = (
     sys.executable,
     "-u",
     str(_LEGACY_SERVER_PATH),
+)
+_OMIT_IS_ERROR_SERVER_COMMAND: Final = (
+    *_SERVER_COMMAND,
+    "--omit-is-error",
+)
+_INVALID_IS_ERROR_SERVER_COMMAND: Final = (
+    *_SERVER_COMMAND,
+    "--invalid-is-error",
 )
 
 
@@ -116,5 +125,39 @@ async def test_client_restarts_with_legacy_stdio_lifecycle() -> None:
 
         assert result.text_content == ("42",)
         assert result.is_error is False
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_client_treats_missing_is_error_as_success() -> None:
+    client = McpClient(command=_OMIT_IS_ERROR_SERVER_COMMAND)
+
+    try:
+        await client.start()
+
+        result = await client.call_tool(
+            name="add",
+            arguments={"left": 1, "right": 2},
+        )
+
+        assert result.text_content == ("3",)
+        assert result.is_error is False
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_client_rejects_non_boolean_is_error() -> None:
+    client = McpClient(command=_INVALID_IS_ERROR_SERVER_COMMAND)
+
+    try:
+        await client.start()
+
+        with pytest.raises(McpProtocolError, match="invalid isError"):
+            await client.call_tool(
+                name="add",
+                arguments={"left": 1, "right": 2},
+            )
     finally:
         await client.aclose()

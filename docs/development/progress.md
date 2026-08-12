@@ -3316,7 +3316,7 @@
 
 - 以 Tavily 官方本地 stdio MCP Server 完成首次真实 Web Search 人工验收：用户在 Tavily 创建 API key，
   Keychain 以 Connection 保存凭据，并仅向该 Server 的 `TAVILY_API_KEY` 定向注入。首轮只启用基础
-  `tavily-search`，确认每次审批、结果大小与免费额度体验；不启用 advanced search、extract、map、crawl、
+  `tavily_search`，确认每次审批、结果大小与免费额度体验；不启用 advanced search、extract、map、crawl、
   research 或远程 HTTP Transport。
 
 ## 2026-08-12 阶段 8 MCP 工具白名单工作记录
@@ -3348,7 +3348,7 @@
 - 新增 `save_mcp_server_configs()`：显式保存时原子替换 `config_dir/mcp.json`，并保留同一配置中的其他
   Server；文件只序列化严格校验过的非敏感 `McpServerConfigs`。
 - 新增 `bootstrap.tavily_settings.TavilySettings`，统一协调 `connection-tavily` 的 macOS Keychain API key、
-  SQLite `Connection` 元数据和 Tavily MCP 配置。启用时只写入 `tavily-search` 白名单；禁用保留 key 与
+  SQLite `Connection` 元数据和 Tavily MCP 配置。启用时只写入 `tavily_search` 白名单；禁用保留 key 与
   Connection；删除才清理三处状态。
 - Local API 在注入该对象时提供经 Bearer 认证的 Tavily 状态、保存/启用、禁用和删除端点。任何响应只含
   `enabled`、`api_key_saved` 或标准错误，不返回 API key。
@@ -3365,3 +3365,41 @@
 
 - 在 Electron Settings 页面加入 Tavily 开关、临时密码输入、保存/禁用/删除状态和“Restart asAgent to apply
   this change”提示；Renderer 只能通过窄 Preload/Main IPC 调用上述 API，不能获取、缓存或打印 API key。
+
+## 2026-08-12 阶段 8 Tavily Electron Settings 工作记录
+
+### 完成
+
+- Electron Preferences 的 Tavily Web Search 卡片已接入现有 BackendLauncher、受来源校验的 Main IPC 与窄
+  Preload API；Renderer 不获得 Local API Token、端口、HTTP 能力或已保存 key。
+- 开关关闭调用 disable 并保留 key；存在 key 时可直接重新启用，首次配置或 Replace 时才显示临时 password
+  input；保存成功或失败后均清空该输入 state。Remove 有英文确认，并执行完整删除。
+- 状态加载或写入失败只显示固定英文消息；写入成功后明确提示 `Restart asAgent to apply this change.`，不在
+  当前 Sidecar 内热重启或热加载 MCP。
+
+### 验证
+
+- Desktop 执行 `npm run format`、`npm run typecheck`、`npm run lint`、`npm test`（16 passed）及
+  `npm run build` 均通过。
+- Python `scripts/check.sh` 通过：348 passed；Ruff、strict mypy（159 个 source files）与锁文件检查均通过。
+- 手动体验已验证：Preferences 可保存 Tavily key，重启后 Sidecar 能读取 Tavily 配置并完成启动。
+
+## 2026-08-12 阶段 8 Tavily 真实搜索兼容性与人工验收
+
+### 完成
+
+- `McpClient` 现在将 `tools/call` 成功结果中省略的可选 `isError` 解释为 `False`；显式非布尔值继续按
+  `McpProtocolError` 拒绝，避免静默接受损坏协议数据。
+- 受控 MCP 测试 Server 新增“省略 `isError`”和“无效 `isError`”模式；集成测试分别验证成功兼容与严格拒绝。
+- 真实桌面验收已完成：用户在 Preferences 保存 Tavily API key、重启 Sidecar、批准 `tavily_search` 后，Agent
+  成功获取并回答 Perth 的实时天气。该路径验证了 Settings、Keychain、定向子进程环境、白名单、审批、
+  MCP Tool、Agent Loop 与模型回答的完整闭环。
+
+### 验证
+
+- `scripts/check.sh` 通过：350 passed；Ruff、strict mypy（159 个 source files）与锁文件检查均通过。
+
+### 下一步
+
+- Tavily 最小 Web Search 已完成。后续 MCP 工作按真实需求选择，例如 `tools/list` 分页/`listChanged`、
+  Streamable HTTP，或其他用户显式配置的 Server；不因已有 Tavily 闭环自动扩展更多搜索工具。

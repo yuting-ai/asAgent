@@ -270,7 +270,7 @@ class McpClient:
                 )
             text_content.append(text)
 
-        is_error = result.get("isError")
+        is_error = result.get("isError", False)
         if not isinstance(is_error, bool):
             raise McpProtocolError("tools/call response has invalid isError")
 

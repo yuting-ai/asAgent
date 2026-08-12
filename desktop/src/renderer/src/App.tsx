@@ -65,7 +65,18 @@ type AppView =
   | 'add-app'
   | 'preferences'
 
+type TavilySettingsStatus = {
+  enabled: boolean
+  api_key_saved: boolean
+}
+
 type ActivityTab = 'approvals' | 'schedule'
+
+const TAVILY_RESTART_HINT = 'Restart asAgent to apply this change.'
+const TAVILY_SETTINGS_LOAD_ERROR = 'Tavily settings could not be loaded.'
+const TAVILY_SETTINGS_UPDATE_ERROR = 'Tavily settings could not be updated.'
+const TAVILY_API_KEY_REQUIRED = 'Enter a Tavily API key before saving.'
+const TAVILY_DELETE_CONFIRM = 'Remove the saved Tavily API key and disable Tavily web search?'
 
 function conversationLabel(title: string | null): string {
   return title ?? 'New conversation'
@@ -229,6 +240,15 @@ export default function App(): React.JSX.Element {
   const [isDecidingApproval, setIsDecidingApproval] = useState(false)
   const [activeView, setActiveView] = useState<AppView>('chat')
   const [activityTab, setActivityTab] = useState<ActivityTab>('approvals')
+  const [tavilySettings, setTavilySettings] = useState<TavilySettingsStatus | null>(null)
+  const [tavilyLoadError, setTavilyLoadError] = useState<string | null>(null)
+  const [tavilyActionError, setTavilyActionError] = useState<string | null>(null)
+  const [tavilyRestartHint, setTavilyRestartHint] = useState(false)
+  const [tavilyApiKey, setTavilyApiKey] = useState('')
+  const [showTavilyKeyInput, setShowTavilyKeyInput] = useState(false)
+  const [isReplacingTavilyKey, setIsReplacingTavilyKey] = useState(false)
+  const [isTavilyLoading, setIsTavilyLoading] = useState(true)
+  const [isTavilyBusy, setIsTavilyBusy] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -259,6 +279,37 @@ export default function App(): React.JSX.Element {
     }
 
     void loadInitialData()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadTavilySettings(): Promise<void> {
+      setIsTavilyLoading(true)
+
+      try {
+        const status = await window.desktop.getTavilySettings()
+
+        if (!cancelled) {
+          setTavilySettings(status)
+          setTavilyLoadError(null)
+        }
+      } catch {
+        if (!cancelled) {
+          setTavilyLoadError(TAVILY_SETTINGS_LOAD_ERROR)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsTavilyLoading(false)
+        }
+      }
+    }
+
+    void loadTavilySettings()
 
     return () => {
       cancelled = true
@@ -520,6 +571,115 @@ export default function App(): React.JSX.Element {
       setErrorMessage('Tool approval decision could not be sent.')
     } finally {
       setIsDecidingApproval(false)
+    }
+  }
+
+  function applyTavilyStatus(status: TavilySettingsStatus): void {
+    setTavilySettings(status)
+    setTavilyActionError(null)
+    setTavilyRestartHint(true)
+    setTavilyApiKey('')
+    setShowTavilyKeyInput(false)
+    setIsReplacingTavilyKey(false)
+  }
+
+  async function handleTavilyToggle(enabled: boolean): Promise<void> {
+    if (isTavilyBusy || tavilySettings === null) {
+      return
+    }
+
+    setTavilyActionError(null)
+    setTavilyRestartHint(false)
+
+    if (!enabled) {
+      setIsTavilyBusy(true)
+      try {
+        const status = await window.desktop.disableTavily()
+        applyTavilyStatus(status)
+      } catch {
+        setTavilyActionError(TAVILY_SETTINGS_UPDATE_ERROR)
+      } finally {
+        setIsTavilyBusy(false)
+      }
+      return
+    }
+
+    if (tavilySettings.api_key_saved) {
+      setIsTavilyBusy(true)
+      try {
+        const status = await window.desktop.enableTavily()
+        applyTavilyStatus(status)
+      } catch {
+        setTavilyActionError(TAVILY_SETTINGS_UPDATE_ERROR)
+      } finally {
+        setIsTavilyBusy(false)
+      }
+      return
+    }
+
+    setShowTavilyKeyInput(true)
+    setIsReplacingTavilyKey(false)
+  }
+
+  async function handleSaveTavilyKey(): Promise<void> {
+    if (isTavilyBusy) {
+      return
+    }
+
+    setTavilyActionError(null)
+    setTavilyRestartHint(false)
+
+    if (!tavilyApiKey.trim()) {
+      setTavilyActionError(TAVILY_API_KEY_REQUIRED)
+      setTavilyApiKey('')
+      return
+    }
+
+    setIsTavilyBusy(true)
+    try {
+      const status = await window.desktop.enableTavily(tavilyApiKey.trim())
+      applyTavilyStatus(status)
+    } catch {
+      setTavilyActionError(TAVILY_SETTINGS_UPDATE_ERROR)
+      setTavilyApiKey('')
+    } finally {
+      setIsTavilyBusy(false)
+    }
+  }
+
+  function handleStartReplaceTavilyKey(): void {
+    if (isTavilyBusy) {
+      return
+    }
+
+    setTavilyActionError(null)
+    setTavilyRestartHint(false)
+    setTavilyApiKey('')
+    setShowTavilyKeyInput(true)
+    setIsReplacingTavilyKey(true)
+  }
+
+  async function handleRemoveTavilyKey(): Promise<void> {
+    if (isTavilyBusy || tavilySettings === null || !tavilySettings.api_key_saved) {
+      return
+    }
+
+    if (!window.confirm(TAVILY_DELETE_CONFIRM)) {
+      return
+    }
+
+    setIsTavilyBusy(true)
+    setTavilyActionError(null)
+    setTavilyRestartHint(false)
+
+    try {
+      const status = await window.desktop.deleteTavily()
+      applyTavilyStatus(status)
+    } catch {
+      setTavilyActionError(TAVILY_SETTINGS_UPDATE_ERROR)
+      setTavilyApiKey('')
+    } finally {
+      setIsTavilyBusy(false)
     }
   }
 
@@ -1276,7 +1436,142 @@ export default function App(): React.JSX.Element {
           {renderPlaceholderView('Add app', 'Connect another local data source.')}
         </div>
         <div className={`view${activeView === 'preferences' ? ' active' : ''}`}>
-          {renderPlaceholderView('Agent preferences', 'Model, safety, and desktop preferences.')}
+          <section className="center">
+            <div className="center-header">
+              <div className="center-title">Agent preferences</div>
+              <div className="center-sub">Model, safety, and desktop preferences.</div>
+            </div>
+
+            <div className="settings-panel">
+              <article className="settings-card">
+                <div className="settings-card-header">
+                  <div>
+                    <div className="settings-card-title">Tavily Web Search</div>
+                    <p className="settings-card-copy">
+                      Tavily lets asAgent search the web through a configured MCP server. Your API
+                      key is stored in the macOS Keychain and is never shown in this window.
+                    </p>
+                  </div>
+                  <label className="settings-toggle">
+                    <input
+                      checked={tavilySettings?.enabled ?? false}
+                      disabled={isTavilyBusy || isTavilyLoading || tavilySettings === null}
+                      onChange={(event) => {
+                        void handleTavilyToggle(event.target.checked)
+                      }}
+                      type="checkbox"
+                    />
+                    <span aria-hidden="true" className="settings-toggle-track" />
+                  </label>
+                </div>
+
+                {isTavilyLoading ? (
+                  <p className="settings-card-status">Loading Tavily settings…</p>
+                ) : null}
+
+                {tavilyLoadError !== null ? (
+                  <p className="settings-card-error">{tavilyLoadError}</p>
+                ) : null}
+
+                {!isTavilyLoading && tavilyLoadError === null && tavilySettings !== null ? (
+                  <>
+                    <p className="settings-card-status">
+                      {tavilySettings.enabled
+                        ? 'Tavily web search is enabled.'
+                        : tavilySettings.api_key_saved
+                          ? 'Tavily is disabled. Your API key is still saved.'
+                          : 'Tavily is not configured.'}
+                    </p>
+
+                    {showTavilyKeyInput ? (
+                      <div className="settings-key-form">
+                        <label className="settings-field-label" htmlFor="tavily-api-key">
+                          Tavily API key
+                        </label>
+                        <input
+                          autoComplete="off"
+                          className="settings-text-input"
+                          disabled={isTavilyBusy}
+                          id="tavily-api-key"
+                          onChange={(event) => setTavilyApiKey(event.target.value)}
+                          placeholder="tvly-..."
+                          spellCheck={false}
+                          type="password"
+                          value={tavilyApiKey}
+                        />
+                        <div className="settings-card-actions">
+                          <button
+                            className="settings-button settings-button-primary"
+                            disabled={isTavilyBusy}
+                            onClick={() => {
+                              void handleSaveTavilyKey()
+                            }}
+                            type="button"
+                          >
+                            {isReplacingTavilyKey ? 'Save new API key' : 'Save and enable'}
+                          </button>
+                          {isReplacingTavilyKey ? (
+                            <button
+                              className="settings-button settings-button-secondary"
+                              disabled={isTavilyBusy}
+                              onClick={() => {
+                                setShowTavilyKeyInput(false)
+                                setIsReplacingTavilyKey(false)
+                                setTavilyApiKey('')
+                                setTavilyActionError(null)
+                              }}
+                              type="button"
+                            >
+                              Cancel
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {tavilySettings.api_key_saved && !showTavilyKeyInput ? (
+                      <div className="settings-card-actions">
+                        <button
+                          className="settings-button settings-button-secondary"
+                          disabled={isTavilyBusy}
+                          onClick={handleStartReplaceTavilyKey}
+                          type="button"
+                        >
+                          Replace API key
+                        </button>
+                        <button
+                          className="settings-button settings-button-danger"
+                          disabled={isTavilyBusy}
+                          onClick={() => {
+                            void handleRemoveTavilyKey()
+                          }}
+                          type="button"
+                        >
+                          Remove saved API key
+                        </button>
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
+
+                {tavilyActionError !== null ? (
+                  <p className="settings-card-error">{tavilyActionError}</p>
+                ) : null}
+
+                {tavilyRestartHint ? (
+                  <p className="settings-card-hint">{TAVILY_RESTART_HINT}</p>
+                ) : null}
+              </article>
+            </div>
+          </section>
+
+          <aside className="attn">
+            <div className="attn-header">Integrations</div>
+            <p className="chat-context-sub">
+              MCP servers are configured on this device. Changes to Tavily settings take effect
+              after you restart asAgent.
+            </p>
+          </aside>
         </div>
       </div>
     </div>

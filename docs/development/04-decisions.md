@@ -765,9 +765,13 @@
   每月 1,000 API credits，且无需信用卡；基础搜索每次消耗 1 credit，高级搜索每次消耗 2 credits，因此
   首次验收仅通过每 Server 的 `allowed_tools` 白名单开放基础搜索，不导入 extract、map、crawl 或 research。
   省略白名单才保留“导入 Server 全部工具”的兼容行为；无效或未暴露的白名单名称会阻止整个原子导入。
-  Tavily 需通过现有 Connection/Keychain 以 `TAVILY_API_KEY` 定向注入，不将 Key 写入 `mcp.json`。
+  Tavily 需通过现有 Connection/Keychain 以 `TAVILY_API_KEY` 定向注入，首版白名单的实际名称为
+  `tavily_search`，不将 Key 写入 `mcp.json`。
   当前已提供受 Local API Bearer 认证的 Tavily 状态、保存/启用、禁用和完全删除操作；其响应不含 key，
-  设置变更需重启 Sidecar 后才影响 Tool Snapshot。
+  设置变更需重启 Sidecar 后才影响 Tool Snapshot。Electron Preferences 经窄 Preload/Main IPC 使用这些
+  固定操作：开关禁用保留 key，首次/替换输入只短暂存在于 Renderer state，删除有明确确认；不暴露通用
+  HTTP、Endpoint、Token 或 credential 读取能力。MCP `tools/call` 的可选 `isError` 缺失时视为成功，
+  显式非布尔值仍拒绝；这已通过 Tavily 的真实调用和独立 Client 集成测试验证。
   Provider-managed search 如有需求，必须作为独立的 Provider 专用能力重新设计。
 - 替代方案：直接依赖 DeepSeek/其他模型厂商的内置搜索、复制 CowAgent 的多搜索 API 路由、或用 Browser
   抓取搜索结果页替代搜索服务；当前均不作为 asAgent 的默认搜索架构。

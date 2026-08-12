@@ -555,16 +555,25 @@ Provider-managed search，必须作为明确的 Provider 专用能力另行设�
 因此，MCP credential 不会绕过最小环境策略：未引用 Connection 的 Server 继续仅接收 Sidecar
 显式允许的基础环境（当前为 `PATH`）；引用 Connection 的 Server 只额外接收自身声明变量名下的
 credential，不会收到模型 API Key、Local API Token、其他连接的 credential 或完整宿主环境。
-这一实现目前只支持 macOS Keychain；OAuth、刷新、Connection API、设置 UI、Windows/Linux 系统存储
-以及除环境变量以外的受控交付机制仍是后续独立工作。
+这一实现目前只支持 macOS Keychain；OAuth、刷新、Windows/Linux 系统存储以及除环境变量以外的受控交付
+机制仍是后续独立工作。
 
 首个桌面可配置的 API key 连接是 Tavily。`bootstrap.tavily_settings.TavilySettings` 协调 API key、
 Connection 与 MCP 配置，但不成为新的通用设置框架：`GET` / `PUT` / disable / `DELETE`
 `/api/v1/settings/tavily` 只在 Local API 已注入该对象时可用，仍受本地 Bearer 认证。保存或替换 key 时，
 Keychain 保存 `connection-tavily` 的不透明值，SQLite 保存 `service_id="tavily"` 的非敏感 Connection，
-而 `mcp.json` 只保存定向的 `TAVILY_API_KEY` 引用与 `allowed_tools=["tavily-search"]`。禁用只移除该
+而 `mcp.json` 只保存定向的 `TAVILY_API_KEY` 引用与 `allowed_tools=["tavily_search"]`。禁用只移除该
 Server 配置；删除才同时删除配置、Keychain 值与 Connection。响应只包含 `enabled` 与 `api_key_saved`，
 不返回 API key。设置变更不热更新当前 Tool Snapshot，必须重启 Sidecar 才会生效。
+
+Electron 的现有 Preferences 页面已通过专用 Main IPC 接入上述 Tavily 操作：首次启用时 Renderer 只将密码
+输入短暂传递给 `enableTavily()`，操作完成或失败后立即清空 state；已经保存的 key 永不回读或显示。关闭
+只调用 disable，Replace 再次要求临时输入，Remove 在英文确认后调用完全删除。所有设置写操作完成后只提示
+`Restart asAgent to apply this change.`，不会在活跃 Sidecar 内热加载或扩大 Renderer 权限。
+
+MCP 的 `tools/call` 成功结果可以省略可选的 `isError` 字段；`McpClient` 将其解释为 `False`。若 Server
+显式给出非布尔值，仍按协议错误拒绝。这样兼容 Tavily 等合法的成功响应形式，同时不把损坏的错误标记静默
+视为成功。
 
 MCP 工具内部 ID：
 

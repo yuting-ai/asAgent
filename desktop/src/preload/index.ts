@@ -51,6 +51,11 @@ type ToolApproval = {
   arguments: Record<string, unknown>
 }
 
+type TavilySettingsStatus = {
+  enabled: boolean
+  api_key_saved: boolean
+}
+
 const desktopBridge = {
   getAppInfo: (): Promise<{
     appName: string
@@ -72,6 +77,12 @@ const desktopBridge = {
     approvalId: string,
     decision: 'allow_once' | 'allow_conversation' | 'deny'
   ): Promise<void> => ipcRenderer.invoke('desktop:decide-tool-approval', approvalId, decision),
+  getTavilySettings: (): Promise<TavilySettingsStatus> =>
+    ipcRenderer.invoke('desktop:get-tavily-settings'),
+  enableTavily: (apiKey?: string): Promise<TavilySettingsStatus> =>
+    ipcRenderer.invoke('desktop:enable-tavily', apiKey),
+  disableTavily: (): Promise<TavilySettingsStatus> => ipcRenderer.invoke('desktop:disable-tavily'),
+  deleteTavily: (): Promise<TavilySettingsStatus> => ipcRenderer.invoke('desktop:delete-tavily'),
   onRunEvent: (callback: (update: RunUpdate) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, update: RunUpdate): void => {
       callback(update)
