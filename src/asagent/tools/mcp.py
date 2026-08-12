@@ -3,6 +3,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import Final
 
@@ -123,16 +124,20 @@ class McpClient:
         client_name: str = "asagent",
         client_version: str = "0.1.0",
         request_timeout_seconds: float = _DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        working_directory: Path | None = None,
     ) -> None:
         if not command or any(not part for part in command):
             raise ValueError("MCP server command must not be empty")
         if request_timeout_seconds <= 0:
             raise ValueError("request_timeout_seconds must be positive")
+        if working_directory is not None and not working_directory.is_absolute():
+            raise ValueError("MCP server working_directory must be absolute")
 
         self._command = command
         self._client_name = client_name
         self._client_version = client_version
         self._request_timeout_seconds = request_timeout_seconds
+        self._working_directory = working_directory
         self._process: asyncio.subprocess.Process | None = None
         self._server_info: McpServerInfo | None = None
         self._next_request_id = 1
@@ -147,6 +152,7 @@ class McpClient:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            cwd=self._working_directory,
         )
 
         try:

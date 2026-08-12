@@ -2999,3 +2999,45 @@
 - 实现最小多 Server 生命周期所有者：从已校验 `McpServerConfigs` 创建、启动和关闭多个
   `McpServerSession`；不在该任务接入 CLI、Local API、Electron、legacy fallback、分页或真实
   第三方 Server。
+
+## 2026-08-12 阶段 8 McpClient 工作目录工作记录
+
+### 完成
+
+- `McpClient` 增加可选绝对 `working_directory`，启动 stdio 子进程时作为 `cwd`；相对路径在
+  构造时拒绝。未提供时行为与此前相同（沿用宿主当前目录）。
+
+### 验证
+
+- `tests/integration/test_mcp_client.py` 与 `test_mcp_server_session.py` 在默认不传 cwd 时仍通过。
+- 定向 Ruff 与 `mypy src/asagent/tools/mcp.py` 通过。
+
+### 下一步
+
+- 从已校验的配置在应用组合根构造 Manager，使用户显式配置的 MCP Server 可进入实际 Runtime；
+  仍不实现 Secret 注入、legacy fallback、分页、热刷新或真实第三方 Server 验收。
+
+## 2026-08-12 阶段 8 最小 MCP Server Manager 工作记录
+
+### 完成
+
+- 新增 `tools.mcp_manager.McpServerManager`，从注入的 `McpServerConfigs` 创建多个
+  `McpServerSession`，并把每项绝对工作目录传入 `McpClient` 作为 stdio 子进程 cwd。
+- Manager 先使用临时 `ToolRegistry` 导入全部远程工具；仅所有 Session 启动成功且无正式工具 ID
+  冲突后才合并到正式 Registry。任一 Server 失败时关闭已启动 Session，正式 Registry 不留下
+  已关闭 Client 的工具。
+- `aclose()` 以反向创建顺序关闭全部 Session 并拒绝再次启动。当前 Manager 不读配置文件、不处理
+  Secret、热刷新、重连、分页或 legacy fallback，也尚未被 CLI/API/Electron 自动构造。
+
+### 验证
+
+- `tests/integration/test_mcp_server_manager.py` 覆盖单 Server 成功导入与“首个 Server 成功、
+  后续 Server 退出”时的清理及正式 Registry 无残留。
+- 完整 `scripts/check.sh` 为 298 passed；Ruff、strict mypy（146 个 source files）与锁文件检查
+  均通过。
+
+### 下一步
+
+- 将可选 `mcp.json` 和 `McpServerManager` 接入一个明确的应用组合根，使配置的 Server 可供实际
+  Runtime 使用；不在该任务接入 Secret、legacy fallback、分页、热刷新、桌面设置页或真实第三方
+  Server。
