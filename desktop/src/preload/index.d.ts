@@ -44,6 +44,17 @@ interface RunStreamError {
   message: string
 }
 
+interface ToolApproval {
+  approval_id: string
+  run_id: string
+  conversation_id: string
+  tool_call_id: string
+  tool_id: string
+  display_name: string
+  description: string
+  arguments: Record<string, unknown>
+}
+
 interface DesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>
   getBackendStatus(): Promise<{ status: 'ready' | 'unavailable' }>
@@ -52,8 +63,11 @@ interface DesktopBridge {
   createConversation(): Promise<ConversationSummary>
   submitMessage(conversationId: string, content: string): Promise<SubmittedMessage>
   cancelRun(runId: string): Promise<void>
+  decideToolApproval(approvalId: string, approved: boolean): Promise<void>
   onRunEvent(callback: (update: RunUpdate) => void): () => void
   onRunStreamError(callback: (error: RunStreamError) => void): () => void
+  onToolApprovalRequested(callback: (approval: ToolApproval) => void): () => void
+  onToolApprovalError(callback: (error: RunStreamError) => void): () => void
 }
 
 declare global {

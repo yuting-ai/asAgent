@@ -1,5 +1,5 @@
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -9,7 +9,7 @@ from asagent.agent.context_builder import (
     ContextBuilder,
 )
 from asagent.core.event_publisher import EventPublisher
-from asagent.core.ids import ConversationId, EventId, RunId, ToolCallId
+from asagent.core.ids import ApprovalId, ConversationId, EventId, RunId, ToolCallId
 from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
 from asagent.core.tool_call import ToolCall
@@ -23,6 +23,7 @@ from asagent.models.contracts import (
 )
 from asagent.models.errors import ProviderTimeoutError
 from asagent.models.provider import ModelProvider
+from asagent.tools.approval import ToolApprovalRequest
 from asagent.tools.errors import (
     ToolApprovalDeniedError,
     ToolArgumentsValidationError,
@@ -75,6 +76,7 @@ class AgentLoop:
         tool_call_recorder: ToolCallRecorder | None = None,
         tool_call_id_factory: Callable[[], ToolCallId] | None = None,
         context_builder: ContextBuilder | None = None,
+        approval_id_factory: Callable[[], ApprovalId] | None = None,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps must be positive")
@@ -97,6 +99,7 @@ class AgentLoop:
         self._tool_call_recorder = tool_call_recorder
         self._tool_call_id_factory = tool_call_id_factory
         self._context_builder = context_builder
+        self._approval_id_factory = approval_id_factory
 
     async def run(
         self,
@@ -273,6 +276,9 @@ class AgentLoop:
                     execution = await self._execute_tool(
                         tool_call,
                         calls_by_tool_input,
+                        run_id=run_id,
+                        conversation_id=conversation_id,
+                        publish=publish,
                     )
                     event_data: dict[str, object] = {
                         "tool_call_id": tool_call.call_id,
@@ -377,6 +383,10 @@ class AgentLoop:
         self,
         tool_call: ModelToolCall,
         calls_by_tool_input: dict[tuple[str, str], int],
+        *,
+        run_id: RunId | None,
+        conversation_id: ConversationId | None,
+        publish: Callable[[str, Mapping[str, object]], Awaitable[None]],
     ) -> _ToolExecutionResult:
         try:
             tool_id = self._tool_snapshot.tool_id_for(tool_call.name)
@@ -416,9 +426,41 @@ class AgentLoop:
 
         calls_by_tool_input[call_key] = calls + 1
 
+        approval_request: ToolApprovalRequest | None = None
+        definition = self._tool_snapshot.definition_for(tool_id)
+        if (
+            definition.requires_approval
+            and run_id is not None
+            and conversation_id is not None
+            and self._approval_id_factory is not None
+        ):
+            approval_request = ToolApprovalRequest(
+                approval_id=self._approval_id_factory(),
+                run_id=run_id,
+                conversation_id=conversation_id,
+                tool_call_id=tool_call.call_id,
+                definition=definition,
+                arguments=tool_call.arguments,
+            )
+
+        async def approval_requested(request: ToolApprovalRequest) -> None:
+            await publish(
+                "tool.approval_requested",
+                {
+                    "approval_id": str(request.approval_id),
+                    "tool_call_id": request.tool_call_id,
+                    "tool_id": request.definition.tool_id,
+                },
+            )
+
         try:
             return _ToolExecutionResult(
-                content=await self._executor.execute(tool_id, tool_call.arguments),
+                content=await self._executor.execute(
+                    tool_id,
+                    tool_call.arguments,
+                    approval_request=approval_request,
+                    on_approval_requested=approval_requested,
+                ),
                 succeeded=True,
                 tool_id=tool_id,
             )

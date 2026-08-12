@@ -3,7 +3,12 @@ from collections.abc import Mapping
 
 import pytest
 
+from asagent.core.ids import ApprovalId, ConversationId, RunId
 from asagent.core.tool_definition import ToolDefinition
+from asagent.tools.approval import (
+    ToolApprovalRequest,
+    ToolApprovalRequestedCallback,
+)
 from asagent.tools.errors import (
     ToolApprovalDeniedError,
     ToolArgumentsValidationError,
@@ -99,11 +104,23 @@ class RecordingApprovalPolicy:
 
     async def approve(
         self,
-        definition: ToolDefinition,
-        arguments: Mapping[str, object],
+        request: ToolApprovalRequest,
+        on_requested: ToolApprovalRequestedCallback | None = None,
     ) -> bool:
-        self.requests.append((definition, arguments))
+        del on_requested
+        self.requests.append((request.definition, request.arguments))
         return self._approved
+
+
+def _approval_request(tool: RecordingTool) -> ToolApprovalRequest:
+    return ToolApprovalRequest(
+        approval_id=ApprovalId("approval-1"),
+        run_id=RunId("run-1"),
+        conversation_id=ConversationId("conversation-1"),
+        tool_call_id="call-1",
+        definition=tool.definition,
+        arguments={"text": "hello"},
+    )
 
 
 @pytest.mark.asyncio
@@ -180,7 +197,11 @@ async def test_executor_executes_approved_tools() -> None:
     policy = RecordingApprovalPolicy(True)
     executor = ToolExecutor(registry, approval_policy=policy)
 
-    result = await executor.execute("builtin.echo", {"text": "hello"})
+    result = await executor.execute(
+        "builtin.echo",
+        {"text": "hello"},
+        approval_request=_approval_request(tool),
+    )
 
     assert result == "Echo: hello"
     assert tool.arguments == {"text": "hello"}

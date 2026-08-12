@@ -1,12 +1,11 @@
 import sys
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
 
 import pytest
 
 from asagent.agent.loop import AgentLoop
-from asagent.core.tool_definition import ToolDefinition
+from asagent.core.ids import ApprovalId, ConversationId, RunId
 from asagent.models.contracts import (
     ModelMessage,
     ModelMessageRole,
@@ -15,6 +14,7 @@ from asagent.models.contracts import (
 )
 from asagent.models.fake_provider import FakeModelProvider
 from asagent.models.tool_names import openai_compatible_tool_name
+from asagent.tools.approval import ToolApprovalRequest, ToolApprovalRequestedCallback
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.mcp import McpClient, register_mcp_tools
 from asagent.tools.registry import ToolRegistry
@@ -31,9 +31,10 @@ _SERVER_COMMAND: Final = (
 class ApprovingPolicy:
     async def approve(
         self,
-        definition: ToolDefinition,
-        arguments: Mapping[str, object],
+        request: ToolApprovalRequest,
+        on_requested: ToolApprovalRequestedCallback | None = None,
     ) -> bool:
+        del request, on_requested
         return True
 
 
@@ -79,6 +80,7 @@ async def test_agent_loop_exposes_and_executes_registered_mcp_tool() -> None:
                 approval_policy=ApprovingPolicy(),
             ),
             tool_snapshot=snapshot,
+            approval_id_factory=lambda: ApprovalId("approval-1"),
         )
 
         result = await loop.run(
@@ -90,6 +92,8 @@ async def test_agent_loop_exposes_and_executes_registered_mcp_tool() -> None:
                     content="Add 2 and 3.",
                 ),
             ),
+            run_id=RunId("run-1"),
+            conversation_id=ConversationId("conversation-1"),
         )
 
         assert result.text == "The result is 5."

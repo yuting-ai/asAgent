@@ -1,11 +1,11 @@
 import sys
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
 
 import pytest
 
-from asagent.core.tool_definition import ToolDefinition
+from asagent.core.ids import ApprovalId, ConversationId, RunId
+from asagent.tools.approval import ToolApprovalRequest, ToolApprovalRequestedCallback
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.mcp import McpClient, register_mcp_tools
 from asagent.tools.registry import ToolRegistry
@@ -21,9 +21,10 @@ _SERVER_COMMAND: Final = (
 class ApprovingPolicy:
     async def approve(
         self,
-        definition: ToolDefinition,
-        arguments: Mapping[str, object],
+        request: ToolApprovalRequest,
+        on_requested: ToolApprovalRequestedCallback | None = None,
     ) -> bool:
+        del request, on_requested
         return True
 
 
@@ -63,6 +64,14 @@ async def test_register_mcp_tools_exposes_add_through_executor() -> None:
         result = await executor.execute(
             add_tool.tool_id,
             {"left": 2, "right": 3},
+            approval_request=ToolApprovalRequest(
+                approval_id=ApprovalId("approval-1"),
+                run_id=RunId("run-1"),
+                conversation_id=ConversationId("conversation-1"),
+                tool_call_id="call-1",
+                definition=add_tool,
+                arguments={"left": 2, "right": 3},
+            ),
         )
 
         assert result == "5"

@@ -3,8 +3,9 @@ from pathlib import Path
 
 import pytest
 
+from asagent.core.ids import ApprovalId, ConversationId, RunId
 from asagent.core.tool import Tool
-from asagent.core.tool_definition import ToolDefinition
+from asagent.tools.approval import ToolApprovalRequest, ToolApprovalRequestedCallback
 from asagent.tools.builtin.filesystem_write_file import FilesystemWriteFileTool
 from asagent.tools.errors import (
     ToolApprovalDeniedError,
@@ -21,9 +22,10 @@ from asagent.workspace.resolver import (
 class ApprovingPolicy:
     async def approve(
         self,
-        definition: ToolDefinition,
-        arguments: Mapping[str, object],
+        request: ToolApprovalRequest,
+        on_requested: ToolApprovalRequestedCallback | None = None,
     ) -> bool:
+        del request, on_requested
         return True
 
 
@@ -207,7 +209,18 @@ async def test_executor_requires_permission_and_approval_before_creating_file(
         approval_policy=ApprovingPolicy(),
     )
 
-    result = await approved.execute(tool.definition.tool_id, arguments)
+    result = await approved.execute(
+        tool.definition.tool_id,
+        arguments,
+        approval_request=ToolApprovalRequest(
+            approval_id=ApprovalId("approval-1"),
+            run_id=RunId("run-1"),
+            conversation_id=ConversationId("conversation-1"),
+            tool_call_id="call-1",
+            definition=tool.definition,
+            arguments=arguments,
+        ),
+    )
 
     assert result == "File created."
     assert target.read_text(encoding="utf-8") == "content"

@@ -31,7 +31,11 @@ from asagent.models.errors import ProviderTimeoutError
 from asagent.models.fake_provider import FakeModelProvider
 from asagent.models.provider import ModelProvider
 from asagent.models.tool_names import openai_compatible_tool_name
-from asagent.tools.approval import ToolApprovalPolicy
+from asagent.tools.approval import (
+    ToolApprovalPolicy,
+    ToolApprovalRequest,
+    ToolApprovalRequestedCallback,
+)
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.registry import ToolRegistry
 from asagent.tools.snapshot import ToolSnapshot
@@ -112,9 +116,10 @@ class FixedApprovalPolicy:
 
     async def approve(
         self,
-        definition: ToolDefinition,
-        arguments: Mapping[str, object],
+        request: ToolApprovalRequest,
+        on_requested: ToolApprovalRequestedCallback | None = None,
     ) -> bool:
+        del request, on_requested
         return self._approved
 
 

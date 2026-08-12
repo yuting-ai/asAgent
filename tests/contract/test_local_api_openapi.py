@@ -73,6 +73,8 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
         "/api/v1/runs/{run_id}",
         "/api/v1/runs/{run_id}/cancel",
         "/api/v1/runs/{run_id}/events",
+        "/api/v1/tool-approvals/{approval_id}",
+        "/api/v1/tool-approvals/{approval_id}/decision",
     }
 
     expected_operations = (
@@ -88,6 +90,8 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
         ("/api/v1/runs/{run_id}", "get", "200"),
         ("/api/v1/runs/{run_id}/cancel", "post", "202"),
         ("/api/v1/runs/{run_id}/events", "get", "200"),
+        ("/api/v1/tool-approvals/{approval_id}", "get", "200"),
+        ("/api/v1/tool-approvals/{approval_id}/decision", "post", "200"),
     )
     for path, method, success_status in expected_operations:
         operation = paths[path][method]

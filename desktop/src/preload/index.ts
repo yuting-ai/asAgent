@@ -40,6 +40,17 @@ type RunStreamError = {
   message: string
 }
 
+type ToolApproval = {
+  approval_id: string
+  run_id: string
+  conversation_id: string
+  tool_call_id: string
+  tool_id: string
+  display_name: string
+  description: string
+  arguments: Record<string, unknown>
+}
+
 const desktopBridge = {
   getAppInfo: (): Promise<{
     appName: string
@@ -57,6 +68,8 @@ const desktopBridge = {
   submitMessage: (conversationId: string, content: string): Promise<SubmittedMessage> =>
     ipcRenderer.invoke('desktop:submit-message', conversationId, content),
   cancelRun: (runId: string): Promise<void> => ipcRenderer.invoke('desktop:cancel-run', runId),
+  decideToolApproval: (approvalId: string, approved: boolean): Promise<void> =>
+    ipcRenderer.invoke('desktop:decide-tool-approval', approvalId, approved),
   onRunEvent: (callback: (update: RunUpdate) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, update: RunUpdate): void => {
       callback(update)
@@ -72,6 +85,22 @@ const desktopBridge = {
 
     ipcRenderer.on('desktop:run-stream-error', listener)
     return () => ipcRenderer.removeListener('desktop:run-stream-error', listener)
+  },
+  onToolApprovalRequested: (callback: (approval: ToolApproval) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, approval: ToolApproval): void => {
+      callback(approval)
+    }
+
+    ipcRenderer.on('desktop:tool-approval-requested', listener)
+    return () => ipcRenderer.removeListener('desktop:tool-approval-requested', listener)
+  },
+  onToolApprovalError: (callback: (error: RunStreamError) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, error: RunStreamError): void => {
+      callback(error)
+    }
+
+    ipcRenderer.on('desktop:tool-approval-error', listener)
+    return () => ipcRenderer.removeListener('desktop:tool-approval-error', listener)
   }
 }
 

@@ -3041,3 +3041,29 @@
 - 将可选 `mcp.json` 和 `McpServerManager` 接入一个明确的应用组合根，使配置的 Server 可供实际
   Runtime 使用；不在该任务接入 Secret、legacy fallback、分页、热刷新、桌面设置页或真实第三方
   Server。
+
+## 2026-08-12 阶段 8 桌面逐次工具审批工作记录
+
+### 完成
+
+- 新增不可变 `ToolApprovalRequest` 与内存 `PendingToolApprovalPolicy`。工具调用会在 schema、权限
+  检查通过后登记请求，随后才发布不含参数正文的 `tool.approval_requested` 事件并等待一次决定。
+- Local API 新增认证的待处理审批读取与决定端点；取消 Run 和关闭 Sidecar 会拒绝未完成审批，避免
+  后台 Run 永久等待。
+- Electron Main 继续独占本地 Token：它从 SSE 得到审批事件后读取详情，经 Preload 的具名 IPC 交给
+  Renderer；Renderer 在对话流中显示英文审批卡，展示工具、说明和参数，并提供 `Allow once` / `Deny`。
+- 此任务不自动加载 `mcp.json`、不启动 MCP Server，也不授予 `mcp.execute`；因此它建立确认通道，
+  而不扩大任何实际工具能力。
+
+### 验证
+
+- `tests/unit/test_tool_approval.py` 覆盖请求先登记后通知、Run 取消与关闭拒绝等待；
+  `tests/integration/test_api_tool_approvals.py` 覆盖本地 API 读取和一次性决定。
+- `scripts/check.sh` 为 301 passed；Ruff、strict mypy（148 个 source files）与锁文件检查均通过。
+- Desktop 执行 `npm run format`、`npm run typecheck`、`npm run lint`、`npm test`（7 tests）和
+  `npm run build` 均通过。
+
+### 下一步
+
+- 将可选 `mcp.json` 与 `McpServerManager` 接入桌面 Sidecar 的明确组合根：成功启动后才把其 Tool
+  导入 Runtime，并仅向该 Runtime 授予 `mcp.execute`；使用上述审批卡进行首次真实 MCP 人工验收。

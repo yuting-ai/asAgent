@@ -1568,6 +1568,86 @@
   animation: pulse 1.8s ease-in-out infinite;
 }
 
+.tool-approval-msg {
+  align-items: flex-start;
+}
+
+.msg-bubble.tool-approval-card {
+  display: grid;
+  gap: 10px;
+  width: min(460px, 100%);
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--amber) 48%, var(--line));
+  background: color-mix(in srgb, var(--amber) 7%, var(--bg-inset));
+}
+
+.tool-approval-eyebrow,
+.tool-approval-id {
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.tool-approval-title {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.tool-approval-description {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.tool-approval-arguments {
+  overflow: auto;
+  max-height: 180px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.tool-approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.tool-approval-actions button {
+  min-width: 84px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.tool-approval-deny {
+  border: 1px solid var(--line);
+  background: var(--bg-inset);
+  color: var(--text-dim);
+}
+
+.tool-approval-allow {
+  border: 1px solid var(--brass);
+  background: var(--brass);
+  color: #fff;
+}
+
+.tool-approval-actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .chat-composer {
   padding: 14px 24px 18px;
   border-top: 1px solid var(--line-soft);

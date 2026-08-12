@@ -666,6 +666,16 @@
 - 替代方案：锁定 `2025-11-25` 及以前的旧生命周期；只支持 `2026-07-28` 而拒绝旧 Server；
   在同一已探测 stdio 子进程内直接发送旧版 initialize；当前均不采用。
 
+### DEC-066：桌面端采用内存中的逐次工具审批闭环
+
+- 日期：2026-08-12
+- 状态：已确认
+- 背景：MCP Tool 已统一声明 `requires_approval=True`，但真实桌面入口尚不能把用户的单次 Allow/Deny 决定可靠地送回正在等待的 Python ToolExecutor。将 Token 交给 Renderer 或让 CLI 读取输入都会破坏既有桌面安全边界与产品入口。
+- 决策：每次需要审批的调用使用不可变 `ToolApprovalRequest`，包含一次性 `approval_id`、Run、Conversation、模型 Tool Call、ToolDefinition 和参数。`PendingToolApprovalPolicy` 只在内存中保存未决定请求；它登记成功后才发出安全元数据 `tool.approval_requested` 事件并等待决定。Local API 以 Bearer 认证提供读取待处理请求和提交决定的端点；Electron Main 持有 Token 并转发受信任 Renderer 的具名 IPC，Renderer 在对话中展示英文审批卡片。取消 Run、关闭 Sidecar 或重复/过期决定均拒绝并解除等待。
+- 原因：一次性内存请求足以完成首次真实 MCP 体验，又能保证 UI 不会为无效参数或未获权限的调用弹窗；Main 继续是唯一可访问本地 HTTP Token 的桌面进程，且审批本身不污染用户可见消息或持久化 RunEvent 正文。
+- 影响：当前审批不具备刷新恢复、长期授权、审批历史或审计持久化；未来这些能力必须单独设计数据最小化、范围、有效期与撤销规则。配置的 MCP Server 尚未自动进入 Runtime，本决策只提供其可安全使用的用户确认通道。
+- 替代方案：Renderer 直接访问本地 API、CLI stdin 审批、只按固定风险等级自动批准、或将审批结果和完整参数写入 RunEvent；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

@@ -69,6 +69,13 @@ class ToolSnapshot:
 
         raise KeyError(f"provider_name is not in snapshot: {provider_name}")
 
+    def definition_for(self, tool_id: str) -> ToolDefinition:
+        for binding in self.bindings:
+            if binding.tool_id == tool_id:
+                return binding.definition
+
+        raise KeyError(f"tool_id is not in snapshot: {tool_id}")
+
     @property
     def model_tools(self) -> tuple[ModelToolDefinition, ...]:
         return tuple(

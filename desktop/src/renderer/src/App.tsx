@@ -39,6 +39,17 @@ type RunActivity = {
   endedAt: number | null
 }
 
+type ToolApproval = {
+  approval_id: string
+  run_id: string
+  conversation_id: string
+  tool_call_id: string
+  tool_id: string
+  display_name: string
+  description: string
+  arguments: Record<string, unknown>
+}
+
 type AppView =
   | 'chat'
   | 'activity'
@@ -196,6 +207,8 @@ export default function App(): React.JSX.Element {
   const [isCancellingRun, setIsCancellingRun] = useState(false)
   const [runActivity, setRunActivity] = useState<RunActivity | null>(null)
   const [activityExpanded, setActivityExpanded] = useState(false)
+  const [pendingApproval, setPendingApproval] = useState<ToolApproval | null>(null)
+  const [isDecidingApproval, setIsDecidingApproval] = useState(false)
   const [activeView, setActiveView] = useState<AppView>('chat')
   const [activityTab, setActivityTab] = useState<ActivityTab>('approvals')
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
@@ -277,6 +290,7 @@ export default function App(): React.JSX.Element {
       }
 
       finishRunActivity(update.runId, outcome)
+      setPendingApproval((current) => (current?.run_id === update.runId ? null : current))
       setActiveRun((current) => (current?.runId === update.runId ? null : current))
       setIsCancellingRun(false)
 
@@ -296,15 +310,33 @@ export default function App(): React.JSX.Element {
       setErrorMessage(error.message)
     })
 
+    const removeApprovalListener = window.desktop.onToolApprovalRequested((approval) => {
+      setPendingApproval(approval)
+      setIsDecidingApproval(false)
+      appendRunActivity(approval.run_id, 'Waiting for your approval.')
+    })
+
+    const removeApprovalErrorListener = window.desktop.onToolApprovalError((error) => {
+      setErrorMessage(error.message)
+    })
+
     return () => {
       removeEventListener()
       removeErrorListener()
+      removeApprovalListener()
+      removeApprovalErrorListener()
     }
   }, [selectedConversationId])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages, runActivity?.entries.length, runActivity?.phase, selectedConversationId])
+  }, [
+    messages,
+    pendingApproval?.approval_id,
+    runActivity?.entries.length,
+    runActivity?.phase,
+    selectedConversationId
+  ])
 
   const selectedConversation = conversations.find(
     (conversation) => conversation.conversation_id === selectedConversationId
@@ -446,6 +478,26 @@ export default function App(): React.JSX.Element {
     } catch {
       setIsCancellingRun(false)
       setErrorMessage('Cancellation request failed.')
+    }
+  }
+
+  async function decidePendingApproval(approved: boolean): Promise<void> {
+    const approval = pendingApproval
+    if (approval === null || isDecidingApproval) {
+      return
+    }
+
+    setIsDecidingApproval(true)
+    setErrorMessage(null)
+
+    try {
+      await window.desktop.decideToolApproval(approval.approval_id, approved)
+      appendRunActivity(approval.run_id, approved ? 'Tool approved. Continuing…' : 'Tool denied.')
+      setPendingApproval(null)
+    } catch {
+      setErrorMessage('Tool approval decision could not be sent.')
+    } finally {
+      setIsDecidingApproval(false)
     }
   }
 
@@ -788,6 +840,10 @@ export default function App(): React.JSX.Element {
                           runActivity?.conversationId === selectedConversationId
                             ? runActivity
                             : null
+                        const visibleApproval =
+                          pendingApproval?.conversation_id === selectedConversationId
+                            ? pendingApproval
+                            : null
                         const activityAnchorIndex =
                           visibleActivity === null
                             ? -1
@@ -871,6 +927,40 @@ export default function App(): React.JSX.Element {
                           )
                         }
 
+                        function renderToolApproval(approval: ToolApproval): React.JSX.Element {
+                          return (
+                            <div className="msg agent tool-approval-msg">
+                              <div className="msg-bubble tool-approval-card">
+                                <div className="tool-approval-eyebrow">Approval required</div>
+                                <div className="tool-approval-title">{approval.display_name}</div>
+                                <p className="tool-approval-description">{approval.description}</p>
+                                <div className="tool-approval-id">{approval.tool_id}</div>
+                                <pre className="tool-approval-arguments">
+                                  {JSON.stringify(approval.arguments, null, 2)}
+                                </pre>
+                                <div className="tool-approval-actions">
+                                  <button
+                                    className="tool-approval-deny"
+                                    disabled={isDecidingApproval}
+                                    onClick={() => void decidePendingApproval(false)}
+                                    type="button"
+                                  >
+                                    Deny
+                                  </button>
+                                  <button
+                                    className="tool-approval-allow"
+                                    disabled={isDecidingApproval}
+                                    onClick={() => void decidePendingApproval(true)}
+                                    type="button"
+                                  >
+                                    {isDecidingApproval ? 'Sending…' : 'Allow once'}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        }
+
                         return (
                           <>
                             {visibleMessages.map((message, index) => (
@@ -896,6 +986,7 @@ export default function App(): React.JSX.Element {
                             {visibleActivity !== null && activityAnchorIndex === -1
                               ? renderRunActivity(visibleActivity)
                               : null}
+                            {visibleApproval !== null ? renderToolApproval(visibleApproval) : null}
                           </>
                         )
                       })()}

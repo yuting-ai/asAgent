@@ -26,6 +26,7 @@ from asagent.chat.service import ChatService
 from asagent.core.conversation import Conversation
 from asagent.core.event_publisher import EventPublisher
 from asagent.core.ids import (
+    ApprovalId,
     ConversationId,
     EventId,
     MessageId,
@@ -59,6 +60,7 @@ from asagent.storage.sqlite.run_finisher import SqliteRunFinisher
 from asagent.storage.sqlite.run_repository import SqliteRunRepository
 from asagent.storage.sqlite.run_starter import SqliteRunStarter
 from asagent.storage.tool_call_recorder import RepositoryToolCallRecorder
+from asagent.tools.approval import PendingToolApprovalPolicy, ToolApprovalPolicy
 from asagent.tools.builtin.calculator import CalculatorTool
 from asagent.tools.builtin.current_time import CurrentTimeTool
 from asagent.tools.builtin.echo import EchoTool
@@ -154,6 +156,7 @@ def build_agent_loop(
     model: ModelProvider,
     event_publisher: EventPublisher,
     tool_call_recorder: ToolCallRecorder | None = None,
+    approval_policy: ToolApprovalPolicy | None = None,
 ) -> AgentLoop:
     registry = _register_builtin_tools()
     snapshot = ToolSnapshot.from_definitions(
@@ -165,6 +168,7 @@ def build_agent_loop(
         executor=ToolExecutor(
             registry,
             granted_permissions=frozenset({"tool.execute"}),
+            approval_policy=approval_policy,
         ),
         tool_snapshot=snapshot,
         event_publisher=event_publisher,
@@ -174,6 +178,7 @@ def build_agent_loop(
         tool_call_id_factory=(
             new_tool_call_id if tool_call_recorder is not None else None
         ),
+        approval_id_factory=new_approval_id,
     )
 
 
@@ -181,6 +186,7 @@ def build_development_agent_loop(
     *,
     event_publisher: EventPublisher,
     tool_call_recorder: ToolCallRecorder | None = None,
+    approval_policy: ToolApprovalPolicy | None = None,
 ) -> AgentLoop:
     registry = _register_builtin_tools()
     snapshot = ToolSnapshot.from_definitions(
@@ -192,6 +198,7 @@ def build_development_agent_loop(
         executor=ToolExecutor(
             registry,
             granted_permissions=frozenset({"tool.execute"}),
+            approval_policy=approval_policy,
         ),
         tool_snapshot=snapshot,
         event_publisher=event_publisher,
@@ -199,6 +206,7 @@ def build_development_agent_loop(
         clock=now,
         tool_call_recorder=tool_call_recorder,
         tool_call_id_factory=new_tool_call_id,
+        approval_id_factory=new_approval_id,
     )
 
 
@@ -310,6 +318,10 @@ def new_tool_call_id() -> ToolCallId:
     return ToolCallId(f"tool_{uuid4().hex}")
 
 
+def new_approval_id() -> ApprovalId:
+    return ApprovalId(f"approval_{uuid4().hex}")
+
+
 def _alembic_config_path() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys._MEIPASS) / "alembic.ini"  # type: ignore[attr-defined]
@@ -324,6 +336,7 @@ def build_persistent_agent_runtime(
     runs: SqliteRunRepository,
     starter: SqliteRunStarter,
     finisher: SqliteRunFinisher,
+    approval_policy: ToolApprovalPolicy | None = None,
 ) -> PersistentAgentRuntime:
     return PersistentAgentRuntime(
         conversations=conversations,
@@ -339,6 +352,7 @@ def build_persistent_agent_runtime(
             model=model,
             event_publisher=RepositoryEventPublisher(runs),
             tool_call_recorder=RepositoryToolCallRecorder(runs),
+            approval_policy=approval_policy,
         ),
         now=now,
         new_message_id=new_message_id,
@@ -351,6 +365,7 @@ def build_persistent_development_runtime(
     runs: SqliteRunRepository,
     starter: SqliteRunStarter,
     finisher: SqliteRunFinisher,
+    approval_policy: ToolApprovalPolicy | None = None,
 ) -> PersistentAgentRuntime:
     return PersistentAgentRuntime(
         conversations=conversations,
@@ -365,6 +380,7 @@ def build_persistent_development_runtime(
         loop=build_development_agent_loop(
             event_publisher=RepositoryEventPublisher(runs),
             tool_call_recorder=RepositoryToolCallRecorder(runs),
+            approval_policy=approval_policy,
         ),
         now=now,
         new_message_id=new_message_id,
@@ -512,6 +528,7 @@ async def _run_main(args: argparse.Namespace) -> None:
         runs = SqliteRunRepository(database_path)
         starter = SqliteRunStarter(database_path)
         finisher = SqliteRunFinisher(database_path)
+        tool_approvals = PendingToolApprovalPolicy()
         run_submission = RunSubmissionService(
             conversations=conversations,
             run_starter=starter,
@@ -532,6 +549,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                 runs=runs,
                 starter=starter,
                 finisher=finisher,
+                approval_policy=tool_approvals,
             )
             model_name = "development-tools"
         else:
@@ -560,6 +578,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                 runs=runs,
                 starter=starter,
                 finisher=finisher,
+                approval_policy=tool_approvals,
             )
             model_name = profile.model
 
@@ -587,6 +606,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     run_submission=run_submission,
                     dispatch_submitted_run=dispatcher.dispatch,
                     cancel_run=dispatcher.cancel,
+                    tool_approvals=tool_approvals,
                 ),
                 host=args.host,
                 port=args.port,
@@ -595,6 +615,7 @@ async def _run_main(args: argparse.Namespace) -> None:
             print(f"{READY_PREFIX}{ready.to_json()}", flush=True)
             await server.wait_closed()
         finally:
+            await tool_approvals.aclose()
             await dispatcher.aclose()
             await finisher.aclose()
             await starter.aclose()

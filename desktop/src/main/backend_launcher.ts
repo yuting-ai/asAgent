@@ -47,6 +47,17 @@ export type RunEvent = {
   data: Record<string, unknown>
 }
 
+export type ToolApproval = {
+  approval_id: string
+  run_id: string
+  conversation_id: string
+  tool_call_id: string
+  tool_id: string
+  display_name: string
+  description: string
+  arguments: Record<string, unknown>
+}
+
 export type CreatedConversation = ConversationSummary
 
 type BackendLauncherOptions = {
@@ -226,6 +237,18 @@ export class BackendLauncher {
 
   async cancelRun(runId: string): Promise<void> {
     await this.requestJson(`/api/v1/runs/${encodeURIComponent(runId)}/cancel`, 'POST', {})
+  }
+
+  async getToolApproval(approvalId: string): Promise<ToolApproval> {
+    return this.requestJson(`/api/v1/tool-approvals/${encodeURIComponent(approvalId)}`, 'GET')
+  }
+
+  async decideToolApproval(approvalId: string, approved: boolean): Promise<void> {
+    await this.requestJson(
+      `/api/v1/tool-approvals/${encodeURIComponent(approvalId)}/decision`,
+      'POST',
+      { approved }
+    )
   }
 
   watchRunEvents(

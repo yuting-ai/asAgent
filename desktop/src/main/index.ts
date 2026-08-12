@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { BackendLauncher, type SubmittedMessage } from './backend_launcher'
+import { BackendLauncher, type SubmittedMessage, type ToolApproval } from './backend_launcher'
 
 let backendLauncher: BackendLauncher | undefined
 let isQuitting = false
@@ -135,6 +135,29 @@ function watchRun(sender: WebContents, conversationId: string, submitted: Submit
         conversationId,
         event: runEvent
       })
+
+      if (runEvent.event_type === 'tool.approval_requested') {
+        const approvalId = runEvent.data['approval_id']
+        if (typeof approvalId === 'string') {
+          void getReadyBackendLauncher()
+            .getToolApproval(approvalId)
+            .then((approval: ToolApproval) => {
+              if (!sender.isDestroyed()) {
+                sender.send('desktop:tool-approval-requested', approval)
+              }
+            })
+            .catch((error) => {
+              if (!sender.isDestroyed()) {
+                sender.send('desktop:tool-approval-error', {
+                  runId: submitted.run.run_id,
+                  conversationId,
+                  message:
+                    error instanceof Error ? error.message : 'Tool approval could not be loaded.'
+                })
+              }
+            })
+        }
+      }
 
       if (isTerminalRunEvent(runEvent.event_type)) {
         stopRunWatcher(submitted.run.run_id)
@@ -272,6 +295,27 @@ app.whenReady().then(async () => {
 
     await getReadyBackendLauncher().cancelRun(runId)
   })
+
+  ipcMain.handle(
+    'desktop:decide-tool-approval',
+    async (event, approvalId: unknown, approved: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) {
+        throw new Error('Untrusted renderer IPC request.')
+      }
+
+      assertTrustedRenderer(frame.url)
+
+      if (typeof approvalId !== 'string' || !approvalId.trim()) {
+        throw new Error('Tool approval ID is invalid.')
+      }
+      if (typeof approved !== 'boolean') {
+        throw new Error('Tool approval decision is invalid.')
+      }
+
+      await getReadyBackendLauncher().decideToolApproval(approvalId, approved)
+    }
+  )
 
   createWindow()
 

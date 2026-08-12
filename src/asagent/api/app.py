@@ -17,12 +17,13 @@ from asagent.agent.run_submission import (
 )
 from asagent.api.auth import BearerTokenAuthenticator, LocalApiToken
 from asagent.core.conversation import Conversation
-from asagent.core.ids import ConversationId, RunId, UserId
+from asagent.core.ids import ApprovalId, ConversationId, RunId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.repositories import ConversationRepository, RunRepository
 from asagent.core.run import Run
 from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
+from asagent.tools.approval import PendingToolApprovalPolicy, ToolApprovalRequest
 
 _LOCAL_USER_ID: Final = UserId("local-user")
 _EVENT_POLL_INTERVAL_SECONDS: Final = 0.1
@@ -117,6 +118,41 @@ class SubmitMessageResponse(BaseModel):
     conversation: ConversationResponse
 
 
+class ToolApprovalResponse(BaseModel):
+    approval_id: str
+    run_id: str
+    conversation_id: str
+    tool_call_id: str
+    tool_id: str
+    display_name: str
+    description: str
+    arguments: dict[str, object]
+
+    @classmethod
+    def from_request(cls, request: ToolApprovalRequest) -> "ToolApprovalResponse":
+        return cls(
+            approval_id=str(request.approval_id),
+            run_id=str(request.run_id),
+            conversation_id=str(request.conversation_id),
+            tool_call_id=request.tool_call_id,
+            tool_id=request.definition.tool_id,
+            display_name=request.definition.display_name,
+            description=request.definition.description,
+            arguments=dict(request.arguments),
+        )
+
+
+class ToolApprovalDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approved: bool
+
+
+class ToolApprovalDecisionResponse(BaseModel):
+    approval_id: str
+    approved: bool
+
+
 def create_app(
     *,
     access_token: LocalApiToken,
@@ -125,6 +161,7 @@ def create_app(
     run_submission: RunSubmissionService,
     dispatch_submitted_run: Callable[[SubmittedRun], object],
     cancel_run: Callable[[RunId], bool],
+    tool_approvals: PendingToolApprovalPolicy | None = None,
     conversation_id_factory: Callable[[], ConversationId] | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
@@ -152,6 +189,23 @@ def create_app(
             )
 
         return stored_run
+
+    async def get_pending_approval(approval_id: ApprovalId) -> ToolApprovalRequest:
+        if tool_approvals is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="tool approval not found",
+            )
+
+        pending = tool_approvals.get(approval_id)
+        if pending is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="tool approval not found",
+            )
+
+        await get_local_run(pending.run_id)
+        return pending
 
     def event_frame(event: RunEvent) -> str:
         payload = {
@@ -323,7 +377,42 @@ def create_app(
                 detail="run is not active",
             )
 
+        if tool_approvals is not None:
+            tool_approvals.deny_run(stored_run.run_id)
+
         return CancelRunResponse(run_id=str(stored_run.run_id))
+
+    @app.get(
+        "/api/v1/tool-approvals/{approval_id}",
+        response_model=ToolApprovalResponse,
+        dependencies=[Depends(authenticate)],
+    )
+    async def get_tool_approval(approval_id: str) -> ToolApprovalResponse:
+        pending = await get_pending_approval(ApprovalId(approval_id))
+        return ToolApprovalResponse.from_request(pending)
+
+    @app.post(
+        "/api/v1/tool-approvals/{approval_id}/decision",
+        response_model=ToolApprovalDecisionResponse,
+        dependencies=[Depends(authenticate)],
+    )
+    async def decide_tool_approval(
+        approval_id: str,
+        request: ToolApprovalDecisionRequest,
+    ) -> ToolApprovalDecisionResponse:
+        pending = await get_pending_approval(ApprovalId(approval_id))
+        assert tool_approvals is not None
+
+        if not tool_approvals.decide(pending.approval_id, request.approved):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="tool approval not found",
+            )
+
+        return ToolApprovalDecisionResponse(
+            approval_id=str(pending.approval_id),
+            approved=request.approved,
+        )
 
     @app.get(
         "/api/v1/conversations/{conversation_id}/messages",

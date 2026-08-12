@@ -185,6 +185,63 @@ describe('BackendLauncher', () => {
     )
   })
 
+  it('reads and decides a tool approval through its private backend connection', async () => {
+    const child = createChild()
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+    const fetchBackend = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            approval_id: 'approval-1',
+            run_id: 'run-1',
+            conversation_id: 'conv-1',
+            tool_call_id: 'call-1',
+            tool_id: 'mcp:test-server:add:1234',
+            display_name: 'Add numbers',
+            description: 'Add two numbers.',
+            arguments: { left: 2, right: 3 }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ approval_id: 'approval-1', approved: true }), {
+          status: 200
+        })
+      )
+
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      spawnBackend,
+      fetchBackend
+    })
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+    await starting
+
+    await expect(launcher.getToolApproval('approval-1')).resolves.toMatchObject({
+      approval_id: 'approval-1',
+      arguments: { left: 2, right: 3 }
+    })
+    await expect(launcher.decideToolApproval('approval-1', true)).resolves.toBeUndefined()
+
+    expect(fetchBackend).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:43123/api/v1/tool-approvals/approval-1/decision',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ approved: true }),
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /)
+        })
+      })
+    )
+  })
+
   it('creates a conversation and submits a message through its private backend connection', async () => {
     const child = createChild()
     const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
