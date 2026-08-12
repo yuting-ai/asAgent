@@ -35,6 +35,8 @@ type RunActivity = {
   runId: string
   conversationId: string
   entries: string[]
+  currentLabel: string
+  toolNames: string[]
   phase: 'live' | 'done'
   outcome: RunActivityOutcome | null
   startedAt: number
@@ -70,13 +72,23 @@ type TavilySettingsStatus = {
   api_key_saved: boolean
 }
 
+type ModelSettingsStatus = {
+  configured: boolean
+  api_key_saved: boolean
+  model: string | null
+  base_url: string | null
+}
+
 type ActivityTab = 'approvals' | 'schedule'
 
-const TAVILY_RESTART_HINT = 'Restart asAgent to apply this change.'
 const TAVILY_SETTINGS_LOAD_ERROR = 'Tavily settings could not be loaded.'
 const TAVILY_SETTINGS_UPDATE_ERROR = 'Tavily settings could not be updated.'
 const TAVILY_API_KEY_REQUIRED = 'Enter a Tavily API key before saving.'
 const TAVILY_DELETE_CONFIRM = 'Remove the saved Tavily API key and disable Tavily web search?'
+const MODEL_SETTINGS_LOAD_ERROR = 'Model settings could not be loaded.'
+const MODEL_SETTINGS_UPDATE_ERROR = 'Model settings could not be updated.'
+const MODEL_SETTINGS_REQUIRED = 'Enter a model, base URL, and API key before saving.'
+const MODEL_DELETE_CONFIRM = 'Remove the saved model configuration and API key?'
 
 function conversationLabel(title: string | null): string {
   return title ?? 'New conversation'
@@ -85,17 +97,6 @@ function conversationLabel(title: string | null): string {
 function mcpServerNameFromToolId(toolId: string): string | null {
   const match = /^mcp:([a-z][a-z0-9-]{0,63}):[^:]+:[0-9a-f]+$/i.exec(toolId)
   return match?.[1] ?? null
-}
-
-function approvalActivityMessage(decision: ToolApprovalDecision): string {
-  switch (decision) {
-    case 'deny':
-      return 'Tool denied.'
-    case 'allow_once':
-      return 'Tool approved once. Continuing…'
-    case 'allow_conversation':
-      return 'Tool allowed for this conversation.'
-  }
 }
 
 function orderConversations(conversations: ConversationSummary[]): ConversationSummary[] {
@@ -141,28 +142,27 @@ function formatThreadTime(iso: string): string {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
-function runActivityEntry(eventType: string): string {
+function terminalActivityEntry(outcome: RunActivityOutcome): string {
+  switch (outcome) {
+    case 'completed':
+      return 'Answered'
+    case 'failed':
+      return 'Run failed'
+    case 'cancelled':
+      return 'Stopped'
+    case 'limit':
+      return 'Reached the safety limit'
+  }
+}
+
+function runActivityStatus(eventType: string): string | null {
   switch (eventType) {
-    case 'run.started':
-      return 'Run started.'
     case 'model.requested':
       return 'Thinking…'
-    case 'model.completed':
-      return 'Model response received.'
     case 'tool.requested':
       return 'Using a tool…'
-    case 'tool.completed':
-      return 'Tool completed.'
-    case 'run.completed':
-      return 'Response completed.'
-    case 'run.cancelled':
-      return 'Run cancelled.'
-    case 'run.limit_reached':
-      return 'Run reached its safety limit.'
-    case 'run.failed':
-      return 'Run failed.'
     default:
-      return 'Working…'
+      return null
   }
 }
 
@@ -188,21 +188,26 @@ function formatElapsed(startedAt: number, endedAt: number | null): string | null
 }
 
 function activitySummaryLabel(activity: RunActivity): string {
-  const stepCount = activity.entries.length
-  const steps = `${stepCount} step${stepCount === 1 ? '' : 's'}`
   const elapsed = formatElapsed(activity.startedAt, activity.endedAt)
-  const withTime = elapsed === null ? steps : `${steps} · ${elapsed}`
+  const toolSummary =
+    activity.toolNames.length === 0
+      ? null
+      : activity.toolNames.length === 1
+        ? `Used ${activity.toolNames[0]}`
+        : `Used ${activity.toolNames.length} tools`
+
+  const details = [elapsed, toolSummary].filter((detail): detail is string => detail !== null)
 
   switch (activity.outcome) {
     case 'failed':
-      return `Failed · ${withTime}`
+      return ['Failed', ...details].join(' · ')
     case 'cancelled':
-      return `Cancelled · ${withTime}`
+      return ['Stopped', ...details].join(' · ')
     case 'limit':
-      return `Stopped · ${withTime}`
+      return ['Stopped for safety', ...details].join(' · ')
     case 'completed':
     default:
-      return `Worked · ${withTime}`
+      return ['Worked', ...details].join(' · ')
   }
 }
 
@@ -243,12 +248,21 @@ export default function App(): React.JSX.Element {
   const [tavilySettings, setTavilySettings] = useState<TavilySettingsStatus | null>(null)
   const [tavilyLoadError, setTavilyLoadError] = useState<string | null>(null)
   const [tavilyActionError, setTavilyActionError] = useState<string | null>(null)
-  const [tavilyRestartHint, setTavilyRestartHint] = useState(false)
   const [tavilyApiKey, setTavilyApiKey] = useState('')
   const [showTavilyKeyInput, setShowTavilyKeyInput] = useState(false)
   const [isReplacingTavilyKey, setIsReplacingTavilyKey] = useState(false)
   const [isTavilyLoading, setIsTavilyLoading] = useState(true)
   const [isTavilyBusy, setIsTavilyBusy] = useState(false)
+  const [modelSettings, setModelSettings] = useState<ModelSettingsStatus | null>(null)
+  const [modelLoadError, setModelLoadError] = useState<string | null>(null)
+  const [modelActionError, setModelActionError] = useState<string | null>(null)
+  const [restartRequested, setRestartRequested] = useState(false)
+  const [isRestarting, setIsRestarting] = useState(false)
+  const [modelName, setModelName] = useState('')
+  const [modelBaseUrl, setModelBaseUrl] = useState('')
+  const [modelApiKey, setModelApiKey] = useState('')
+  const [isModelLoading, setIsModelLoading] = useState(true)
+  const [isModelBusy, setIsModelBusy] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -280,6 +294,36 @@ export default function App(): React.JSX.Element {
 
     void loadInitialData()
 
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadModelSettings(): Promise<void> {
+      setIsModelLoading(true)
+      try {
+        const status = await window.desktop.getModelSettings()
+        if (!cancelled) {
+          setModelSettings(status)
+          setModelName(status.model ?? '')
+          setModelBaseUrl(status.base_url ?? '')
+          setModelLoadError(null)
+        }
+      } catch {
+        if (!cancelled) {
+          setModelLoadError(MODEL_SETTINGS_LOAD_ERROR)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsModelLoading(false)
+        }
+      }
+    }
+
+    void loadModelSettings()
     return () => {
       cancelled = true
     }
@@ -351,14 +395,13 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     const removeEventListener = window.desktop.onRunEvent((update) => {
-      appendRunActivity(update.runId, runActivityEntry(update.event.event_type))
+      recordRunEvent(update.runId, update.event.event_type)
 
       const outcome = runActivityOutcome(update.event.event_type)
       if (outcome === null) {
         return
       }
 
-      finishRunActivity(update.runId, outcome)
       setPendingApproval((current) => (current?.run_id === update.runId ? null : current))
       setActiveRun((current) => (current?.runId === update.runId ? null : current))
       setIsCancellingRun(false)
@@ -374,7 +417,7 @@ export default function App(): React.JSX.Element {
     const removeErrorListener = window.desktop.onRunStreamError((error) => {
       setActiveRun((current) => (current?.runId === error.runId ? null : current))
       setIsCancellingRun(false)
-      appendRunActivity(error.runId, 'Run event stream failed.')
+      setRunActivityStatus(error.runId, 'Run connection lost.')
       finishRunActivity(error.runId, 'failed')
       setErrorMessage(error.message)
     })
@@ -382,7 +425,8 @@ export default function App(): React.JSX.Element {
     const removeApprovalListener = window.desktop.onToolApprovalRequested((approval) => {
       setPendingApproval(approval)
       setIsDecidingApproval(false)
-      appendRunActivity(approval.run_id, 'Waiting for your approval.')
+      setRunActivityTool(approval.run_id, approval.display_name)
+      setRunActivityStatus(approval.run_id, `Waiting for approval for ${approval.display_name}…`)
     })
 
     const removeApprovalErrorListener = window.desktop.onToolApprovalError((error) => {
@@ -395,6 +439,9 @@ export default function App(): React.JSX.Element {
       removeApprovalListener()
       removeApprovalErrorListener()
     }
+    // The event handlers below only close over React state setters and stable helpers.
+    // Re-subscribing on every render would risk a gap in the single active Run stream.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConversationId])
 
   useEffect(() => {
@@ -435,21 +482,78 @@ export default function App(): React.JSX.Element {
 
   const usesExternalModel = appInfo?.dataProcessingMode === 'external'
 
-  function appendRunActivity(runId: string, entry: string): void {
+  function openAssistantLink(href: string | undefined): void {
+    if (href === undefined) {
+      return
+    }
+
+    void window.desktop.openExternalLink(href).catch(() => {
+      setErrorMessage('The link could not be opened.')
+    })
+  }
+
+  function setRunActivityStatus(runId: string, currentLabel: string): void {
     setRunActivity((current) => {
       if (current === null || current.runId !== runId) {
         return current
       }
 
-      if (current.entries.at(-1) === entry) {
+      if (current.currentLabel === currentLabel) {
         return current
       }
 
       return {
         ...current,
-        entries: [...current.entries, entry]
+        currentLabel
       }
     })
+  }
+
+  function setRunActivityTool(runId: string, toolName: string): void {
+    setRunActivity((current) => {
+      if (current === null || current.runId !== runId) {
+        return current
+      }
+
+      if (current.toolNames.includes(toolName)) {
+        return current
+      }
+
+      return {
+        ...current,
+        toolNames: [...current.toolNames, toolName]
+      }
+    })
+  }
+
+  function recordRunEvent(runId: string, eventType: string): void {
+    const outcome = runActivityOutcome(eventType)
+    if (outcome !== null) {
+      finishRunActivity(runId, outcome)
+      return
+    }
+
+    const currentLabel = runActivityStatus(eventType)
+    if (currentLabel !== null) {
+      setRunActivityStatus(runId, currentLabel)
+    }
+
+    if (eventType === 'tool.completed') {
+      setRunActivity((current) => {
+        if (current === null || current.runId !== runId) {
+          return current
+        }
+
+        const toolName = current.toolNames.at(-1) ?? 'a tool'
+        const entry = `Used ${toolName}`
+
+        return {
+          ...current,
+          entries: current.entries.includes(entry) ? current.entries : [...current.entries, entry],
+          currentLabel: 'Thinking…'
+        }
+      })
+    }
   }
 
   function finishRunActivity(runId: string, outcome: RunActivityOutcome): void {
@@ -458,8 +562,11 @@ export default function App(): React.JSX.Element {
         return current
       }
 
+      const entry = terminalActivityEntry(outcome)
       return {
         ...current,
+        entries: current.entries.includes(entry) ? current.entries : [...current.entries, entry],
+        currentLabel: entry,
         phase: 'done',
         outcome,
         endedAt: Date.now()
@@ -524,7 +631,9 @@ export default function App(): React.JSX.Element {
       setRunActivity({
         runId: submitted.run.run_id,
         conversationId,
-        entries: ['Starting run…'],
+        entries: ['Started'],
+        currentLabel: 'Starting…',
+        toolNames: [],
         phase: 'live',
         outcome: null,
         startedAt: Date.now(),
@@ -544,7 +653,7 @@ export default function App(): React.JSX.Element {
     }
 
     setIsCancellingRun(true)
-    appendRunActivity(activeRun.runId, 'Cancellation requested.')
+    setRunActivityStatus(activeRun.runId, 'Stopping…')
 
     try {
       await window.desktop.cancelRun(activeRun.runId)
@@ -565,7 +674,10 @@ export default function App(): React.JSX.Element {
 
     try {
       await window.desktop.decideToolApproval(approval.approval_id, decision)
-      appendRunActivity(approval.run_id, approvalActivityMessage(decision))
+      setRunActivityStatus(
+        approval.run_id,
+        decision === 'deny' ? 'Tool denied. Continuing…' : `Using ${approval.display_name}…`
+      )
       setPendingApproval(null)
     } catch {
       setErrorMessage('Tool approval decision could not be sent.')
@@ -577,7 +689,7 @@ export default function App(): React.JSX.Element {
   function applyTavilyStatus(status: TavilySettingsStatus): void {
     setTavilySettings(status)
     setTavilyActionError(null)
-    setTavilyRestartHint(true)
+    setRestartRequested(true)
     setTavilyApiKey('')
     setShowTavilyKeyInput(false)
     setIsReplacingTavilyKey(false)
@@ -589,7 +701,6 @@ export default function App(): React.JSX.Element {
     }
 
     setTavilyActionError(null)
-    setTavilyRestartHint(false)
 
     if (!enabled) {
       setIsTavilyBusy(true)
@@ -627,7 +738,6 @@ export default function App(): React.JSX.Element {
     }
 
     setTavilyActionError(null)
-    setTavilyRestartHint(false)
 
     if (!tavilyApiKey.trim()) {
       setTavilyActionError(TAVILY_API_KEY_REQUIRED)
@@ -653,7 +763,6 @@ export default function App(): React.JSX.Element {
     }
 
     setTavilyActionError(null)
-    setTavilyRestartHint(false)
     setTavilyApiKey('')
     setShowTavilyKeyInput(true)
     setIsReplacingTavilyKey(true)
@@ -670,7 +779,6 @@ export default function App(): React.JSX.Element {
 
     setIsTavilyBusy(true)
     setTavilyActionError(null)
-    setTavilyRestartHint(false)
 
     try {
       const status = await window.desktop.deleteTavily()
@@ -680,6 +788,79 @@ export default function App(): React.JSX.Element {
       setTavilyApiKey('')
     } finally {
       setIsTavilyBusy(false)
+    }
+  }
+
+  function applyModelStatus(status: ModelSettingsStatus): void {
+    setModelSettings(status)
+    setModelName(status.model ?? '')
+    setModelBaseUrl(status.base_url ?? '')
+    setModelApiKey('')
+    setModelActionError(null)
+    setRestartRequested(true)
+  }
+
+  async function handleSaveModelSettings(): Promise<void> {
+    if (isModelBusy) {
+      return
+    }
+    if (
+      !modelName.trim() ||
+      !modelBaseUrl.trim() ||
+      (!modelSettings?.api_key_saved && !modelApiKey.trim())
+    ) {
+      setModelActionError(MODEL_SETTINGS_REQUIRED)
+      return
+    }
+
+    setIsModelBusy(true)
+    setModelActionError(null)
+    try {
+      applyModelStatus(
+        await window.desktop.saveModelSettings({
+          model: modelName.trim(),
+          baseUrl: modelBaseUrl.trim(),
+          ...(modelApiKey.trim() ? { apiKey: modelApiKey.trim() } : {})
+        })
+      )
+    } catch {
+      setModelActionError(MODEL_SETTINGS_UPDATE_ERROR)
+      setModelApiKey('')
+    } finally {
+      setIsModelBusy(false)
+    }
+  }
+
+  async function handleRemoveModelSettings(): Promise<void> {
+    if (isModelBusy || modelSettings === null || !modelSettings.configured) {
+      return
+    }
+    if (!window.confirm(MODEL_DELETE_CONFIRM)) {
+      return
+    }
+
+    setIsModelBusy(true)
+    setModelActionError(null)
+    try {
+      applyModelStatus(await window.desktop.deleteModelSettings())
+    } catch {
+      setModelActionError(MODEL_SETTINGS_UPDATE_ERROR)
+    } finally {
+      setIsModelBusy(false)
+    }
+  }
+
+  async function handleRestartApp(): Promise<void> {
+    if (isRestarting) {
+      return
+    }
+
+    setIsRestarting(true)
+    try {
+      await window.desktop.restartApp()
+    } catch {
+      setIsRestarting(false)
+      setErrorMessage('asAgent could not restart automatically.')
     }
   }
 
@@ -1050,55 +1231,47 @@ export default function App(): React.JSX.Element {
                                 </button>
                               ) : (
                                 <div
-                                  className={`msg-bubble activity-shell${
+                                  className={`activity-details${
                                     activity.phase === 'live' ? ' is-live' : ''
                                   }`}
                                 >
-                                  <div className="activity-card">
-                                    {activity.phase === 'live' ? (
-                                      <div className="activity-card-header">
-                                        <span aria-hidden="true" className="activity-spinner" />
-                                        <span className="activity-card-title">Working…</span>
-                                        <span className="activity-card-meta">
-                                          {activity.entries.at(-1) ?? 'Starting run…'}
-                                        </span>
-                                      </div>
-                                    ) : (
-                                      <button
-                                        aria-expanded="true"
-                                        className="activity-card-header is-button"
-                                        onClick={() => setActivityExpanded(false)}
-                                        type="button"
-                                      >
-                                        <span className="activity-card-title">
-                                          {activitySummaryLabel(activity)}
-                                        </span>
-                                        <span aria-hidden="true" className="activity-chevron">
-                                          ▴
-                                        </span>
-                                      </button>
-                                    )}
+                                  {activity.phase === 'live' ? (
+                                    <div aria-live="polite" className="activity-live">
+                                      <span aria-hidden="true" className="activity-spinner" />
+                                      <span>{activity.currentLabel}</span>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      aria-expanded="true"
+                                      className="activity-card-header is-button"
+                                      onClick={() => setActivityExpanded(false)}
+                                      type="button"
+                                    >
+                                      <span className="activity-card-title">
+                                        {activitySummaryLabel(activity)}
+                                      </span>
+                                      <span aria-hidden="true" className="activity-chevron">
+                                        ▴
+                                      </span>
+                                    </button>
+                                  )}
+                                  {activity.phase === 'done' ? (
                                     <ul className="activity-list">
                                       {activity.entries.map((entry, index) => {
-                                        const isCurrent =
-                                          activity.phase === 'live' &&
-                                          index === activity.entries.length - 1
-
                                         return (
                                           <li
-                                            className={`activity-item${isCurrent ? ' is-current' : ''}`}
+                                            className="activity-item"
                                             key={`${activity.runId}-${index}`}
                                           >
-                                            <span
-                                              aria-hidden="true"
-                                              className="activity-item-dot"
-                                            />
+                                            <span aria-hidden="true" className="activity-item-dot">
+                                              ✓
+                                            </span>
                                             <span>{entry}</span>
                                           </li>
                                         )
                                       })}
                                     </ul>
-                                  </div>
+                                  ) : null}
                                 </div>
                               )}
                             </div>
@@ -1115,7 +1288,24 @@ export default function App(): React.JSX.Element {
                                   <div className="msg-bubble">
                                     {message.role === 'assistant' ? (
                                       <div className="markdown-content">
-                                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                                        <ReactMarkdown
+                                          components={{
+                                            a: ({ children, href }) => (
+                                              <a
+                                                href={href}
+                                                onClick={(event) => {
+                                                  event.preventDefault()
+                                                  openAssistantLink(href)
+                                                }}
+                                                title="Open in your default browser"
+                                              >
+                                                {children}
+                                              </a>
+                                            )
+                                          }}
+                                        >
+                                          {message.content}
+                                        </ReactMarkdown>
                                       </div>
                                     ) : (
                                       message.content
@@ -1443,11 +1633,104 @@ export default function App(): React.JSX.Element {
             </div>
 
             <div className="settings-panel">
-              <article className="settings-card">
-                <div className="settings-card-header">
+              <section className="settings-section">
+                <div className="settings-section-header">
                   <div>
-                    <div className="settings-card-title">Tavily Web Search</div>
-                    <p className="settings-card-copy">
+                    <div className="settings-section-title">Model provider</div>
+                    <p className="settings-section-copy">
+                      Configure one OpenAI-compatible provider for asAgent. The API key stays in
+                      your system credential store and is never shown here.
+                    </p>
+                  </div>
+                </div>
+
+                {isModelLoading ? (
+                  <p className="settings-section-status">Loading model settings…</p>
+                ) : null}
+                {modelLoadError !== null ? (
+                  <p className="settings-section-error">{modelLoadError}</p>
+                ) : null}
+                {!isModelLoading && modelLoadError === null ? (
+                  <div className="settings-key-form">
+                    <label className="settings-field-label" htmlFor="model-name">
+                      Model
+                    </label>
+                    <input
+                      className="settings-text-input"
+                      disabled={isModelBusy}
+                      id="model-name"
+                      onChange={(event) => setModelName(event.target.value)}
+                      placeholder="deepseek-v4-flash"
+                      spellCheck={false}
+                      value={modelName}
+                    />
+                    <label className="settings-field-label" htmlFor="model-base-url">
+                      OpenAI-compatible base URL
+                    </label>
+                    <input
+                      className="settings-text-input"
+                      disabled={isModelBusy}
+                      id="model-base-url"
+                      onChange={(event) => setModelBaseUrl(event.target.value)}
+                      placeholder="https://api.deepseek.com/"
+                      spellCheck={false}
+                      value={modelBaseUrl}
+                    />
+                    <label className="settings-field-label" htmlFor="model-api-key">
+                      {modelSettings?.api_key_saved ? 'Replace API key' : 'API key'}
+                    </label>
+                    <input
+                      autoComplete="off"
+                      className="settings-text-input"
+                      disabled={isModelBusy}
+                      id="model-api-key"
+                      onChange={(event) => setModelApiKey(event.target.value)}
+                      placeholder={
+                        modelSettings?.api_key_saved ? 'Enter a new API key' : 'Enter API key'
+                      }
+                      spellCheck={false}
+                      type="password"
+                      value={modelApiKey}
+                    />
+                    <div className="settings-card-actions">
+                      <button
+                        className="settings-button settings-button-primary"
+                        disabled={isModelBusy}
+                        onClick={() => {
+                          void handleSaveModelSettings()
+                        }}
+                        type="button"
+                      >
+                        Save model settings
+                      </button>
+                      {modelSettings?.configured ? (
+                        <button
+                          className="settings-button settings-button-danger"
+                          disabled={isModelBusy}
+                          onClick={() => {
+                            void handleRemoveModelSettings()
+                          }}
+                          type="button"
+                        >
+                          Remove model settings
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+                {modelActionError !== null ? (
+                  <p className="settings-section-error">{modelActionError}</p>
+                ) : null}
+                <p className="settings-section-placeholder">
+                  Anthropic and Gemini providers are not available yet.
+                </p>
+              </section>
+
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div>
+                    <div className="settings-section-title">Tavily Web Search</div>
+                    <p className="settings-section-copy">
                       Tavily lets asAgent search the web through a configured MCP server. Your API
                       key is stored in the macOS Keychain and is never shown in this window.
                     </p>
@@ -1466,16 +1749,16 @@ export default function App(): React.JSX.Element {
                 </div>
 
                 {isTavilyLoading ? (
-                  <p className="settings-card-status">Loading Tavily settings…</p>
+                  <p className="settings-section-status">Loading Tavily settings…</p>
                 ) : null}
 
                 {tavilyLoadError !== null ? (
-                  <p className="settings-card-error">{tavilyLoadError}</p>
+                  <p className="settings-section-error">{tavilyLoadError}</p>
                 ) : null}
 
                 {!isTavilyLoading && tavilyLoadError === null && tavilySettings !== null ? (
                   <>
-                    <p className="settings-card-status">
+                    <p className="settings-section-status">
                       {tavilySettings.enabled
                         ? 'Tavily web search is enabled.'
                         : tavilySettings.api_key_saved
@@ -1555,13 +1838,9 @@ export default function App(): React.JSX.Element {
                 ) : null}
 
                 {tavilyActionError !== null ? (
-                  <p className="settings-card-error">{tavilyActionError}</p>
+                  <p className="settings-section-error">{tavilyActionError}</p>
                 ) : null}
-
-                {tavilyRestartHint ? (
-                  <p className="settings-card-hint">{TAVILY_RESTART_HINT}</p>
-                ) : null}
-              </article>
+              </section>
             </div>
           </section>
 
@@ -1574,6 +1853,39 @@ export default function App(): React.JSX.Element {
           </aside>
         </div>
       </div>
+      {restartRequested ? (
+        <div aria-modal="true" className="restart-modal-backdrop" role="dialog">
+          <section aria-labelledby="restart-modal-title" className="restart-modal">
+            <div className="restart-modal-eyebrow">Settings saved</div>
+            <h2 id="restart-modal-title">Restart asAgent now?</h2>
+            <p>
+              Your changes are saved. Restarting applies the updated model and integrations to a new
+              Sidecar.
+            </p>
+            <div className="restart-modal-actions">
+              <button
+                className="settings-button settings-button-secondary"
+                disabled={isRestarting}
+                onClick={() => setRestartRequested(false)}
+                type="button"
+              >
+                Later
+              </button>
+              <button
+                autoFocus
+                className="settings-button settings-button-primary"
+                disabled={isRestarting}
+                onClick={() => {
+                  void handleRestartApp()
+                }}
+                type="button"
+              >
+                {isRestarting ? 'Restarting…' : 'Restart now'}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   )
 }

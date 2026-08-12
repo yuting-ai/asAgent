@@ -3403,3 +3403,28 @@
 
 - Tavily 最小 Web Search 已完成。后续 MCP 工作按真实需求选择，例如 `tools/list` 分页/`listChanged`、
   Streamable HTTP，或其他用户显式配置的 Server；不因已有 Tavily 闭环自动扩展更多搜索工具。
+
+## 2026-08-12 桌面外部链接、紧凑活动视图与模型设置
+
+### 完成
+
+- Assistant Markdown 中的安全 `http`/`https` 外部链接可经来源校验的 Main IPC 在系统默认浏览器打开；Renderer
+  不获得 shell、任意 URL 导航或 Token。
+- 当前 Run 的活动信息改为紧凑的进行中状态和可展开完成摘要，隐藏原始内部事件名称；它仍是本次 Renderer 会话的
+  临时视图。RunEvent 已按 sequence 持久化，重启后的历史摘要将在后续独立任务中从事件回放重建，而不重复存储摘要。
+- Preferences 现以分隔线组织 Model provider 与 Tavily Web Search。用户可保存一个 OpenAI-compatible model、
+  base URL 和 API key；配置与 key 分别进入 `providers.toml` 和系统 CredentialStore，重启后自动使用该模型。
+  Anthropic/Gemini 仅保留英文占位，尚未实现。
+- 保存模型或 Tavily 设置后，Preferences 显示统一的 `Restart now` / `Later` 提示；前者由 Electron Main
+  在发布版自动 relaunch 并安全停止自己持有的 Sidecar；开发版仅重启 Sidecar 后刷新 Renderer，避免空白窗口。
+  用户不必手动退出并重新打开。
+
+### 验证
+
+- Python 定向设置测试通过：13 passed。
+- `scripts/check.sh` 通过：355 passed；Ruff、strict mypy（163 个 source files）与锁文件检查均通过。
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm test`（24 passed）和 `npm run build` 均通过。
+
+### 下一步
+
+- 在单独的桌面体验任务中，从已持久化的 RunEvent 回放重建历史 Run 的折叠活动摘要；不新增摘要表，也不保存模型或工具正文。

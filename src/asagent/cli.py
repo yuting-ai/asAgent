@@ -18,11 +18,18 @@ from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
 from asagent.api.bootstrap import read_local_api_token
 from asagent.api.server import READY_PREFIX, LocalApiServer
+from asagent.bootstrap.credential_secret_provider import CredentialStoreSecretProvider
 from asagent.bootstrap.environment_secret_provider import (
     EnvironmentSecretProvider,
 )
 from asagent.bootstrap.keychain_credential_store import (
     MacOSKeychainCredentialStore,
+)
+from asagent.bootstrap.model_settings import (
+    MODEL_CONNECTION_ID,
+    MODEL_PROFILE_NAME,
+    MODEL_SECRET_ID,
+    ModelSettings,
 )
 from asagent.bootstrap.provider_factory import create_model_provider
 from asagent.bootstrap.tavily_settings import TavilySettings
@@ -43,6 +50,7 @@ from asagent.core.repositories import ConversationRepository
 from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
 from asagent.core.tool_call_recorder import ToolCallRecorder
+from asagent.models.config import ProviderProfiles
 from asagent.models.contracts import (
     ModelEvent,
     ModelMessage,
@@ -54,6 +62,7 @@ from asagent.models.contracts import (
 from asagent.models.errors import ProviderConfigurationError
 from asagent.models.profile_loader import load_provider_profiles
 from asagent.models.provider import ModelProvider
+from asagent.models.secrets import SecretProvider
 from asagent.models.tool_names import openai_compatible_tool_name
 from asagent.paths import AppPaths
 from asagent.storage.event_publisher import RepositoryEventPublisher
@@ -572,6 +581,8 @@ async def _run_main(args: argparse.Namespace) -> None:
             "--profile and --secret-env must be provided together",
         )
 
+    secrets: SecretProvider
+
     if args.command == "serve":
         if not args.bootstrap_stdin:
             raise ValueError("serve requires --bootstrap-stdin")
@@ -590,6 +601,12 @@ async def _run_main(args: argparse.Namespace) -> None:
         finisher = SqliteRunFinisher(database_path)
         credential_store = MacOSKeychainCredentialStore()
         tavily_settings = TavilySettings(
+            config_dir=paths.config_dir,
+            connections=connections,
+            credential_store=credential_store,
+            clock=now,
+        )
+        model_settings = ModelSettings(
             config_dir=paths.config_dir,
             connections=connections,
             credential_store=credential_store,
@@ -627,7 +644,8 @@ async def _run_main(args: argparse.Namespace) -> None:
                 else _BUILTIN_TOOL_PERMISSIONS
             )
 
-            if args.profile is None:
+            configured_profile = model_settings.get_active_profile()
+            if args.profile is None and configured_profile is None:
                 runtime = build_persistent_development_runtime(
                     conversations=conversations,
                     runs=runs,
@@ -639,22 +657,34 @@ async def _run_main(args: argparse.Namespace) -> None:
                 )
                 model_name = "development-tools"
             else:
-                profiles = load_provider_profiles(paths.config_dir)
-                try:
-                    profile = profiles.providers[args.profile]
-                except KeyError as error:
-                    raise ProviderConfigurationError(
-                        "requested provider profile is unavailable",
-                    ) from error
-
-                secrets = EnvironmentSecretProvider(
-                    environment=dict(os.environ),
-                    bindings={profile.secret_id: args.secret_env},
-                )
+                if args.profile is None:
+                    profile = configured_profile
+                    assert profile is not None
+                    profiles = ProviderProfiles(
+                        providers={MODEL_PROFILE_NAME: profile},
+                    )
+                    profile_name = MODEL_PROFILE_NAME
+                    secrets = CredentialStoreSecretProvider(
+                        credential_store=credential_store,
+                        bindings={MODEL_SECRET_ID: MODEL_CONNECTION_ID},
+                    )
+                else:
+                    profiles = load_provider_profiles(paths.config_dir)
+                    try:
+                        profile = profiles.providers[args.profile]
+                    except KeyError as error:
+                        raise ProviderConfigurationError(
+                            "requested provider profile is unavailable",
+                        ) from error
+                    profile_name = args.profile
+                    secrets = EnvironmentSecretProvider(
+                        environment=dict(os.environ),
+                        bindings={profile.secret_id: args.secret_env},
+                    )
                 http_client = httpx.AsyncClient()
                 provider = create_model_provider(
                     profiles=profiles,
-                    profile_name=args.profile,
+                    profile_name=profile_name,
                     secrets=secrets,
                     http_client=http_client,
                 )
@@ -694,6 +724,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     cancel_run=dispatcher.cancel,
                     tool_approvals=tool_approvals,
                     tavily_settings=tavily_settings,
+                    model_settings=model_settings,
                 ),
                 host=args.host,
                 port=args.port,

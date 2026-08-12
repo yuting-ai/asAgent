@@ -571,6 +571,15 @@ Electron 的现有 Preferences 页面已通过专用 Main IPC 接入上述 Tavil
 只调用 disable，Replace 再次要求临时输入，Remove 在英文确认后调用完全删除。所有设置写操作完成后只提示
 `Restart asAgent to apply this change.`，不会在活跃 Sidecar 内热加载或扩大 Renderer 权限。
 
+桌面还可配置一个固定名称为 `desktop` 的 OpenAI-compatible Provider Profile。`providers.toml` 仅保存
+adapter、model、base URL、secret ID 和 timeout；对应 API key 只以 `connection-desktop-model` 存在系统
+CredentialStore。`ModelSettings` 经 Bearer Local API 和固定 Main/Preload IPC 暴露状态、保存与删除，响应只返回
+是否已配置、是否已有 key、model 和 base URL。默认桌面 Sidecar 启动时，若这份 Profile 与 key 都存在，则以
+`CredentialStoreSecretProvider` 创建真实 Provider；否则保持离线 Runtime。设置修改必须重启 Sidecar 才生效，
+Renderer 不读取或保存 API key。保存 Tavily 或模型设置后，Renderer 可通过受来源校验的固定 Main IPC 请求
+应用更新运行时：开发模式只重启自身持有的 Sidecar 后刷新现有 Renderer，避免重启 `electron-vite` 管理的
+Electron 子进程导致开发服务器丢失；打包版才执行完整 Electron relaunch。两种路径都不要求用户手动退出再打开。
+
 MCP 的 `tools/call` 成功结果可以省略可选的 `isError` 字段；`McpClient` 将其解释为 `False`。若 Server
 显式给出非布尔值，仍按协议错误拒绝。这样兼容 Tavily 等合法的成功响应形式，同时不把损坏的错误标记静默
 视为成功。

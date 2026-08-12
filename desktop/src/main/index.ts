@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, type WebContents } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
@@ -9,6 +9,7 @@ import {
   type SubmittedMessage,
   type ToolApproval
 } from './backend_launcher'
+import { parseExternalWebUrl } from './external_url'
 
 let backendLauncher: BackendLauncher | undefined
 let isQuitting = false
@@ -104,6 +105,39 @@ function parseOptionalTavilyApiKey(value: unknown): string | undefined {
   return trimmed
 }
 
+function parseModelSettingsInput(value: unknown): {
+  model: string
+  baseUrl: string
+  apiKey?: string
+} {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('Model settings are invalid.')
+  }
+
+  const input = value as Record<string, unknown>
+  const model = input['model']
+  const baseUrl = input['baseUrl']
+  const apiKey = input['apiKey']
+
+  if (
+    typeof model !== 'string' ||
+    !model.trim() ||
+    typeof baseUrl !== 'string' ||
+    !baseUrl.trim()
+  ) {
+    throw new Error('Model settings are invalid.')
+  }
+  if (apiKey !== undefined && (typeof apiKey !== 'string' || !apiKey.trim())) {
+    throw new Error('Model settings are invalid.')
+  }
+
+  return {
+    model: model.trim(),
+    baseUrl: baseUrl.trim(),
+    ...(apiKey === undefined ? {} : { apiKey: apiKey.trim() })
+  }
+}
+
 function createDevelopmentBackendLauncher(): BackendLauncher {
   const projectRoot = join(app.getAppPath(), '..')
   const providerProfile = process.env['ASAGENT_DESKTOP_PROFILE']
@@ -131,6 +165,17 @@ function createDevelopmentBackendLauncher(): BackendLauncher {
   })
 }
 
+async function refreshDataProcessingMode(): Promise<void> {
+  if (process.env['ASAGENT_DESKTOP_PROFILE'] !== undefined) {
+    dataProcessingMode = 'external'
+    return
+  }
+
+  const modelSettings = await getReadyBackendLauncher().getModelSettings()
+  dataProcessingMode =
+    modelSettings.configured && modelSettings.api_key_saved ? 'external' : 'local'
+}
+
 function isTerminalRunEvent(eventType: string): boolean {
   return ['run.completed', 'run.failed', 'run.cancelled', 'run.limit_reached'].includes(eventType)
 }
@@ -139,6 +184,29 @@ function stopRunWatcher(runId: string): void {
   const stop = runWatchers.get(runId)
   runWatchers.delete(runId)
   stop?.()
+}
+
+async function restartSettingsRuntime(sender: WebContents): Promise<void> {
+  if (!is.dev) {
+    app.relaunch()
+    app.quit()
+    return
+  }
+
+  for (const runId of runWatchers.keys()) {
+    stopRunWatcher(runId)
+  }
+
+  const launcher = getReadyBackendLauncher()
+  await launcher.stop()
+  await launcher.start()
+  await refreshDataProcessingMode()
+
+  setTimeout(() => {
+    if (!sender.isDestroyed()) {
+      sender.reload()
+    }
+  }, 0)
 }
 
 function watchRun(sender: WebContents, conversationId: string, submitted: SubmittedMessage): void {
@@ -212,6 +280,7 @@ app.whenReady().then(async () => {
 
   try {
     await backendLauncher.start()
+    await refreshDataProcessingMode()
   } catch (error) {
     dialog.showErrorBox(
       'asAgent backend unavailable',
@@ -235,6 +304,16 @@ app.whenReady().then(async () => {
     }
   })
 
+  ipcMain.handle('desktop:open-external-link', (event, url: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return shell.openExternal(parseExternalWebUrl(url))
+  })
+
   ipcMain.handle('desktop:get-backend-status', (event) => {
     const frame = event.senderFrame
     if (frame === null) {
@@ -242,6 +321,16 @@ app.whenReady().then(async () => {
     }
     assertTrustedRenderer(frame.url)
     return { status: backendLauncher?.isReady ? 'ready' : 'unavailable' }
+  })
+
+  ipcMain.handle('desktop:restart-app', async (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    await restartSettingsRuntime(event.sender)
   })
 
   ipcMain.handle('desktop:list-conversations', (event) => {
@@ -377,6 +466,36 @@ app.whenReady().then(async () => {
 
     assertTrustedRenderer(frame.url)
     return getReadyBackendLauncher().deleteTavily()
+  })
+
+  ipcMain.handle('desktop:get-model-settings', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().getModelSettings()
+  })
+
+  ipcMain.handle('desktop:save-model-settings', (event, input: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().saveModelSettings(parseModelSettingsInput(input))
+  })
+
+  ipcMain.handle('desktop:delete-model-settings', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().deleteModelSettings()
   })
 
   createWindow()

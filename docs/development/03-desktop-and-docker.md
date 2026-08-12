@@ -132,9 +132,11 @@ uv run asagent serve ...
 
 阶段 7 现支持可选的真实 Provider 开发验收。默认 `npm run dev` 仍只启动离线 `development-tools` Runtime；`npm run dev:deepseek` 仅向 Electron Main 提供非敏感的 Profile 名和 Secret 环境变量名。Main 将 `.env` 文件路径、`--profile` 与 `--secret-env` 交给自身启动的 Python Sidecar；Sidecar 使用既有 Profile Loader、EnvironmentSecretProvider、Provider Factory 和生命周期内的 HTTP Client 创建真实 Runtime。API Key 仅由启动时加载 `.env` 的 Python 进程读取，不进入 Renderer、Preload、IPC、URL、ready 记录或日志。真实配置或调用失败时不得降级为离线 Provider；正式发行版仍应以系统 Secret Store 取代开发 `.env`。
 
-Electron Main 还会向 Renderer 暴露一个无敏感信息的处理模式：`local` 或 `external`。它只反映本次 Sidecar 的启动配置，不包含 Provider 名、端口、Token 或 API Key；顶栏与 Privacy 页面据此准确说明是否可能将请求内容发送到外部模型服务。默认离线模式明确不外发对话内容，真实 Provider 模式明确请求所需的对话内容和工具结果可能发送至选定服务商。
+Electron Main 还会向 Renderer 暴露一个无敏感信息的处理模式：`local` 或 `external`。它只反映本次 Sidecar 的启动配置或已保存的桌面模型 Profile 是否可用，不包含 Provider 名、端口、Token 或 API Key；顶栏与 Privacy 页面据此准确说明是否可能将请求内容发送到外部模型服务。默认离线模式明确不外发对话内容，真实 Provider 模式明确请求所需的对话内容和工具结果可能发送至选定服务商。
 
-桌面 Chat 仅对 AssistantMessage 使用安全 Markdown 渲染，以显示标题、列表、引用和代码块；UserMessage 保持原始文本。Renderer 使用不启用原始 HTML 的解析配置，因此模型文本不会直接成为 DOM HTML。消息数据库仍保存原始 Markdown 文本，显示规则不改变 API 或持久化契约。
+桌面 Chat 仅对 AssistantMessage 使用安全 Markdown 渲染，以显示标题、列表、引用、代码块和普通外部链接；UserMessage 保持原始文本。Renderer 使用不启用原始 HTML 的解析配置，因此模型文本不会直接成为 DOM HTML。点击链接会经过窄 Main IPC：只允许无凭据的 `http`/`https` URL，并由系统默认浏览器打开；Renderer 不获得 Electron shell、任意 IPC 或页面内导航能力。消息数据库仍保存原始 Markdown 文本，显示规则不改变 API 或持久化契约。
+
+需要重新组合 Sidecar 的设置（当前为模型 Profile 与 Tavily）在成功保存后显示统一的 `Restart asAgent now to apply your changes?` 提示。用户选择 `Restart now` 时，Renderer 只能调用固定 IPC；发布版 Main 校验来源、登记 Electron relaunch 并走正常退出流程关闭自身 Backend，随后启动新实例。`electron-vite dev` 模式则保留 Electron 进程，只重启 Main 持有的 Sidecar 并刷新 Renderer，避免开发编排器随 Electron 子进程退出而停止 Vite 服务。选择 `Later` 不回滚已保存的配置，但当前 Runtime 不会热替换。
 
 发布环境命令为：
 

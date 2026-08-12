@@ -655,4 +655,74 @@ describe('BackendLauncher', () => {
     const lastCall = fetchBackend.mock.calls.at(-1)
     expect(lastCall?.[1]).not.toHaveProperty('body')
   })
+
+  it('reads and saves model settings without exposing its API key', async () => {
+    const child = createChild()
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+    const fetchBackend = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            configured: true,
+            api_key_saved: true,
+            model: 'deepseek-chat',
+            base_url: 'https://api.deepseek.com/v1'
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            configured: true,
+            api_key_saved: true,
+            model: 'deepseek-chat',
+            base_url: 'https://api.deepseek.com/v1'
+          }),
+          { status: 200 }
+        )
+      )
+
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      spawnBackend,
+      fetchBackend
+    })
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+    await starting
+
+    await expect(launcher.getModelSettings()).resolves.toMatchObject({
+      configured: true,
+      api_key_saved: true,
+      model: 'deepseek-chat'
+    })
+    await expect(
+      launcher.saveModelSettings({
+        model: 'deepseek-chat',
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'secret-model-key'
+      })
+    ).resolves.toMatchObject({ configured: true, api_key_saved: true })
+
+    expect(fetchBackend).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:43123/api/v1/settings/model',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          base_url: 'https://api.deepseek.com/v1',
+          api_key: 'secret-model-key'
+        }),
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /)
+        })
+      })
+    )
+  })
 })

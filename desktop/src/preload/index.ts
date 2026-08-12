@@ -56,14 +56,30 @@ type TavilySettingsStatus = {
   api_key_saved: boolean
 }
 
+type ModelSettingsStatus = {
+  configured: boolean
+  api_key_saved: boolean
+  model: string | null
+  base_url: string | null
+}
+
+type ModelSettingsInput = {
+  model: string
+  baseUrl: string
+  apiKey?: string
+}
+
 const desktopBridge = {
   getAppInfo: (): Promise<{
     appName: string
     version: string
     dataProcessingMode: 'local' | 'external'
   }> => ipcRenderer.invoke('desktop:get-app-info'),
+  openExternalLink: (url: string): Promise<void> =>
+    ipcRenderer.invoke('desktop:open-external-link', url),
   getBackendStatus: (): Promise<{ status: 'ready' | 'unavailable' }> =>
     ipcRenderer.invoke('desktop:get-backend-status'),
+  restartApp: (): Promise<void> => ipcRenderer.invoke('desktop:restart-app'),
   listConversations: (): Promise<ConversationSummary[]> =>
     ipcRenderer.invoke('desktop:list-conversations'),
   listConversationMessages: (conversationId: string): Promise<ConversationMessage[]> =>
@@ -83,6 +99,12 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:enable-tavily', apiKey),
   disableTavily: (): Promise<TavilySettingsStatus> => ipcRenderer.invoke('desktop:disable-tavily'),
   deleteTavily: (): Promise<TavilySettingsStatus> => ipcRenderer.invoke('desktop:delete-tavily'),
+  getModelSettings: (): Promise<ModelSettingsStatus> =>
+    ipcRenderer.invoke('desktop:get-model-settings'),
+  saveModelSettings: (input: ModelSettingsInput): Promise<ModelSettingsStatus> =>
+    ipcRenderer.invoke('desktop:save-model-settings', input),
+  deleteModelSettings: (): Promise<ModelSettingsStatus> =>
+    ipcRenderer.invoke('desktop:delete-model-settings'),
   onRunEvent: (callback: (update: RunUpdate) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, update: RunUpdate): void => {
       callback(update)

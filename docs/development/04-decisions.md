@@ -605,6 +605,25 @@
 - 影响：支持常见文本 Markdown 和代码块显示，但不在本任务引入 HTML、脚本、富文本编辑、代码高亮或链接预览。
 - 替代方案：全局 Prompt 禁止 Markdown、对所有用户/模型文本使用 `dangerouslySetInnerHTML`、或在后端将 Markdown 转为 HTML；当前均不采用。
 
+### DEC-062 实施补充：安全外部 Markdown 链接
+
+- 日期：2026-08-12
+- 状态：已确认并完成
+- 决策：Assistant Markdown 的链接仅允许以系统默认浏览器打开无用户名、无密码的 `http` 或 `https` URL。Renderer 拦截默认导航，经窄 Preload/Main IPC 请求；Main 校验 Renderer 来源和 URL 后调用 Electron shell。窗口内的新窗口与非受信任导航继续拒绝。
+- 原因：模型回答中的来源链接应可访问，但 Renderer 不应拥有 shell、任意 IPC 或页面导航能力。
+- 影响：链接不预览、不进入应用页面，也不改变模型文本、API 或 SQLite；不安全协议、相对 URL 和含凭据 URL 都拒绝。
+- 替代方案：禁用全部链接、让 Renderer 直接使用 Electron shell、或允许任意 URL 在应用内打开；当前均不采用。
+
+### DEC-076：桌面模型配置使用 Profile 加系统 CredentialStore
+
+- 日期：2026-08-12
+- 状态：已确认并完成最小 macOS 实现
+- 背景：真实 Provider 不能要求用户编辑开发用 `.env`，但 model、base URL 与 API key 不能混入 SQLite、Renderer 或普通配置文件。
+- 决策：Preferences 只支持一个名为 `desktop` 的 OpenAI-compatible Profile。非敏感字段写入 `providers.toml`，API key 以固定 `connection-desktop-model` 写入系统 CredentialStore，SQLite 只保留非敏感 Connection 元数据。Local API 与 Main/Preload 提供固定状态、保存和删除操作；API key 从不回读给 Renderer。下次 Sidecar 启动仅在 Profile 与 key 都存在时创建真实 Provider，否则使用离线 Runtime。
+- 原因：复用现有 ProviderConfig、Connection 与 CredentialStore，不引入厂商专属设置、额外 Secret 文件或通用 Renderer HTTP。
+- 影响：DeepSeek、OpenAI 和其他 OpenAI-compatible 服务可由 model/base URL 配置；Anthropic、Gemini 等需要不同 Adapter 的服务在 UI 中明确占位，不能伪装为兼容。配置变更需要重新组合 Sidecar；保存后由统一的英文提示提供 `Restart now`（安全 Electron relaunch）或 `Later`，不要求用户手动退出再打开。
+- 替代方案：保存 API key 至 `.env`、SQLite 或 localStorage；为每个厂商建设独立 Settings；或让 Renderer 直接调用 Local API；当前均不采用。
+
 ### DEC-062 实施补充：固定写入操作沿用 Main 私有 Token
 
 - 日期：2026-08-11

@@ -14,6 +14,7 @@ from alembic import command
 from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
+from asagent.bootstrap.model_settings import MODEL_CONNECTION_ID, ModelSettings
 from asagent.bootstrap.tavily_settings import (
     TAVILY_CONNECTION_ID,
     TAVILY_SERVER_NAME,
@@ -133,6 +134,12 @@ async def tavily_api_context(tmp_path: Path) -> AsyncIterator[TavilyApiContext]:
         credential_store=credential_store,
         clock=lambda: _FIXED_NOW,
     )
+    model_settings = ModelSettings(
+        config_dir=config_dir,
+        connections=connections,
+        credential_store=credential_store,
+        clock=lambda: _FIXED_NOW,
+    )
     conversations = InMemoryConversationRepository()
     app = create_app(
         access_token=_TOKEN,
@@ -148,6 +155,7 @@ async def tavily_api_context(tmp_path: Path) -> AsyncIterator[TavilyApiContext]:
         dispatch_submitted_run=_discard_submission,
         cancel_run=_cancel_nothing,
         tavily_settings=tavily_settings,
+        model_settings=model_settings,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -175,6 +183,79 @@ def _assert_response_never_leaks_api_key(
     payload = response.json()
     assert set(payload) <= {"enabled", "api_key_saved", "detail"}
     assert "api_key" not in payload
+
+
+@pytest.mark.asyncio
+async def test_model_settings_save_status_and_delete_keep_api_key_private(
+    tavily_api_context: TavilyApiContext,
+) -> None:
+    client = tavily_api_context.client
+    api_key = "model-test-key-not-real"
+
+    initial = await client.get("/api/v1/settings/model")
+    assert initial.json() == {
+        "configured": False,
+        "api_key_saved": False,
+        "model": None,
+        "base_url": None,
+    }
+
+    saved = await client.put(
+        "/api/v1/settings/model",
+        json={
+            "model": "deepseek-chat",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": api_key,
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json() == {
+        "configured": True,
+        "api_key_saved": True,
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com/v1",
+    }
+    assert api_key not in saved.text
+    assert (
+        tavily_api_context.credential_store.get_credential(MODEL_CONNECTION_ID)
+        == api_key
+    )
+    assert api_key not in (tavily_api_context.config_dir / "providers.toml").read_text(
+        encoding="utf-8",
+    )
+
+    deleted = await client.delete("/api/v1/settings/model")
+    assert deleted.status_code == 200
+    assert deleted.json() == {
+        "configured": False,
+        "api_key_saved": False,
+        "model": None,
+        "base_url": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_model_settings_reject_missing_or_blank_key_before_one_is_saved(
+    tavily_api_context: TavilyApiContext,
+) -> None:
+    missing_key = await tavily_api_context.client.put(
+        "/api/v1/settings/model",
+        json={
+            "model": "deepseek-chat",
+            "base_url": "https://api.deepseek.com/v1",
+        },
+    )
+    blank_key = await tavily_api_context.client.put(
+        "/api/v1/settings/model",
+        json={
+            "model": "deepseek-chat",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": "   ",
+        },
+    )
+
+    assert missing_key.status_code == 409
+    assert blank_key.status_code == 422
 
 
 @pytest.mark.asyncio

@@ -77,6 +77,19 @@ export type TavilySettingsStatus = {
   api_key_saved: boolean
 }
 
+export type ModelSettingsStatus = {
+  configured: boolean
+  api_key_saved: boolean
+  model: string | null
+  base_url: string | null
+}
+
+export type ModelSettingsInput = {
+  model: string
+  baseUrl: string
+  apiKey?: string
+}
+
 type BackendLauncherOptions = {
   projectRoot: string
   appHome: string
@@ -286,6 +299,22 @@ export class BackendLauncher {
 
   async deleteTavily(): Promise<TavilySettingsStatus> {
     return this.requestJson('/api/v1/settings/tavily', 'DELETE')
+  }
+
+  async getModelSettings(): Promise<ModelSettingsStatus> {
+    return this.requestJson('/api/v1/settings/model', 'GET')
+  }
+
+  async saveModelSettings(input: ModelSettingsInput): Promise<ModelSettingsStatus> {
+    return this.requestJson('/api/v1/settings/model', 'PUT', {
+      model: input.model,
+      base_url: input.baseUrl,
+      ...(input.apiKey === undefined ? {} : { api_key: input.apiKey })
+    })
+  }
+
+  async deleteModelSettings(): Promise<ModelSettingsStatus> {
+    return this.requestJson('/api/v1/settings/model', 'DELETE')
   }
 
   watchRunEvents(

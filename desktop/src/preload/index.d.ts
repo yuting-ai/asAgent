@@ -60,9 +60,24 @@ interface TavilySettingsStatus {
   api_key_saved: boolean
 }
 
+interface ModelSettingsStatus {
+  configured: boolean
+  api_key_saved: boolean
+  model: string | null
+  base_url: string | null
+}
+
+interface ModelSettingsInput {
+  model: string
+  baseUrl: string
+  apiKey?: string
+}
+
 interface DesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>
+  openExternalLink(url: string): Promise<void>
   getBackendStatus(): Promise<{ status: 'ready' | 'unavailable' }>
+  restartApp(): Promise<void>
   listConversations(): Promise<ConversationSummary[]>
   listConversationMessages(conversationId: string): Promise<ConversationMessage[]>
   createConversation(): Promise<ConversationSummary>
@@ -76,6 +91,9 @@ interface DesktopBridge {
   enableTavily(apiKey?: string): Promise<TavilySettingsStatus>
   disableTavily(): Promise<TavilySettingsStatus>
   deleteTavily(): Promise<TavilySettingsStatus>
+  getModelSettings(): Promise<ModelSettingsStatus>
+  saveModelSettings(input: ModelSettingsInput): Promise<ModelSettingsStatus>
+  deleteModelSettings(): Promise<ModelSettingsStatus>
   onRunEvent(callback: (update: RunUpdate) => void): () => void
   onRunStreamError(callback: (error: RunStreamError) => void): () => void
   onToolApprovalRequested(callback: (approval: ToolApproval) => void): () => void

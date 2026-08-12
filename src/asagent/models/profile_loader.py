@@ -1,3 +1,4 @@
+import json
 import tomllib
 from pathlib import Path
 
@@ -30,3 +31,28 @@ def load_provider_profiles(config_dir: Path) -> ProviderProfiles:
         raise ProviderConfigurationError(
             "provider profile configuration is invalid",
         ) from error
+
+
+def save_provider_profiles(config_dir: Path, profiles: ProviderProfiles) -> None:
+    """Atomically write validated, non-sensitive provider profiles."""
+
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "providers.toml"
+    temporary_path = config_path.with_suffix(".toml.tmp")
+    lines: list[str] = []
+
+    for name, profile in sorted(profiles.providers.items()):
+        lines.extend(
+            (
+                f"[providers.{json.dumps(name)}]",
+                f'adapter = "{profile.adapter.value}"',
+                f"model = {json.dumps(profile.model)}",
+                f"base_url = {json.dumps(str(profile.base_url))}",
+                f"secret_id = {json.dumps(profile.secret_id)}",
+                f"timeout_seconds = {profile.timeout_seconds}",
+                "",
+            ),
+        )
+
+    temporary_path.write_text("\n".join(lines), encoding="utf-8")
+    temporary_path.replace(config_path)

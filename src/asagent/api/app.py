@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
 
 from asagent.agent.run_submission import (
     ConversationAccessDeniedError,
@@ -16,6 +16,11 @@ from asagent.agent.run_submission import (
     UnknownConversationError,
 )
 from asagent.api.auth import BearerTokenAuthenticator, LocalApiToken
+from asagent.bootstrap.model_settings import (
+    ModelApiKeyMissingError,
+    ModelSettings,
+    ModelSettingsStatus,
+)
 from asagent.bootstrap.tavily_settings import (
     TavilyApiKeyMissingError,
     TavilySettings,
@@ -174,6 +179,44 @@ class TavilySettingsResponse(BaseModel):
         )
 
 
+class ModelSettingsResponse(BaseModel):
+    configured: bool
+    api_key_saved: bool
+    model: str | None
+    base_url: str | None
+
+    @classmethod
+    def from_status(cls, status: ModelSettingsStatus) -> "ModelSettingsResponse":
+        return cls(
+            configured=status.configured,
+            api_key_saved=status.api_key_saved,
+            model=status.model,
+            base_url=status.base_url,
+        )
+
+
+class UpdateModelSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(min_length=1)
+    base_url: AnyHttpUrl
+    api_key: str | None = None
+
+    @field_validator("model")
+    @classmethod
+    def value_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value must not be blank")
+        return value
+
+    @field_validator("api_key")
+    @classmethod
+    def api_key_must_not_be_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("api_key must not be blank")
+        return value
+
+
 class UpdateTavilySettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -197,6 +240,7 @@ def create_app(
     cancel_run: Callable[[RunId], bool],
     tool_approvals: PendingToolApprovalPolicy | None = None,
     tavily_settings: TavilySettings | None = None,
+    model_settings: ModelSettings | None = None,
     conversation_id_factory: Callable[[], ConversationId] | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
@@ -518,6 +562,46 @@ def create_app(
         async def delete_tavily_settings() -> TavilySettingsResponse:
             tavily_status = await tavily_settings.delete()
             return TavilySettingsResponse.from_status(tavily_status)
+
+    if model_settings is not None:
+
+        @app.get(
+            "/api/v1/settings/model",
+            response_model=ModelSettingsResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def get_model_settings() -> ModelSettingsResponse:
+            return ModelSettingsResponse.from_status(await model_settings.get_status())
+
+        @app.put(
+            "/api/v1/settings/model",
+            response_model=ModelSettingsResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def update_model_settings(
+            request: UpdateModelSettingsRequest,
+        ) -> ModelSettingsResponse:
+            try:
+                saved_status = await model_settings.save(
+                    model=request.model,
+                    base_url=str(request.base_url),
+                    api_key=request.api_key,
+                )
+            except ModelApiKeyMissingError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="model api key is not saved",
+                ) from error
+
+            return ModelSettingsResponse.from_status(saved_status)
+
+        @app.delete(
+            "/api/v1/settings/model",
+            response_model=ModelSettingsResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def delete_model_settings() -> ModelSettingsResponse:
+            return ModelSettingsResponse.from_status(await model_settings.delete())
 
     return app
 
