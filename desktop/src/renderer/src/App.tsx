@@ -2,6 +2,7 @@ import {
   type CSSProperties,
   type FormEvent,
   type PointerEvent,
+  useCallback,
   useEffect,
   useRef,
   useState
@@ -371,6 +372,7 @@ export default function App(): React.JSX.Element {
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const scrollbarHideTimerRef = useRef<number | null>(null)
   const desktopLayoutRef = useRef(desktopLayout)
+  const resizingColumnRef = useRef<ResizableColumn | null>(null)
 
   function revealScrollbar(area: ScrollArea): void {
     setVisibleScrollbar(area)
@@ -407,12 +409,17 @@ export default function App(): React.JSX.Element {
     }
 
     event.preventDefault()
-    event.currentTarget.setPointerCapture(event.pointerId)
+    resizingColumnRef.current = column
     setResizingColumn(column)
+    window.addEventListener('pointermove', handleColumnResizeMove)
+    window.addEventListener('pointerup', endColumnResize)
+    window.addEventListener('pointercancel', endColumnResize)
+    window.addEventListener('blur', endColumnResize)
   }
 
-  function resizeColumn(event: PointerEvent<HTMLDivElement>): void {
-    if (resizingColumn === null) {
+  const handleColumnResizeMove = useCallback((event: globalThis.PointerEvent): void => {
+    const column = resizingColumnRef.current
+    if (column === null) {
       return
     }
 
@@ -420,32 +427,32 @@ export default function App(): React.JSX.Element {
     const railIsVisible = window.innerWidth > 820
     const layout = desktopLayoutRef.current
     const requestedWidth =
-      resizingColumn === 'rail'
+      column === 'rail'
         ? event.clientX
-        : resizingColumn === 'threads'
+        : column === 'threads'
           ? event.clientX - layout.railWidth
           : window.innerWidth - event.clientX
     const otherColumnWidth =
-      resizingColumn === 'rail' && attentionIsVisible
+      column === 'rail' && attentionIsVisible
         ? layout.attentionWidth
-        : resizingColumn === 'attention'
+        : column === 'attention'
           ? railIsVisible
             ? layout.railWidth
             : 0
           : 0
     const minimumWidth =
-      resizingColumn === 'rail'
+      column === 'rail'
         ? MIN_RAIL_WIDTH
-        : resizingColumn === 'threads'
+        : column === 'threads'
           ? MIN_THREAD_WIDTH
           : MIN_ATTENTION_WIDTH
     const maximumWidth = Math.min(
-      resizingColumn === 'rail'
+      column === 'rail'
         ? MAX_RAIL_WIDTH
-        : resizingColumn === 'threads'
+        : column === 'threads'
           ? MAX_THREAD_WIDTH
           : MAX_ATTENTION_WIDTH,
-      resizingColumn === 'threads'
+      column === 'threads'
         ? window.innerWidth -
             (railIsVisible ? layout.railWidth : 0) -
             (attentionIsVisible ? layout.attentionWidth : 0) -
@@ -455,23 +462,38 @@ export default function App(): React.JSX.Element {
     const width = Math.max(minimumWidth, Math.min(requestedWidth, maximumWidth))
     const nextLayout = {
       ...desktopLayoutRef.current,
-      ...(resizingColumn === 'rail'
+      ...(column === 'rail'
         ? { railWidth: width }
-        : resizingColumn === 'threads'
+        : column === 'threads'
           ? { threadWidth: width }
           : { attentionWidth: width })
     }
     desktopLayoutRef.current = nextLayout
     setDesktopLayout(nextLayout)
-  }
+  }, [])
 
-  function endColumnResize(event: PointerEvent<HTMLDivElement>): void {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
+  const endColumnResize = useCallback((): void => {
+    if (resizingColumnRef.current === null) {
+      return
     }
+
+    resizingColumnRef.current = null
     saveDesktopLayout(desktopLayoutRef.current)
     setResizingColumn(null)
-  }
+    window.removeEventListener('pointermove', handleColumnResizeMove)
+    window.removeEventListener('pointerup', endColumnResize)
+    window.removeEventListener('pointercancel', endColumnResize)
+    window.removeEventListener('blur', endColumnResize)
+  }, [handleColumnResizeMove])
+
+  useEffect(() => {
+    return () => {
+      window.removeEventListener('pointermove', handleColumnResizeMove)
+      window.removeEventListener('pointerup', endColumnResize)
+      window.removeEventListener('pointercancel', endColumnResize)
+      window.removeEventListener('blur', endColumnResize)
+    }
+  }, [endColumnResize, handleColumnResizeMove])
 
   useEffect(() => {
     let cancelled = false
@@ -1273,19 +1295,13 @@ export default function App(): React.JSX.Element {
         <div
           aria-label="Resize navigation panel"
           className="column-resizer column-resizer-left"
-          onPointerCancel={endColumnResize}
           onPointerDown={(event) => beginColumnResize('rail', event)}
-          onPointerMove={resizeColumn}
-          onPointerUp={endColumnResize}
           role="separator"
         />
         <div
           aria-label="Resize activity panel"
           className="column-resizer column-resizer-right"
-          onPointerCancel={endColumnResize}
           onPointerDown={(event) => beginColumnResize('attention', event)}
-          onPointerMove={resizeColumn}
-          onPointerUp={endColumnResize}
           role="separator"
         />
 
@@ -1515,10 +1531,7 @@ export default function App(): React.JSX.Element {
               <div
                 aria-label="Resize conversation list"
                 className="chat-column-resizer"
-                onPointerCancel={endColumnResize}
                 onPointerDown={(event) => beginColumnResize('threads', event)}
-                onPointerMove={resizeColumn}
-                onPointerUp={endColumnResize}
                 role="separator"
               />
 
