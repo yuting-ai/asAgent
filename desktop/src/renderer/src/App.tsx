@@ -110,9 +110,8 @@ const MODEL_SETTINGS_LOAD_ERROR = 'Model settings could not be loaded.'
 const MODEL_SETTINGS_UPDATE_ERROR = 'Model settings could not be updated.'
 const MODEL_SETTINGS_REQUIRED = 'Enter a model, base URL, and API key before saving.'
 const MODEL_DELETE_CONFIRM = 'Remove the saved model configuration and API key?'
-const WORKSPACE_SETTINGS_LOAD_ERROR = 'File access settings could not be loaded.'
-const WORKSPACE_SETTINGS_UPDATE_ERROR = 'File access settings could not be updated.'
 const DEFAULT_RAIL_WIDTH = 226
+const COLLAPSED_RAIL_WIDTH = 56
 const DEFAULT_THREAD_WIDTH = 210
 const DEFAULT_ATTENTION_WIDTH = 300
 const MIN_RAIL_WIDTH = 180
@@ -362,17 +361,17 @@ export default function App(): React.JSX.Element {
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [isModelBusy, setIsModelBusy] = useState(false)
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettingsStatus | null>(null)
-  const [workspaceLoadError, setWorkspaceLoadError] = useState<string | null>(null)
-  const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null)
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(true)
   const [isWorkspaceBusy, setIsWorkspaceBusy] = useState(false)
   const [visibleScrollbar, setVisibleScrollbar] = useState<ScrollArea | null>(null)
   const [desktopLayout, setDesktopLayout] = useState<DesktopLayout>(storedDesktopLayout)
+  const [isRailCollapsed, setIsRailCollapsed] = useState(false)
   const [resizingColumn, setResizingColumn] = useState<ResizableColumn | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const scrollbarHideTimerRef = useRef<number | null>(null)
   const desktopLayoutRef = useRef(desktopLayout)
   const resizingColumnRef = useRef<ResizableColumn | null>(null)
+  const railWidth = isRailCollapsed ? COLLAPSED_RAIL_WIDTH : desktopLayout.railWidth
 
   function revealScrollbar(area: ScrollArea): void {
     setVisibleScrollbar(area)
@@ -417,60 +416,64 @@ export default function App(): React.JSX.Element {
     window.addEventListener('blur', endColumnResize)
   }
 
-  const handleColumnResizeMove = useCallback((event: globalThis.PointerEvent): void => {
-    const column = resizingColumnRef.current
-    if (column === null) {
-      return
-    }
+  const handleColumnResizeMove = useCallback(
+    (event: globalThis.PointerEvent): void => {
+      const column = resizingColumnRef.current
+      if (column === null) {
+        return
+      }
 
-    const attentionIsVisible = window.innerWidth > 1100
-    const railIsVisible = window.innerWidth > 820
-    const layout = desktopLayoutRef.current
-    const requestedWidth =
-      column === 'rail'
-        ? event.clientX
-        : column === 'threads'
-          ? event.clientX - layout.railWidth
-          : window.innerWidth - event.clientX
-    const otherColumnWidth =
-      column === 'rail' && attentionIsVisible
-        ? layout.attentionWidth
-        : column === 'attention'
-          ? railIsVisible
-            ? layout.railWidth
+      const attentionIsVisible = window.innerWidth > 1100
+      const railIsVisible = window.innerWidth > 820
+      const layout = desktopLayoutRef.current
+      const currentRailWidth = isRailCollapsed ? COLLAPSED_RAIL_WIDTH : layout.railWidth
+      const requestedWidth =
+        column === 'rail'
+          ? event.clientX
+          : column === 'threads'
+            ? event.clientX - currentRailWidth
+            : window.innerWidth - event.clientX
+      const otherColumnWidth =
+        column === 'rail' && attentionIsVisible
+          ? layout.attentionWidth
+          : column === 'attention'
+            ? railIsVisible
+              ? currentRailWidth
+              : 0
             : 0
-          : 0
-    const minimumWidth =
-      column === 'rail'
-        ? MIN_RAIL_WIDTH
-        : column === 'threads'
-          ? MIN_THREAD_WIDTH
-          : MIN_ATTENTION_WIDTH
-    const maximumWidth = Math.min(
-      column === 'rail'
-        ? MAX_RAIL_WIDTH
-        : column === 'threads'
-          ? MAX_THREAD_WIDTH
-          : MAX_ATTENTION_WIDTH,
-      column === 'threads'
-        ? window.innerWidth -
-            (railIsVisible ? layout.railWidth : 0) -
-            (attentionIsVisible ? layout.attentionWidth : 0) -
-            MIN_CHAT_CONTENT_WIDTH
-        : window.innerWidth - otherColumnWidth - MIN_CENTER_WIDTH
-    )
-    const width = Math.max(minimumWidth, Math.min(requestedWidth, maximumWidth))
-    const nextLayout = {
-      ...desktopLayoutRef.current,
-      ...(column === 'rail'
-        ? { railWidth: width }
-        : column === 'threads'
-          ? { threadWidth: width }
-          : { attentionWidth: width })
-    }
-    desktopLayoutRef.current = nextLayout
-    setDesktopLayout(nextLayout)
-  }, [])
+      const minimumWidth =
+        column === 'rail'
+          ? MIN_RAIL_WIDTH
+          : column === 'threads'
+            ? MIN_THREAD_WIDTH
+            : MIN_ATTENTION_WIDTH
+      const maximumWidth = Math.min(
+        column === 'rail'
+          ? MAX_RAIL_WIDTH
+          : column === 'threads'
+            ? MAX_THREAD_WIDTH
+            : MAX_ATTENTION_WIDTH,
+        column === 'threads'
+          ? window.innerWidth -
+              (railIsVisible ? currentRailWidth : 0) -
+              (attentionIsVisible ? layout.attentionWidth : 0) -
+              MIN_CHAT_CONTENT_WIDTH
+          : window.innerWidth - otherColumnWidth - MIN_CENTER_WIDTH
+      )
+      const width = Math.max(minimumWidth, Math.min(requestedWidth, maximumWidth))
+      const nextLayout = {
+        ...desktopLayoutRef.current,
+        ...(column === 'rail'
+          ? { railWidth: width }
+          : column === 'threads'
+            ? { threadWidth: width }
+            : { attentionWidth: width })
+      }
+      desktopLayoutRef.current = nextLayout
+      setDesktopLayout(nextLayout)
+    },
+    [isRailCollapsed]
+  )
 
   const endColumnResize = useCallback((): void => {
     if (resizingColumnRef.current === null) {
@@ -535,7 +538,6 @@ export default function App(): React.JSX.Element {
     async function loadWorkspaceSettings(): Promise<void> {
       if (selectedConversationId === null) {
         setWorkspaceSettings(null)
-        setWorkspaceLoadError(null)
         setIsWorkspaceLoading(false)
         return
       }
@@ -545,11 +547,10 @@ export default function App(): React.JSX.Element {
         const status = await window.desktop.getConversationFileAccess(selectedConversationId)
         if (!cancelled) {
           setWorkspaceSettings(status)
-          setWorkspaceLoadError(null)
         }
       } catch {
         if (!cancelled) {
-          setWorkspaceLoadError(WORKSPACE_SETTINGS_LOAD_ERROR)
+          setWorkspaceSettings(null)
         }
       } finally {
         if (!cancelled) {
@@ -1132,7 +1133,6 @@ export default function App(): React.JSX.Element {
     }
 
     setIsWorkspaceBusy(true)
-    setWorkspaceActionError(null)
     try {
       setWorkspaceSettings(
         await window.desktop.saveConversationFileAccess(selectedConversationId, {
@@ -1147,37 +1147,7 @@ export default function App(): React.JSX.Element {
         })
       )
     } catch {
-      setWorkspaceActionError(WORKSPACE_SETTINGS_UPDATE_ERROR)
-    } finally {
-      setIsWorkspaceBusy(false)
-    }
-  }
-
-  async function handleRemoveWorkspacePath(
-    path: string,
-    kind: 'directory' | 'file'
-  ): Promise<void> {
-    if (isWorkspaceBusy || workspaceSettings === null || selectedConversationId === null) {
-      return
-    }
-
-    setIsWorkspaceBusy(true)
-    setWorkspaceActionError(null)
-    try {
-      setWorkspaceSettings(
-        await window.desktop.saveConversationFileAccess(selectedConversationId, {
-          additionalFiles:
-            kind === 'file'
-              ? workspaceSettings.additional_files.filter((filePath) => filePath !== path)
-              : workspaceSettings.additional_files,
-          additionalRoots:
-            kind === 'directory'
-              ? workspaceSettings.additional_roots.filter((root) => root !== path)
-              : workspaceSettings.additional_roots
-        })
-      )
-    } catch {
-      setWorkspaceActionError(WORKSPACE_SETTINGS_UPDATE_ERROR)
+      setErrorMessage('File access settings could not be updated.')
     } finally {
       setIsWorkspaceBusy(false)
     }
@@ -1234,10 +1204,12 @@ export default function App(): React.JSX.Element {
       </div>
 
       <div
-        className={`app${resizingColumn === null ? '' : ' is-resizing'}`}
+        className={`app${isRailCollapsed ? ' rail-collapsed' : ''}${
+          resizingColumn === null ? '' : ' is-resizing'
+        }`}
         style={
           {
-            '--rail-width': `${desktopLayout.railWidth}px`,
+            '--rail-width': `${railWidth}px`,
             '--thread-width': `${desktopLayout.threadWidth}px`,
             '--attention-width': `${desktopLayout.attentionWidth}px`
           } as CSSProperties
@@ -1305,9 +1277,30 @@ export default function App(): React.JSX.Element {
           role="separator"
         />
 
-        <nav aria-label="Primary" className="rail">
-          <div className="rail-section">
+        <nav aria-label="Primary" className="rail" id="primary-sidebar">
+          <div className="rail-control">
             <div className="rail-label">Agent</div>
+            <button
+              aria-controls="primary-sidebar"
+              aria-expanded={!isRailCollapsed}
+              aria-label={isRailCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="rail-toggle"
+              onClick={() => setIsRailCollapsed((collapsed) => !collapsed)}
+              title={isRailCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              type="button"
+            >
+              <svg
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <path d={isRailCollapsed ? 'm9 18 6-6-6-6' : 'm15 18-6-6 6-6'} />
+              </svg>
+            </button>
+          </div>
+          <div className="rail-section">
             <button
               className={railItemClass('chat')}
               onClick={() => setActiveView('chat')}
@@ -1317,7 +1310,7 @@ export default function App(): React.JSX.Element {
                 className="rail-icon"
                 path="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"
               />
-              Chat
+              <span className="rail-item-label">Chat</span>
             </button>
             <button
               className={railItemClass('activity')}
@@ -1325,7 +1318,7 @@ export default function App(): React.JSX.Element {
               type="button"
             >
               <Icon className="rail-icon" path="M13 2 3 14h7l-1 8 10-12h-7l1-8z" />
-              Activity
+              <span className="rail-item-label">Activity</span>
               {activeRun !== null ? (
                 <span className="rail-live">
                   <span className="rail-live-dot" />1 running
@@ -1347,7 +1340,7 @@ export default function App(): React.JSX.Element {
                 <circle cx="12" cy="12" r="9" />
                 <path d="M12 7v5l3 3" />
               </svg>
-              Scheduled
+              <span className="rail-item-label">Scheduled</span>
               <span className="rail-count">—</span>
             </button>
             <button
@@ -1356,7 +1349,7 @@ export default function App(): React.JSX.Element {
               type="button"
             >
               <Icon className="rail-icon" path="M4 5h16M4 12h10M4 19h13" />
-              Automations
+              <span className="rail-item-label">Automations</span>
               <span className="rail-count">—</span>
             </button>
             <button
@@ -1368,7 +1361,7 @@ export default function App(): React.JSX.Element {
                 className="rail-icon"
                 path="M12 2 3 6v6c0 5 4 8.5 9 10 5-1.5 9-5 9-10V6l-9-4Z"
               />
-              Privacy & Permissions
+              <span className="rail-item-label">Privacy &amp; Permissions</span>
             </button>
             <button
               className={railItemClass('history')}
@@ -1376,7 +1369,7 @@ export default function App(): React.JSX.Element {
               type="button"
             >
               <Icon className="rail-icon" path="M3 3v18h18M7 15l4-5 3 3 5-7" />
-              History
+              <span className="rail-item-label">History</span>
             </button>
           </div>
 
@@ -1397,7 +1390,7 @@ export default function App(): React.JSX.Element {
                 <rect height="16" rx="2" width="18" x="3" y="4" />
                 <path d="M3 9h18" />
               </svg>
-              Files & Folders
+              <span className="rail-item-label">Files &amp; Folders</span>
               <span className="status-dot pending" title="Not connected yet" />
             </button>
             <button
@@ -1406,7 +1399,7 @@ export default function App(): React.JSX.Element {
               type="button"
             >
               <Icon className="rail-icon" path="M4 4h16v16H4zM4 8h16M8 4v16" />
-              Mail
+              <span className="rail-item-label">Mail</span>
               <span className="status-dot pending" title="Not connected yet" />
             </button>
             <button
@@ -1424,7 +1417,7 @@ export default function App(): React.JSX.Element {
                 <rect height="14" rx="2" width="18" x="3" y="5" />
                 <path d="M3 10h18" />
               </svg>
-              Calendar
+              <span className="rail-item-label">Calendar</span>
               <span className="status-dot pending" title="Not connected yet" />
             </button>
             <button
@@ -1442,7 +1435,7 @@ export default function App(): React.JSX.Element {
                 <circle cx="12" cy="12" r="9" />
                 <path d="M8 12h8M12 8v8" />
               </svg>
-              + Add app
+              <span className="rail-item-label">+ Add app</span>
             </button>
           </div>
 
@@ -1453,7 +1446,7 @@ export default function App(): React.JSX.Element {
               type="button"
             >
               <Icon path="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              Agent preferences
+              <span className="rail-item-label">Agent preferences</span>
             </button>
             <div className="agent-card">
               <div className="agent-card-top">
@@ -1520,7 +1513,6 @@ export default function App(): React.JSX.Element {
                       <div className="chat-thread-name">
                         {conversationLabel(conversation.title)}
                       </div>
-                      <div className="chat-thread-preview">Local conversation</div>
                       <div className="chat-thread-time">
                         {formatThreadTime(conversation.updated_at)}
                       </div>
@@ -2022,21 +2014,39 @@ export default function App(): React.JSX.Element {
         </div>
         <div className={`view${activeView === 'preferences' ? ' active' : ''}`}>
           <section className="center">
-            <div className="center-header">
-              <div className="center-title">Agent preferences</div>
-              <div className="center-sub">Model, safety, and desktop preferences.</div>
+            <div className="center-header settings-page-header">
+              <div>
+                <div className="settings-header-eyebrow">Preferences</div>
+                <div className="center-title">Agent preferences</div>
+                <div className="center-sub">Manage model access, tools, and local file scope.</div>
+              </div>
+              <div className={`settings-mode-card${usesExternalModel ? ' external' : ''}`}>
+                <span>Processing</span>
+                <strong>{usesExternalModel ? 'External model' : 'Local mode'}</strong>
+                <small>
+                  {usesExternalModel
+                    ? 'Conversation content may leave this device.'
+                    : 'No model data is sent externally.'}
+                </small>
+              </div>
             </div>
 
             <div className="settings-panel">
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
+                    <div className="settings-section-eyebrow">Model &amp; privacy</div>
                     <div className="settings-section-title">Model provider</div>
                     <p className="settings-section-copy">
                       Configure one OpenAI-compatible provider for asAgent. The API key stays in
                       your system credential store and is never shown here.
                     </p>
                   </div>
+                  <span
+                    className={`settings-state${modelSettings?.configured ? ' configured' : ''}`}
+                  >
+                    {modelSettings?.configured ? 'Configured' : 'Not configured'}
+                  </span>
                 </div>
 
                 {isModelLoading ? (
@@ -2124,94 +2134,7 @@ export default function App(): React.JSX.Element {
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
-                    <div className="settings-section-title">Conversation file access</div>
-                    <p className="settings-section-copy">
-                      The selected files and folders apply only to the active conversation. This
-                      does not enable file tools or grant write access.
-                    </p>
-                  </div>
-                </div>
-
-                {isWorkspaceLoading ? (
-                  <p className="settings-section-status">Loading file access settings…</p>
-                ) : null}
-                {workspaceLoadError !== null ? (
-                  <p className="settings-section-error">{workspaceLoadError}</p>
-                ) : null}
-                {selectedConversationId === null ? (
-                  <p className="settings-section-placeholder">
-                    Select a conversation to manage its local file access.
-                  </p>
-                ) : null}
-                {selectedConversationId !== null &&
-                !isWorkspaceLoading &&
-                workspaceLoadError === null &&
-                workspaceSettings !== null ? (
-                  <>
-                    <p className="settings-section-status">
-                      Default workspace: <code>{workspaceSettings.workspace_root}</code>
-                    </p>
-                    {workspaceSettings.additional_roots.length === 0 &&
-                    workspaceSettings.additional_files.length === 0 ? (
-                      <p className="settings-section-placeholder">
-                        No additional files or folders are authorized.
-                      </p>
-                    ) : (
-                      <ul className="settings-directory-list">
-                        {workspaceSettings.additional_roots.map((folder) => (
-                          <li key={folder}>
-                            <code>{folder}</code>
-                            <button
-                              className="settings-button settings-button-danger"
-                              disabled={isWorkspaceBusy}
-                              onClick={() => {
-                                void handleRemoveWorkspacePath(folder, 'directory')
-                              }}
-                              type="button"
-                            >
-                              Remove
-                            </button>
-                          </li>
-                        ))}
-                        {workspaceSettings.additional_files.map((filePath) => (
-                          <li key={filePath}>
-                            <code>{filePath}</code>
-                            <button
-                              className="settings-button settings-button-danger"
-                              disabled={isWorkspaceBusy}
-                              onClick={() => {
-                                void handleRemoveWorkspacePath(filePath, 'file')
-                              }}
-                              type="button"
-                            >
-                              Remove
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    <div className="settings-card-actions">
-                      <button
-                        className="settings-button settings-button-primary"
-                        disabled={isWorkspaceBusy}
-                        onClick={() => {
-                          void handleAddWorkspacePath()
-                        }}
-                        type="button"
-                      >
-                        Add file or folder
-                      </button>
-                    </div>
-                  </>
-                ) : null}
-                {workspaceActionError !== null ? (
-                  <p className="settings-section-error">{workspaceActionError}</p>
-                ) : null}
-              </section>
-
-              <section className="settings-section">
-                <div className="settings-section-header">
-                  <div>
+                    <div className="settings-section-eyebrow">Connected tool</div>
                     <div className="settings-section-title">Tavily Web Search</div>
                     <p className="settings-section-copy">
                       Tavily lets asAgent search the web through a configured MCP server. Your API
@@ -2328,11 +2251,21 @@ export default function App(): React.JSX.Element {
           </section>
 
           <aside className="attn">
-            <div className="attn-header">Integrations</div>
-            <p className="chat-context-sub">
-              MCP servers are configured on this device. Changes to Tavily settings take effect
-              after you restart asAgent.
-            </p>
+            <div className="attn-header">Settings guide</div>
+            <div className="settings-guide">
+              <section className="settings-guide-item">
+                <div className="settings-guide-title">Your credentials</div>
+                <p>API keys are stored in the system Keychain and are never displayed here.</p>
+              </section>
+              <section className="settings-guide-item">
+                <div className="settings-guide-title">File access</div>
+                <p>Extra paths apply only to the selected conversation and remain read-only.</p>
+              </section>
+              <section className="settings-guide-item restart">
+                <div className="settings-guide-title">Restart required</div>
+                <p>Model and Tavily changes take effect after restarting asAgent.</p>
+              </section>
+            </div>
           </aside>
         </div>
       </div>
