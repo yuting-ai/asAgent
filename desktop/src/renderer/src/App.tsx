@@ -1,4 +1,11 @@
-import { FormEvent, useEffect, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  type FormEvent,
+  type PointerEvent,
+  useEffect,
+  useRef,
+  useState
+} from 'react'
 import ReactMarkdown from 'react-markdown'
 
 import { TOOL_APPROVAL_BANNER_ACTIONS, type ToolApprovalDecision } from './tool_approval'
@@ -86,6 +93,13 @@ type WorkspaceSettingsStatus = {
 }
 
 type ActivityTab = 'approvals' | 'schedule'
+type ScrollArea = 'threads' | 'messages'
+type ResizableColumn = 'rail' | 'threads' | 'attention'
+type DesktopLayout = {
+  railWidth: number
+  threadWidth: number
+  attentionWidth: number
+}
 
 const TAVILY_SETTINGS_LOAD_ERROR = 'Tavily settings could not be loaded.'
 const TAVILY_SETTINGS_UPDATE_ERROR = 'Tavily settings could not be updated.'
@@ -97,6 +111,68 @@ const MODEL_SETTINGS_REQUIRED = 'Enter a model, base URL, and API key before sav
 const MODEL_DELETE_CONFIRM = 'Remove the saved model configuration and API key?'
 const WORKSPACE_SETTINGS_LOAD_ERROR = 'File access settings could not be loaded.'
 const WORKSPACE_SETTINGS_UPDATE_ERROR = 'File access settings could not be updated.'
+const DEFAULT_RAIL_WIDTH = 226
+const DEFAULT_THREAD_WIDTH = 210
+const DEFAULT_ATTENTION_WIDTH = 300
+const MIN_RAIL_WIDTH = 180
+const MAX_RAIL_WIDTH = 360
+const MIN_THREAD_WIDTH = 160
+const MAX_THREAD_WIDTH = 360
+const MIN_ATTENTION_WIDTH = 240
+const MAX_ATTENTION_WIDTH = 460
+const MIN_CHAT_CONTENT_WIDTH = 360
+const MIN_CENTER_WIDTH = MIN_THREAD_WIDTH + MIN_CHAT_CONTENT_WIDTH
+const DESKTOP_LAYOUT_STORAGE_KEY = 'asagent.desktop.layout.v1'
+
+function defaultDesktopLayout(): DesktopLayout {
+  return {
+    railWidth: DEFAULT_RAIL_WIDTH,
+    threadWidth: DEFAULT_THREAD_WIDTH,
+    attentionWidth: DEFAULT_ATTENTION_WIDTH
+  }
+}
+
+function storedDesktopLayout(): DesktopLayout {
+  try {
+    const stored = window.localStorage.getItem(DESKTOP_LAYOUT_STORAGE_KEY)
+    if (stored === null) {
+      return defaultDesktopLayout()
+    }
+
+    const value: unknown = JSON.parse(stored)
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return defaultDesktopLayout()
+    }
+
+    const layout = value as Record<string, unknown>
+    const railWidth = layout['railWidth']
+    const threadWidth = layout['threadWidth']
+    const attentionWidth = layout['attentionWidth']
+    if (
+      !isLayoutWidth(railWidth, MIN_RAIL_WIDTH, MAX_RAIL_WIDTH) ||
+      !isLayoutWidth(threadWidth, MIN_THREAD_WIDTH, MAX_THREAD_WIDTH) ||
+      !isLayoutWidth(attentionWidth, MIN_ATTENTION_WIDTH, MAX_ATTENTION_WIDTH)
+    ) {
+      return defaultDesktopLayout()
+    }
+
+    return { railWidth, threadWidth, attentionWidth }
+  } catch {
+    return defaultDesktopLayout()
+  }
+}
+
+function isLayoutWidth(value: unknown, minimum: number, maximum: number): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum
+}
+
+function saveDesktopLayout(layout: DesktopLayout): void {
+  try {
+    window.localStorage.setItem(DESKTOP_LAYOUT_STORAGE_KEY, JSON.stringify(layout))
+  } catch {
+    // Layout persistence is optional and must never block the chat UI.
+  }
+}
 
 function conversationLabel(title: string | null): string {
   return title ?? 'New conversation'
@@ -289,7 +365,113 @@ export default function App(): React.JSX.Element {
   const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null)
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(true)
   const [isWorkspaceBusy, setIsWorkspaceBusy] = useState(false)
+  const [visibleScrollbar, setVisibleScrollbar] = useState<ScrollArea | null>(null)
+  const [desktopLayout, setDesktopLayout] = useState<DesktopLayout>(storedDesktopLayout)
+  const [resizingColumn, setResizingColumn] = useState<ResizableColumn | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const scrollbarHideTimerRef = useRef<number | null>(null)
+  const desktopLayoutRef = useRef(desktopLayout)
+
+  function revealScrollbar(area: ScrollArea): void {
+    setVisibleScrollbar(area)
+
+    if (scrollbarHideTimerRef.current !== null) {
+      window.clearTimeout(scrollbarHideTimerRef.current)
+    }
+
+    scrollbarHideTimerRef.current = window.setTimeout(() => {
+      setVisibleScrollbar(null)
+      scrollbarHideTimerRef.current = null
+    }, 700)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (scrollbarHideTimerRef.current !== null) {
+        window.clearTimeout(scrollbarHideTimerRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    document.body.classList.toggle('is-resizing-columns', resizingColumn !== null)
+
+    return () => {
+      document.body.classList.remove('is-resizing-columns')
+    }
+  }, [resizingColumn])
+
+  function beginColumnResize(column: ResizableColumn, event: PointerEvent<HTMLDivElement>): void {
+    if (event.button !== 0) {
+      return
+    }
+
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setResizingColumn(column)
+  }
+
+  function resizeColumn(event: PointerEvent<HTMLDivElement>): void {
+    if (resizingColumn === null) {
+      return
+    }
+
+    const attentionIsVisible = window.innerWidth > 1100
+    const railIsVisible = window.innerWidth > 820
+    const layout = desktopLayoutRef.current
+    const requestedWidth =
+      resizingColumn === 'rail'
+        ? event.clientX
+        : resizingColumn === 'threads'
+          ? event.clientX - layout.railWidth
+          : window.innerWidth - event.clientX
+    const otherColumnWidth =
+      resizingColumn === 'rail' && attentionIsVisible
+        ? layout.attentionWidth
+        : resizingColumn === 'attention'
+          ? railIsVisible
+            ? layout.railWidth
+            : 0
+          : 0
+    const minimumWidth =
+      resizingColumn === 'rail'
+        ? MIN_RAIL_WIDTH
+        : resizingColumn === 'threads'
+          ? MIN_THREAD_WIDTH
+          : MIN_ATTENTION_WIDTH
+    const maximumWidth = Math.min(
+      resizingColumn === 'rail'
+        ? MAX_RAIL_WIDTH
+        : resizingColumn === 'threads'
+          ? MAX_THREAD_WIDTH
+          : MAX_ATTENTION_WIDTH,
+      resizingColumn === 'threads'
+        ? window.innerWidth -
+            (railIsVisible ? layout.railWidth : 0) -
+            (attentionIsVisible ? layout.attentionWidth : 0) -
+            MIN_CHAT_CONTENT_WIDTH
+        : window.innerWidth - otherColumnWidth - MIN_CENTER_WIDTH
+    )
+    const width = Math.max(minimumWidth, Math.min(requestedWidth, maximumWidth))
+    const nextLayout = {
+      ...desktopLayoutRef.current,
+      ...(resizingColumn === 'rail'
+        ? { railWidth: width }
+        : resizingColumn === 'threads'
+          ? { threadWidth: width }
+          : { attentionWidth: width })
+    }
+    desktopLayoutRef.current = nextLayout
+    setDesktopLayout(nextLayout)
+  }
+
+  function endColumnResize(event: PointerEvent<HTMLDivElement>): void {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    saveDesktopLayout(desktopLayoutRef.current)
+    setResizingColumn(null)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -1029,7 +1211,16 @@ export default function App(): React.JSX.Element {
         <div className="orb orb-4" />
       </div>
 
-      <div className="app">
+      <div
+        className={`app${resizingColumn === null ? '' : ' is-resizing'}`}
+        style={
+          {
+            '--rail-width': `${desktopLayout.railWidth}px`,
+            '--thread-width': `${desktopLayout.threadWidth}px`,
+            '--attention-width': `${desktopLayout.attentionWidth}px`
+          } as CSSProperties
+        }
+      >
         <header className="titlebar">
           <div className="brand">
             <div className="brand-mark" />
@@ -1078,6 +1269,25 @@ export default function App(): React.JSX.Element {
             <Icon path="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </button>
         </header>
+
+        <div
+          aria-label="Resize navigation panel"
+          className="column-resizer column-resizer-left"
+          onPointerCancel={endColumnResize}
+          onPointerDown={(event) => beginColumnResize('rail', event)}
+          onPointerMove={resizeColumn}
+          onPointerUp={endColumnResize}
+          role="separator"
+        />
+        <div
+          aria-label="Resize activity panel"
+          className="column-resizer column-resizer-right"
+          onPointerCancel={endColumnResize}
+          onPointerDown={(event) => beginColumnResize('attention', event)}
+          onPointerMove={resizeColumn}
+          onPointerUp={endColumnResize}
+          role="separator"
+        />
 
         <nav aria-label="Primary" className="rail">
           <div className="rail-section">
@@ -1261,7 +1471,10 @@ export default function App(): React.JSX.Element {
         <div className={`view${activeView === 'chat' ? ' active' : ''}`}>
           <section className="center">
             <div className="chat-layout">
-              <div className="chat-threads">
+              <div
+                className={`chat-threads${visibleScrollbar === 'threads' ? ' scrollbar-visible' : ''}`}
+                onWheel={() => revealScrollbar('threads')}
+              >
                 <div className="chat-threads-header">
                   <div className="chat-threads-title">Conversations</div>
                   <button
@@ -1299,6 +1512,15 @@ export default function App(): React.JSX.Element {
                   ))
                 )}
               </div>
+              <div
+                aria-label="Resize conversation list"
+                className="chat-column-resizer"
+                onPointerCancel={endColumnResize}
+                onPointerDown={(event) => beginColumnResize('threads', event)}
+                onPointerMove={resizeColumn}
+                onPointerUp={endColumnResize}
+                role="separator"
+              />
 
               <div className="chat-main">
                 <div className="chat-thread-header">
@@ -1311,7 +1533,10 @@ export default function App(): React.JSX.Element {
 
                 {errorMessage ? <p className="chat-error">{errorMessage}</p> : null}
 
-                <div className="chat-messages">
+                <div
+                  className={`chat-messages${visibleScrollbar === 'messages' ? ' scrollbar-visible' : ''}`}
+                  onWheel={() => revealScrollbar('messages')}
+                >
                   {selectedConversationId === null ? (
                     <p className="chat-empty">
                       Create or select a conversation to view its history and send messages.
