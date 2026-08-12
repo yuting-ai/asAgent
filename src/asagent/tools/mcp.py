@@ -125,6 +125,7 @@ class McpClient:
         client_version: str = "0.1.0",
         request_timeout_seconds: float = _DEFAULT_REQUEST_TIMEOUT_SECONDS,
         working_directory: Path | None = None,
+        environment: Mapping[str, str] | None = None,
     ) -> None:
         if not command or any(not part for part in command):
             raise ValueError("MCP server command must not be empty")
@@ -132,12 +133,18 @@ class McpClient:
             raise ValueError("request_timeout_seconds must be positive")
         if working_directory is not None and not working_directory.is_absolute():
             raise ValueError("MCP server working_directory must be absolute")
+        if environment is not None and any(
+            not isinstance(name, str) or not isinstance(value, str)
+            for name, value in environment.items()
+        ):
+            raise ValueError("MCP server environment must contain strings")
 
         self._command = command
         self._client_name = client_name
         self._client_version = client_version
         self._request_timeout_seconds = request_timeout_seconds
         self._working_directory = working_directory
+        self._environment = {} if environment is None else dict(environment)
         self._process: asyncio.subprocess.Process | None = None
         self._server_info: McpServerInfo | None = None
         self._next_request_id = 1
@@ -153,6 +160,7 @@ class McpClient:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
             cwd=self._working_directory,
+            env=self._environment,
         )
 
         try:

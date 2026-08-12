@@ -3,7 +3,7 @@ import asyncio
 import json
 import os
 import sys
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -65,8 +65,13 @@ from asagent.tools.builtin.calculator import CalculatorTool
 from asagent.tools.builtin.current_time import CurrentTimeTool
 from asagent.tools.builtin.echo import EchoTool
 from asagent.tools.executor import ToolExecutor
+from asagent.tools.mcp_config import load_mcp_server_configs
+from asagent.tools.mcp_manager import McpServerManager
 from asagent.tools.registry import ToolRegistry
 from asagent.tools.snapshot import ToolSnapshot
+
+_BUILTIN_TOOL_PERMISSIONS = frozenset({"tool.execute"})
+_MCP_SUBPROCESS_ENVIRONMENT_NAMES = ("PATH",)
 
 
 class _EchoModelProvider:
@@ -151,23 +156,53 @@ def _register_builtin_tools() -> ToolRegistry:
     return registry
 
 
+def _mcp_subprocess_environment(
+    environment: Mapping[str, str],
+) -> dict[str, str]:
+    """Return the intentionally small environment inherited by MCP children."""
+
+    return {
+        name: value
+        for name in _MCP_SUBPROCESS_ENVIRONMENT_NAMES
+        if (value := environment.get(name)) is not None
+    }
+
+
+async def _start_configured_mcp_servers(
+    *,
+    config_dir: Path,
+    environment: Mapping[str, str],
+) -> tuple[ToolRegistry, McpServerManager, bool]:
+    configs = load_mcp_server_configs(config_dir)
+    registry = _register_builtin_tools()
+    manager = McpServerManager(
+        configs=configs,
+        registry=registry,
+        environment=_mcp_subprocess_environment(environment),
+    )
+    await manager.start()
+    return registry, manager, bool(configs.servers)
+
+
 def build_agent_loop(
     *,
     model: ModelProvider,
     event_publisher: EventPublisher,
     tool_call_recorder: ToolCallRecorder | None = None,
     approval_policy: ToolApprovalPolicy | None = None,
+    registry: ToolRegistry | None = None,
+    granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
 ) -> AgentLoop:
-    registry = _register_builtin_tools()
+    tool_registry = registry if registry is not None else _register_builtin_tools()
     snapshot = ToolSnapshot.from_definitions(
-        registry.definitions(),
+        tool_registry.definitions(),
         provider_name_for=openai_compatible_tool_name,
     )
     return AgentLoop(
         model=model,
         executor=ToolExecutor(
-            registry,
-            granted_permissions=frozenset({"tool.execute"}),
+            tool_registry,
+            granted_permissions=granted_permissions,
             approval_policy=approval_policy,
         ),
         tool_snapshot=snapshot,
@@ -187,17 +222,19 @@ def build_development_agent_loop(
     event_publisher: EventPublisher,
     tool_call_recorder: ToolCallRecorder | None = None,
     approval_policy: ToolApprovalPolicy | None = None,
+    registry: ToolRegistry | None = None,
+    granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
 ) -> AgentLoop:
-    registry = _register_builtin_tools()
+    tool_registry = registry if registry is not None else _register_builtin_tools()
     snapshot = ToolSnapshot.from_definitions(
-        registry.definitions(),
+        tool_registry.definitions(),
         provider_name_for=openai_compatible_tool_name,
     )
     return AgentLoop(
         model=DevelopmentToolModelProvider(snapshot),
         executor=ToolExecutor(
-            registry,
-            granted_permissions=frozenset({"tool.execute"}),
+            tool_registry,
+            granted_permissions=granted_permissions,
             approval_policy=approval_policy,
         ),
         tool_snapshot=snapshot,
@@ -337,6 +374,8 @@ def build_persistent_agent_runtime(
     starter: SqliteRunStarter,
     finisher: SqliteRunFinisher,
     approval_policy: ToolApprovalPolicy | None = None,
+    registry: ToolRegistry | None = None,
+    granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
 ) -> PersistentAgentRuntime:
     return PersistentAgentRuntime(
         conversations=conversations,
@@ -353,6 +392,8 @@ def build_persistent_agent_runtime(
             event_publisher=RepositoryEventPublisher(runs),
             tool_call_recorder=RepositoryToolCallRecorder(runs),
             approval_policy=approval_policy,
+            registry=registry,
+            granted_permissions=granted_permissions,
         ),
         now=now,
         new_message_id=new_message_id,
@@ -366,6 +407,8 @@ def build_persistent_development_runtime(
     starter: SqliteRunStarter,
     finisher: SqliteRunFinisher,
     approval_policy: ToolApprovalPolicy | None = None,
+    registry: ToolRegistry | None = None,
+    granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
 ) -> PersistentAgentRuntime:
     return PersistentAgentRuntime(
         conversations=conversations,
@@ -381,6 +424,8 @@ def build_persistent_development_runtime(
             event_publisher=RepositoryEventPublisher(runs),
             tool_call_recorder=RepositoryToolCallRecorder(runs),
             approval_policy=approval_policy,
+            registry=registry,
+            granted_permissions=granted_permissions,
         ),
         now=now,
         new_message_id=new_message_id,
@@ -542,62 +587,81 @@ async def _run_main(args: argparse.Namespace) -> None:
         )
 
         http_client: httpx.AsyncClient | None = None
-
-        if args.profile is None:
-            runtime = build_persistent_development_runtime(
-                conversations=conversations,
-                runs=runs,
-                starter=starter,
-                finisher=finisher,
-                approval_policy=tool_approvals,
-            )
-            model_name = "development-tools"
-        else:
-            profiles = load_provider_profiles(paths.config_dir)
-            try:
-                profile = profiles.providers[args.profile]
-            except KeyError as error:
-                raise ProviderConfigurationError(
-                    "requested provider profile is unavailable",
-                ) from error
-
-            secrets = EnvironmentSecretProvider(
-                environment=dict(os.environ),
-                bindings={profile.secret_id: args.secret_env},
-            )
-            http_client = httpx.AsyncClient()
-            provider = create_model_provider(
-                profiles=profiles,
-                profile_name=args.profile,
-                secrets=secrets,
-                http_client=http_client,
-            )
-            runtime = build_persistent_agent_runtime(
-                model=provider,
-                conversations=conversations,
-                runs=runs,
-                starter=starter,
-                finisher=finisher,
-                approval_policy=tool_approvals,
-            )
-            model_name = profile.model
-
-        async def execute_submitted(
-            submission: SubmittedRun,
-            cancellation_token: RunCancellationToken,
-        ) -> None:
-            await runtime.execute_submitted(
-                submission=submission,
-                model_name=model_name,
-                system_prompt=system_prompt,
-                cancellation_token=cancellation_token,
-            )
-
-        dispatcher = InProcessRunDispatcher(
-            execute_submitted=execute_submitted,
-        )
+        mcp_manager: McpServerManager | None = None
+        dispatcher: InProcessRunDispatcher | None = None
 
         try:
+            (
+                registry,
+                mcp_manager,
+                has_mcp_servers,
+            ) = await _start_configured_mcp_servers(
+                config_dir=paths.config_dir,
+                environment=os.environ,
+            )
+            granted_permissions = (
+                _BUILTIN_TOOL_PERMISSIONS | frozenset({"mcp.execute"})
+                if has_mcp_servers
+                else _BUILTIN_TOOL_PERMISSIONS
+            )
+
+            if args.profile is None:
+                runtime = build_persistent_development_runtime(
+                    conversations=conversations,
+                    runs=runs,
+                    starter=starter,
+                    finisher=finisher,
+                    approval_policy=tool_approvals,
+                    registry=registry,
+                    granted_permissions=granted_permissions,
+                )
+                model_name = "development-tools"
+            else:
+                profiles = load_provider_profiles(paths.config_dir)
+                try:
+                    profile = profiles.providers[args.profile]
+                except KeyError as error:
+                    raise ProviderConfigurationError(
+                        "requested provider profile is unavailable",
+                    ) from error
+
+                secrets = EnvironmentSecretProvider(
+                    environment=dict(os.environ),
+                    bindings={profile.secret_id: args.secret_env},
+                )
+                http_client = httpx.AsyncClient()
+                provider = create_model_provider(
+                    profiles=profiles,
+                    profile_name=args.profile,
+                    secrets=secrets,
+                    http_client=http_client,
+                )
+                runtime = build_persistent_agent_runtime(
+                    model=provider,
+                    conversations=conversations,
+                    runs=runs,
+                    starter=starter,
+                    finisher=finisher,
+                    approval_policy=tool_approvals,
+                    registry=registry,
+                    granted_permissions=granted_permissions,
+                )
+                model_name = profile.model
+
+            async def execute_submitted(
+                submission: SubmittedRun,
+                cancellation_token: RunCancellationToken,
+            ) -> None:
+                await runtime.execute_submitted(
+                    submission=submission,
+                    model_name=model_name,
+                    system_prompt=system_prompt,
+                    cancellation_token=cancellation_token,
+                )
+
+            dispatcher = InProcessRunDispatcher(
+                execute_submitted=execute_submitted,
+            )
             server = LocalApiServer(
                 create_app(
                     access_token=access_token,
@@ -616,7 +680,10 @@ async def _run_main(args: argparse.Namespace) -> None:
             await server.wait_closed()
         finally:
             await tool_approvals.aclose()
-            await dispatcher.aclose()
+            if dispatcher is not None:
+                await dispatcher.aclose()
+            if mcp_manager is not None:
+                await mcp_manager.aclose()
             await finisher.aclose()
             await starter.aclose()
             if http_client is not None:

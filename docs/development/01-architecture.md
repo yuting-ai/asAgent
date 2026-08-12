@@ -490,13 +490,13 @@ JSON，顶层只允许 `servers`。每个显式命名 Server 只声明非空的�
 进入此文件，未来只能通过独立 Secret Store 引用注入。
 
 `tools.mcp_manager.McpServerManager` 是多个已校验配置项的最小生命周期所有者。它为每个配置
-创建带对应工作目录的 `McpClient` 与 `McpServerSession`，但先将远程工具导入临时 Registry；
+创建带对应工作目录和显式子进程环境的 `McpClient` 与 `McpServerSession`，但先将远程工具导入临时 Registry；
 只有所有 Session 均成功启动后，才检查工具 ID 冲突并合并到调用方的正式 Registry。任一启动
 失败时，Manager 关闭已创建的 Session，正式 Registry 保持不变。关闭时它以反向创建顺序关闭
 全部 Session，且之后拒绝再次启动。Manager 不读取文件、不管理热刷新、重连、分页、legacy
-fallback 或 Secret；当前也尚未由 CLI、API 或 Electron 组合根自动构造。
+fallback 或 Secret。
 
-MCP Server 的权限独立于宿主工具权限：stdio Server 使用显式工作目录、最小环境变量和自身配置；远程 Server 仅使用为该 Server 配置的 Token 与能力。它们不继承 asAgent 的文件范围、浏览器 Profile 或其他账户 Token。
+MCP Server 的权限独立于宿主工具权限：stdio Server 使用显式工作目录、最小环境变量和自身配置；远程 Server 仅使用为该 Server 配置的 Token 与能力。它们不继承 asAgent 的文件范围、浏览器 Profile 或其他账户 Token。`McpClient` 默认以空环境启动子进程，避免独立调用时意外继承宿主 Secret；当前 Sidecar 组合根仅显式传入 `PATH`，不传模型 API Key、Local API Token 或任意 `.env` 值。
 
 MCP 工具内部 ID：
 
@@ -505,7 +505,11 @@ mcp:{server_name}:{tool_name}:{schema_hash}
 ```
 
 其中 `schema_hash` 是对 `input_schema` 做稳定 JSON 规范化后的 SHA-256 截断。不同 Server
-提供同名工具时不得覆盖。当前尚未从 `mcp.json` 自动在应用组合根启动/导入 Server。
+提供同名工具时不得覆盖。`asagent serve` 是当前唯一的 MCP 应用组合根：它在创建 Runtime 前读取可选
+`config_dir/mcp.json`、启动 Manager，并将成功导入后的同一 Registry 交给 Tool Snapshot 与 ToolExecutor。缺失
+配置保持只有内置工具；非空配置仅在全部 Server 成功启动后向该 Runtime 授予 `mcp.execute`。任一配置、启动
+或导入失败都会阻止 Sidecar 输出 ready 记录；退出时 Manager 在数据库资源关闭前关闭子进程。该集合在一次
+Sidecar 生命周期内固定，修改 `mcp.json` 后需要重启；当前持久化 CLI、热刷新和桌面 MCP 设置页不在范围内。
 `tests/integration/test_mcp_agent_loop.py` 已验证最小完整链路：测试 MCP Server 经过
 `McpClient`、`McpTool`、`ToolRegistry` 和 `ToolSnapshot` 后，脚本化 Model Provider 能看见
 Provider 可见工具名并请求调用；`AgentLoop` 再经 `ToolExecutor` 的 `mcp.execute` 权限与批准

@@ -676,6 +676,16 @@
 - 影响：当前审批不具备刷新恢复、长期授权、审批历史或审计持久化；未来这些能力必须单独设计数据最小化、范围、有效期与撤销规则。配置的 MCP Server 尚未自动进入 Runtime，本决策只提供其可安全使用的用户确认通道。
 - 替代方案：Renderer 直接访问本地 API、CLI stdin 审批、只按固定风险等级自动批准、或将审批结果和完整参数写入 RunEvent；当前均不采用。
 
+### DEC-067：Sidecar 以最小环境原子导入配置的 MCP Server
+
+- 日期：2026-08-12
+- 状态：已确认
+- 背景：`mcp.json` 已能表达非敏感的 stdio Server，但若 MCP 子进程默认继承 Sidecar 全部环境，真实 Provider 的 API Key 或本地 API Token 可能泄露给任意已配置 Server；若逐个直接注册工具，后续 Server 启动失败还会使 Runtime 留下不可用工具。
+- 决策：仅 `asagent serve` 在构造 Runtime 前读取可选 `config_dir/mcp.json` 并启动 `McpServerManager`。Manager 仍先以临时 Registry 导入全部工具，成功后才合并到内置 ToolRegistry；缺失配置保持内置工具路径，非空配置只在全部 Server 成功后向该 Runtime 授予 `mcp.execute`。`McpClient` 默认传递空环境，Sidecar 只显式允许 `PATH` 给 MCP 子进程。启动失败不得输出 ready 记录，关闭时在数据库关闭前关闭 Manager 与子进程；`mcp.json` 改动需重启 Sidecar 才会生效。
+- 原因：这让模型只看到一次启动时已经可用的工具快照，同时防止 Secret 随进程环境隐式扩散；全量成功后再合并保持现有 Manager 的原子导入语义。
+- 影响：MCP Server 不获得模型 API Key、Local API Token 或任意 `.env` 值，也不自动继承本地文件、浏览器或 OAuth 范围。需要凭据的 Server 必须等待独立 Secret Store 引用设计。当前持久化 CLI、设置页、热刷新、重连、分页和 legacy fallback 不因此实现。
+- 替代方案：继承完整宿主环境、将 Token/环境值放入 `mcp.json`、逐个 Server 成功即向 Runtime 注册、或允许 Renderer 直接启动 Server；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

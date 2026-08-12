@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from collections.abc import Mapping
 from typing import Final, TypeGuard
@@ -30,6 +31,9 @@ _ADD_TOOL: Final = {
 
 
 def main() -> None:
+    if os.environ.get("ASAGENT_TEST_MCP_PARENT_SECRET") is not None:
+        raise RuntimeError("MCP server inherited a parent secret")
+
     print("asagent MCP test server started", file=sys.stderr, flush=True)
 
     for line in sys.stdin:

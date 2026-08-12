@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Mapping
 
 from asagent.tools.mcp import McpClient, McpServerSession
 from asagent.tools.mcp_config import McpServerConfigs
@@ -13,9 +14,11 @@ class McpServerManager:
         *,
         configs: McpServerConfigs,
         registry: ToolRegistry,
+        environment: Mapping[str, str] | None = None,
     ) -> None:
         self._configs = configs
         self._registry = registry
+        self._environment = {} if environment is None else dict(environment)
         self._sessions: list[McpServerSession] = []
         self._started = False
         self._closed = False
@@ -34,6 +37,7 @@ class McpServerManager:
                     client=McpClient(
                         command=config.command,
                         working_directory=config.working_directory,
+                        environment=self._environment,
                     ),
                     registry=staging_registry,
                     server_name=server_name,

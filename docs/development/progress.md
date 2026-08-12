@@ -3067,3 +3067,29 @@
 
 - 将可选 `mcp.json` 与 `McpServerManager` 接入桌面 Sidecar 的明确组合根：成功启动后才把其 Tool
   导入 Runtime，并仅向该 Runtime 授予 `mcp.execute`；使用上述审批卡进行首次真实 MCP 人工验收。
+
+## 2026-08-12 阶段 8 MCP Sidecar Runtime 接入工作记录
+
+### 完成
+
+- `asagent serve` 现在读取可选 `config_dir/mcp.json`，在创建 Runtime 前启动 `McpServerManager`，并将同一份“内置工具 + 成功导入的 MCP 工具”Registry 交给 Tool Snapshot 与 Executor。
+- 缺失配置保持原来的仅内置工具行为；非空配置只有在全部 Server 成功启动后才向该 Runtime 授予 `mcp.execute`。任一配置、发现或导入失败会阻止 Sidecar 宣布 ready，Manager 的已有原子导入和清理语义保持生效。
+- MCP 子进程不再隐式继承宿主环境：`McpClient` 默认使用空环境，Sidecar 只传递 `PATH`，因此模型 API Key、Local API Token 与开发 `.env` 值不会进入 MCP Server。
+- 新增集成测试覆盖：缺少 `mcp.json` 时仅保留内置工具；配置测试 Server 后，远程 `add` Tool 经真实 Manager、持久化 Runtime、ToolExecutor 权限与批准 Gate 完成一次模型工具回合；测试还验证父进程 Secret 不会传入 MCP 子进程。
+
+### 验证
+
+- 定向 MCP 集成测试通过：7 passed。
+- `scripts/check.sh` 通过：304 passed；Ruff、strict mypy（149 个 source files）与锁文件检查均通过。
+
+### 决策变化
+
+- 新增 DEC-067：Sidecar 以最小环境原子导入配置的 MCP Server。
+
+### 风险或问题
+
+- 当前仅支持现代 stdio MCP；不包含 Server 凭据注入、热刷新、重连、分页、legacy fallback 或桌面设置页。
+
+### 下一步
+
+- 使用桌面真实 Provider 模式和一个显式 `mcp.json` 完成首次人工 MCP 验收：模型请求 MCP Tool，桌面审批卡 Allow/Deny 后验证结果与 RunEvent；不在该任务扩展配置 UI 或 Secret Store。
