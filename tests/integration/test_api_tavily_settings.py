@@ -26,14 +26,15 @@ from asagent.core.ids import ConnectionId, MessageId, RunId, UserId
 from asagent.core.messages import UserMessage
 from asagent.core.repositories import RunRepository
 from asagent.core.run import Run
-from asagent.storage.in_memory_conversation_repository import (
-    InMemoryConversationRepository,
-)
 from asagent.storage.sqlite.connection_repository import (
     SqliteConnectionRepository,
 )
+from asagent.storage.sqlite.conversation_file_scope_repository import (
+    SqliteConversationFileScopeRepository,
+)
+from asagent.storage.sqlite.conversation_repository import SqliteConversationRepository
 from asagent.tools.mcp_config import load_mcp_server_configs
-from asagent.workspace.settings import WorkspaceSettings
+from asagent.workspace.settings import ConversationWorkspaceSettings
 
 _TOKEN = LocalApiToken("test-token")
 _FIXED_NOW = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
@@ -118,6 +119,8 @@ class TavilyApiContext:
     config_dir: Path
     credential_store: InMemoryCredentialStore
     connections: SqliteConnectionRepository
+    conversation_file_scopes: SqliteConversationFileScopeRepository
+    conversations: SqliteConversationRepository
     workspace_root: Path
 
 
@@ -144,11 +147,12 @@ async def tavily_api_context(tmp_path: Path) -> AsyncIterator[TavilyApiContext]:
         credential_store=credential_store,
         clock=lambda: _FIXED_NOW,
     )
-    workspace_settings = WorkspaceSettings(
-        config_dir=config_dir,
+    conversations = SqliteConversationRepository(database_path)
+    conversation_file_scopes = SqliteConversationFileScopeRepository(database_path)
+    workspace_settings = ConversationWorkspaceSettings(
+        scopes=conversation_file_scopes,
         workspace_root=workspace_root,
     )
-    conversations = InMemoryConversationRepository()
     app = create_app(
         access_token=_TOKEN,
         conversations=conversations,
@@ -178,10 +182,14 @@ async def tavily_api_context(tmp_path: Path) -> AsyncIterator[TavilyApiContext]:
             config_dir=config_dir,
             credential_store=credential_store,
             connections=connections,
+            conversation_file_scopes=conversation_file_scopes,
+            conversations=conversations,
             workspace_root=workspace_root,
         )
 
     await connections.aclose()
+    await conversation_file_scopes.aclose()
+    await conversations.aclose()
 
 
 def _assert_response_never_leaks_api_key(
@@ -269,36 +277,57 @@ async def test_model_settings_reject_missing_or_blank_key_before_one_is_saved(
 
 
 @pytest.mark.asyncio
-async def test_workspace_settings_persist_selected_directories(
+async def test_workspace_settings_persist_selected_files_and_directories(
     tavily_api_context: TavilyApiContext,
     tmp_path: Path,
 ) -> None:
     selected_directory = tmp_path / "selected"
+    selected_file = tmp_path / "report.md"
     selected_directory.mkdir()
+    selected_file.write_text("report", encoding="utf-8")
+    created = await tavily_api_context.client.post("/api/v1/conversations", json={})
+    conversation_id = created.json()["conversation_id"]
 
-    initial = await tavily_api_context.client.get("/api/v1/settings/workspace")
+    initial = await tavily_api_context.client.get(
+        f"/api/v1/conversations/{conversation_id}/file-access",
+    )
     assert initial.status_code == 200
     assert initial.json() == {
         "workspace_root": str(tavily_api_context.workspace_root.resolve()),
         "additional_roots": [],
+        "additional_files": [],
     }
 
     saved = await tavily_api_context.client.put(
-        "/api/v1/settings/workspace",
-        json={"additional_roots": [str(selected_directory)]},
+        f"/api/v1/conversations/{conversation_id}/file-access",
+        json={
+            "additional_roots": [str(selected_directory)],
+            "additional_files": [str(selected_file)],
+        },
     )
     assert saved.status_code == 200
     assert saved.json() == {
         "workspace_root": str(tavily_api_context.workspace_root.resolve()),
         "additional_roots": [str(selected_directory.resolve())],
+        "additional_files": [str(selected_file.resolve())],
     }
 
+    other_created = await tavily_api_context.client.post(
+        "/api/v1/conversations", json={}
+    )
+    other_scope = await tavily_api_context.client.get(
+        f"/api/v1/conversations/{other_created.json()['conversation_id']}/file-access",
+    )
+    assert other_scope.json()["additional_roots"] == []
+    assert other_scope.json()["additional_files"] == []
+
     removed = await tavily_api_context.client.put(
-        "/api/v1/settings/workspace",
-        json={"additional_roots": []},
+        f"/api/v1/conversations/{conversation_id}/file-access",
+        json={"additional_roots": [], "additional_files": []},
     )
     assert removed.status_code == 200
     assert removed.json()["additional_roots"] == []
+    assert removed.json()["additional_files"] == []
 
 
 @pytest.mark.asyncio
@@ -307,14 +336,16 @@ async def test_workspace_settings_reject_invalid_paths_and_unknown_fields(
     tmp_path: Path,
 ) -> None:
     missing_directory = tmp_path / "missing"
+    created = await tavily_api_context.client.post("/api/v1/conversations", json={})
+    conversation_id = created.json()["conversation_id"]
 
     missing = await tavily_api_context.client.put(
-        "/api/v1/settings/workspace",
-        json={"additional_roots": [str(missing_directory)]},
+        f"/api/v1/conversations/{conversation_id}/file-access",
+        json={"additional_roots": [str(missing_directory)], "additional_files": []},
     )
     unknown_field = await tavily_api_context.client.put(
-        "/api/v1/settings/workspace",
-        json={"additional_roots": [], "unexpected": True},
+        f"/api/v1/conversations/{conversation_id}/file-access",
+        json={"additional_roots": [], "additional_files": [], "unexpected": True},
     )
 
     assert missing.status_code == 422

@@ -72,6 +72,12 @@ type ModelSettingsInput = {
 type WorkspaceSettingsStatus = {
   workspace_root: string
   additional_roots: string[]
+  additional_files: string[]
+}
+
+type WorkspaceSettingsInput = {
+  additionalRoots: string[]
+  additionalFiles: string[]
 }
 
 const desktopBridge = {
@@ -110,12 +116,15 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:save-model-settings', input),
   deleteModelSettings: (): Promise<ModelSettingsStatus> =>
     ipcRenderer.invoke('desktop:delete-model-settings'),
-  getWorkspaceSettings: (): Promise<WorkspaceSettingsStatus> =>
-    ipcRenderer.invoke('desktop:get-workspace-settings'),
-  chooseWorkspaceFolder: (): Promise<string | null> =>
-    ipcRenderer.invoke('desktop:choose-workspace-folder'),
-  saveWorkspaceSettings: (additionalRoots: string[]): Promise<WorkspaceSettingsStatus> =>
-    ipcRenderer.invoke('desktop:save-workspace-settings', additionalRoots),
+  getConversationFileAccess: (conversationId: string): Promise<WorkspaceSettingsStatus> =>
+    ipcRenderer.invoke('desktop:get-conversation-file-access', conversationId),
+  chooseWorkspacePath: (): Promise<{ path: string; kind: 'directory' | 'file' } | null> =>
+    ipcRenderer.invoke('desktop:choose-workspace-path'),
+  saveConversationFileAccess: (
+    conversationId: string,
+    input: WorkspaceSettingsInput
+  ): Promise<WorkspaceSettingsStatus> =>
+    ipcRenderer.invoke('desktop:save-conversation-file-access', conversationId, input),
   onRunEvent: (callback: (update: RunUpdate) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, update: RunUpdate): void => {
       callback(update)

@@ -76,6 +76,12 @@ interface ModelSettingsInput {
 interface WorkspaceSettingsStatus {
   workspace_root: string
   additional_roots: string[]
+  additional_files: string[]
+}
+
+interface WorkspaceSettingsInput {
+  additionalRoots: string[]
+  additionalFiles: string[]
 }
 
 interface DesktopBridge {
@@ -99,9 +105,12 @@ interface DesktopBridge {
   getModelSettings(): Promise<ModelSettingsStatus>
   saveModelSettings(input: ModelSettingsInput): Promise<ModelSettingsStatus>
   deleteModelSettings(): Promise<ModelSettingsStatus>
-  getWorkspaceSettings(): Promise<WorkspaceSettingsStatus>
-  chooseWorkspaceFolder(): Promise<string | null>
-  saveWorkspaceSettings(additionalRoots: string[]): Promise<WorkspaceSettingsStatus>
+  getConversationFileAccess(conversationId: string): Promise<WorkspaceSettingsStatus>
+  chooseWorkspacePath(): Promise<{ path: string; kind: 'directory' | 'file' } | null>
+  saveConversationFileAccess(
+    conversationId: string,
+    input: WorkspaceSettingsInput
+  ): Promise<WorkspaceSettingsStatus>
   onRunEvent(callback: (update: RunUpdate) => void): () => void
   onRunStreamError(callback: (error: RunStreamError) => void): () => void
   onToolApprovalRequested(callback: (approval: ToolApproval) => void): () => void

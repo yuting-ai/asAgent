@@ -82,6 +82,7 @@ type ModelSettingsStatus = {
 type WorkspaceSettingsStatus = {
   workspace_root: string
   additional_roots: string[]
+  additional_files: string[]
 }
 
 type ActivityTab = 'approvals' | 'schedule'
@@ -99,6 +100,19 @@ const WORKSPACE_SETTINGS_UPDATE_ERROR = 'File access settings could not be updat
 
 function conversationLabel(title: string | null): string {
   return title ?? 'New conversation'
+}
+
+function fileAccessSummary(settings: WorkspaceSettingsStatus): string {
+  const label = (path: string, kind: 'File' | 'Folder'): string => {
+    const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
+    return `${kind}: ${name} — ${path}`
+  }
+  const paths = [
+    ...settings.additional_roots.map((path) => label(path, 'Folder')),
+    ...settings.additional_files.map((path) => label(path, 'File'))
+  ]
+
+  return paths.join(' · ')
 }
 
 function mcpServerNameFromToolId(toolId: string): string | null {
@@ -315,9 +329,16 @@ export default function App(): React.JSX.Element {
     let cancelled = false
 
     async function loadWorkspaceSettings(): Promise<void> {
+      if (selectedConversationId === null) {
+        setWorkspaceSettings(null)
+        setWorkspaceLoadError(null)
+        setIsWorkspaceLoading(false)
+        return
+      }
+
       setIsWorkspaceLoading(true)
       try {
-        const status = await window.desktop.getWorkspaceSettings()
+        const status = await window.desktop.getConversationFileAccess(selectedConversationId)
         if (!cancelled) {
           setWorkspaceSettings(status)
           setWorkspaceLoadError(null)
@@ -337,7 +358,7 @@ export default function App(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [selectedConversationId])
 
   useEffect(() => {
     let cancelled = false
@@ -890,13 +911,19 @@ export default function App(): React.JSX.Element {
     }
   }
 
-  async function handleAddWorkspaceFolder(): Promise<void> {
-    if (isWorkspaceBusy || workspaceSettings === null) {
+  async function handleAddWorkspacePath(): Promise<void> {
+    if (isWorkspaceBusy || workspaceSettings === null || selectedConversationId === null) {
       return
     }
 
-    const selectedFolder = await window.desktop.chooseWorkspaceFolder()
-    if (selectedFolder === null || workspaceSettings.additional_roots.includes(selectedFolder)) {
+    const selectedPath = await window.desktop.chooseWorkspacePath()
+    if (
+      selectedPath === null ||
+      (selectedPath.kind === 'directory' &&
+        workspaceSettings.additional_roots.includes(selectedPath.path)) ||
+      (selectedPath.kind === 'file' &&
+        workspaceSettings.additional_files.includes(selectedPath.path))
+    ) {
       return
     }
 
@@ -904,10 +931,16 @@ export default function App(): React.JSX.Element {
     setWorkspaceActionError(null)
     try {
       setWorkspaceSettings(
-        await window.desktop.saveWorkspaceSettings([
-          ...workspaceSettings.additional_roots,
-          selectedFolder
-        ])
+        await window.desktop.saveConversationFileAccess(selectedConversationId, {
+          additionalFiles:
+            selectedPath.kind === 'file'
+              ? [...workspaceSettings.additional_files, selectedPath.path]
+              : workspaceSettings.additional_files,
+          additionalRoots:
+            selectedPath.kind === 'directory'
+              ? [...workspaceSettings.additional_roots, selectedPath.path]
+              : workspaceSettings.additional_roots
+        })
       )
     } catch {
       setWorkspaceActionError(WORKSPACE_SETTINGS_UPDATE_ERROR)
@@ -916,8 +949,11 @@ export default function App(): React.JSX.Element {
     }
   }
 
-  async function handleRemoveWorkspaceFolder(folder: string): Promise<void> {
-    if (isWorkspaceBusy || workspaceSettings === null) {
+  async function handleRemoveWorkspacePath(
+    path: string,
+    kind: 'directory' | 'file'
+  ): Promise<void> {
+    if (isWorkspaceBusy || workspaceSettings === null || selectedConversationId === null) {
       return
     }
 
@@ -925,9 +961,16 @@ export default function App(): React.JSX.Element {
     setWorkspaceActionError(null)
     try {
       setWorkspaceSettings(
-        await window.desktop.saveWorkspaceSettings(
-          workspaceSettings.additional_roots.filter((root) => root !== folder)
-        )
+        await window.desktop.saveConversationFileAccess(selectedConversationId, {
+          additionalFiles:
+            kind === 'file'
+              ? workspaceSettings.additional_files.filter((filePath) => filePath !== path)
+              : workspaceSettings.additional_files,
+          additionalRoots:
+            kind === 'directory'
+              ? workspaceSettings.additional_roots.filter((root) => root !== path)
+              : workspaceSettings.additional_roots
+        })
       )
     } catch {
       setWorkspaceActionError(WORKSPACE_SETTINGS_UPDATE_ERROR)
@@ -1264,10 +1307,6 @@ export default function App(): React.JSX.Element {
                       ? conversationLabel(selectedConversation.title)
                       : 'No conversation selected'}
                   </div>
-                  <div className="chat-file-chip">
-                    <Icon path="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6" />
-                    Attachments soon
-                  </div>
                 </div>
 
                 {errorMessage ? <p className="chat-error">{errorMessage}</p> : null}
@@ -1458,16 +1497,36 @@ export default function App(): React.JSX.Element {
                     />
                     <div className="chat-composer-footer">
                       <button
-                        aria-label="Attachments are not available yet"
+                        aria-label="Add a file or folder to local file access"
                         className="chat-attach-btn"
-                        disabled
-                        title="Attachments are not available yet"
+                        disabled={
+                          selectedConversationId === null ||
+                          isWorkspaceLoading ||
+                          isWorkspaceBusy ||
+                          workspaceSettings === null
+                        }
+                        onClick={() => void handleAddWorkspacePath()}
+                        title="Add a file or folder to local file access"
                         type="button"
                       >
                         <Icon path="M12 5v14m-7-7h14" />
                       </button>
-                      <span className="chat-composer-status">
-                        {activeRun === null ? 'Ask asAgent anything' : 'asAgent is working'}
+                      <span
+                        className="chat-composer-status"
+                        title={
+                          workspaceSettings === null
+                            ? undefined
+                            : fileAccessSummary(workspaceSettings)
+                        }
+                      >
+                        {activeRun === null
+                          ? workspaceSettings === null ||
+                            workspaceSettings.additional_roots.length +
+                              workspaceSettings.additional_files.length ===
+                              0
+                            ? 'Add a file or folder to this conversation'
+                            : fileAccessSummary(workspaceSettings)
+                          : 'asAgent is working'}
                       </span>
                       {activeRun === null ? (
                         <button
@@ -1827,10 +1886,10 @@ export default function App(): React.JSX.Element {
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
-                    <div className="settings-section-title">Local file access</div>
+                    <div className="settings-section-title">Conversation file access</div>
                     <p className="settings-section-copy">
-                      Choose folders that asAgent may use in a future file task. This does not
-                      enable file tools or grant write access.
+                      The selected files and folders apply only to the active conversation. This
+                      does not enable file tools or grant write access.
                     </p>
                   </div>
                 </div>
@@ -1841,16 +1900,23 @@ export default function App(): React.JSX.Element {
                 {workspaceLoadError !== null ? (
                   <p className="settings-section-error">{workspaceLoadError}</p>
                 ) : null}
-                {!isWorkspaceLoading &&
+                {selectedConversationId === null ? (
+                  <p className="settings-section-placeholder">
+                    Select a conversation to manage its local file access.
+                  </p>
+                ) : null}
+                {selectedConversationId !== null &&
+                !isWorkspaceLoading &&
                 workspaceLoadError === null &&
                 workspaceSettings !== null ? (
                   <>
                     <p className="settings-section-status">
                       Default workspace: <code>{workspaceSettings.workspace_root}</code>
                     </p>
-                    {workspaceSettings.additional_roots.length === 0 ? (
+                    {workspaceSettings.additional_roots.length === 0 &&
+                    workspaceSettings.additional_files.length === 0 ? (
                       <p className="settings-section-placeholder">
-                        No additional folders are authorized.
+                        No additional files or folders are authorized.
                       </p>
                     ) : (
                       <ul className="settings-directory-list">
@@ -1861,7 +1927,22 @@ export default function App(): React.JSX.Element {
                               className="settings-button settings-button-danger"
                               disabled={isWorkspaceBusy}
                               onClick={() => {
-                                void handleRemoveWorkspaceFolder(folder)
+                                void handleRemoveWorkspacePath(folder, 'directory')
+                              }}
+                              type="button"
+                            >
+                              Remove
+                            </button>
+                          </li>
+                        ))}
+                        {workspaceSettings.additional_files.map((filePath) => (
+                          <li key={filePath}>
+                            <code>{filePath}</code>
+                            <button
+                              className="settings-button settings-button-danger"
+                              disabled={isWorkspaceBusy}
+                              onClick={() => {
+                                void handleRemoveWorkspacePath(filePath, 'file')
                               }}
                               type="button"
                             >
@@ -1876,11 +1957,11 @@ export default function App(): React.JSX.Element {
                         className="settings-button settings-button-primary"
                         disabled={isWorkspaceBusy}
                         onClick={() => {
-                          void handleAddWorkspaceFolder()
+                          void handleAddWorkspacePath()
                         }}
                         type="button"
                       >
-                        Add folder
+                        Add file or folder
                       </button>
                     </div>
                   </>

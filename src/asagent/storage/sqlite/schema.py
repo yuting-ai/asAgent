@@ -35,6 +35,19 @@ conversations = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
+conversation_file_scopes = Table(
+    "conversation_file_scopes",
+    metadata,
+    Column(
+        "conversation_id",
+        String,
+        ForeignKey("conversations.conversation_id", ondelete="RESTRICT"),
+        primary_key=True,
+    ),
+    Column("additional_roots_json", Text, nullable=False),
+    Column("additional_files_json", Text, nullable=False),
+)
+
 messages = Table(
     "messages",
     metadata,

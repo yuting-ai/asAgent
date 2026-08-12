@@ -38,6 +38,27 @@ def test_resolver_allows_explicit_additional_roots(tmp_path: Path) -> None:
     assert resolver.allowed_roots == (workspace_root, additional_root)
 
 
+def test_resolver_allows_an_explicit_file_without_authorizing_its_siblings(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    selected_file = tmp_path / "report.md"
+    sibling_file = tmp_path / "private.md"
+    workspace_root.mkdir()
+    selected_file.write_text("report", encoding="utf-8")
+    sibling_file.write_text("private", encoding="utf-8")
+    resolver = WorkspaceResolver(
+        workspace_root=workspace_root,
+        additional_files=(selected_file,),
+    )
+
+    assert resolver.resolve(selected_file) == selected_file
+    assert resolver.allowed_files == (selected_file,)
+
+    with pytest.raises(WorkspacePathOutsideAllowedRootsError):
+        resolver.resolve(sibling_file)
+
+
 @pytest.mark.parametrize(
     "path",
     [

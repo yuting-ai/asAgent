@@ -795,15 +795,15 @@
 - 替代方案：直接依赖 DeepSeek/其他模型厂商的内置搜索、复制 CowAgent 的多搜索 API 路由、或用 Browser
   抓取搜索结果页替代搜索服务；当前均不作为 asAgent 的默认搜索架构。
 
-### DEC-075：已选择文件夹作为持久、可撤销的未来文件范围
+### DEC-075：已选择文件或文件夹作为会话级、可撤销的未来文件范围
 
 - 日期：2026-08-12
 - 状态：已确认并完成最小桌面实现
-- 背景：`WorkspaceResolver` 和基础文件工具已能约束给定根目录，但用户此前不能在桌面应用中明确选择、查看或撤销 Workspace 外的文件夹。因此若直接注册文件工具，只能使用默认 Workspace，或不安全地依赖宿主目录。
-- 决策：以 `config_dir/workspace.json` 保存默认 Workspace 之外的额外允许根；文件格式仅含规范化绝对目录路径。Preferences 只能通过 Electron Main 的原生目录选择器添加目录，Main 再经固定、Bearer 认证的 Local API 保存完整列表。保存时后端验证目录存在、解析符号链接、去重并移除默认 Workspace；Renderer 只得到目录列表，不能读取目录内容或取得 Node/Token/通用 HTTP 权限。当前不实现整台电脑范围，也不在此任务将文件工具导入 Runtime。
-- 原因：目录选择是用户可理解且可撤销的“未来可寻址范围”授权；将路径规范化和持久化放在 Python 边界，能保证未来 `WorkspaceResolver` 复用同一可信根，而不把文件系统能力交给 Renderer。先不启用 Tool 可避免一个设置页面变成未明确批准的读取能力。
-- 影响：`asagent serve` 确保默认 Workspace 目录存在并注入 Workspace Settings API。Preferences 可显示默认 Workspace、添加/移除额外目录；这些变更立即持久化，但当前不会触发 Sidecar 重启，因为尚无运行中的文件 Tool 消费该范围。后续独立任务必须从此设置构造 `WorkspaceResolver`，再受 `filesystem.read`、逐次审批、超时和审计边界约束接入只读文件工具。
-- 替代方案：把目录直接保存在 Electron Renderer/本地存储、让 Main 直接读写配置、默认授予用户主目录、立即启用所有文件工具、或为当前单一偏好新建 SQLite 表/Repository；当前均不采用。
+- 背景：`WorkspaceResolver` 和基础文件工具已能约束给定根目录，但用户此前不能在桌面应用中明确选择、查看或撤销 Workspace 外的路径。因此若直接注册文件工具，只能使用默认 Workspace，或不安全地依赖宿主目录。
+- 决策：将默认 Workspace 外的额外允许根与单文件允许项，按 `conversation_id` 写入 SQLite 的 `conversation_file_scopes`。Preferences 和 Chat Composer `+` 通过 Electron Main 的同一原生文件/目录选择器添加路径，Main 再经固定、Bearer 认证的 Conversation Local API 保存完整列表。保存时后端验证路径存在、解析符号链接、去重并移除默认 Workspace 或已被允许根覆盖的单文件；Renderer 只得到当前 Conversation 的路径列表，不能读取内容或取得 Node/Token/通用 HTTP 权限。当前不实现整台电脑范围，也不在此任务将文件工具导入 Runtime。
+- 原因：文件夹适合递归范围，而单文件适合精确、最小化的授权；两者分开建模可防止“选择一个文件”悄然变成“授权其父目录”。权限还必须受 Conversation 约束：用户在一个任务中附加的私有文件，不能因开始另一段对话而自动暴露。将路径规范化和持久化放在 Python 边界，能保证未来 `WorkspaceResolver` 按 Run 所属 Conversation 复用同一可信范围，而不把文件系统能力交给 Renderer。先不启用 Tool 可避免一个设置页面变成未明确批准的读取能力。
+- 影响：`asagent serve` 确保默认 Workspace 目录存在，并注入会话级 File Access API。Preferences 和 Composer 可显示或添加/移除当前 Conversation 的额外路径；这些变更立即持久化，不会触发 Sidecar 重启，因为尚无运行中的文件 Tool 消费该范围。旧的全局本地范围配置不会被静默迁移到 Conversation。后续独立任务必须从 Run 的 Conversation 加载此设置构造 `WorkspaceResolver`，再受 `filesystem.read`、逐次审批、超时和审计边界约束接入只读文件工具。
+- 替代方案：把范围作为全局偏好、直接保存在 Electron Renderer/本地存储、让 Main 直接读写配置、默认授予用户主目录、立即启用所有文件工具；当前均不采用。
 
 ## 2. 技术选型
 

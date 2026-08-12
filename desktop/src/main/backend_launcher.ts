@@ -93,6 +93,12 @@ export type ModelSettingsInput = {
 export type WorkspaceSettingsStatus = {
   workspace_root: string
   additional_roots: string[]
+  additional_files: string[]
+}
+
+export type WorkspaceSettingsInput = {
+  additionalRoots: string[]
+  additionalFiles: string[]
 }
 
 type BackendLauncherOptions = {
@@ -322,13 +328,17 @@ export class BackendLauncher {
     return this.requestJson('/api/v1/settings/model', 'DELETE')
   }
 
-  async getWorkspaceSettings(): Promise<WorkspaceSettingsStatus> {
-    return this.requestJson('/api/v1/settings/workspace', 'GET')
+  async getConversationFileAccess(conversationId: string): Promise<WorkspaceSettingsStatus> {
+    return this.requestJson(`/api/v1/conversations/${conversationId}/file-access`, 'GET')
   }
 
-  async saveWorkspaceSettings(additionalRoots: string[]): Promise<WorkspaceSettingsStatus> {
-    return this.requestJson('/api/v1/settings/workspace', 'PUT', {
-      additional_roots: additionalRoots
+  async saveConversationFileAccess(
+    conversationId: string,
+    input: WorkspaceSettingsInput
+  ): Promise<WorkspaceSettingsStatus> {
+    return this.requestJson(`/api/v1/conversations/${conversationId}/file-access`, 'PUT', {
+      additional_roots: input.additionalRoots,
+      additional_files: input.additionalFiles
     })
   }
 

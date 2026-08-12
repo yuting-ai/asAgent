@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
+import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
@@ -138,16 +139,40 @@ function parseModelSettingsInput(value: unknown): {
   }
 }
 
-function parseWorkspaceRoots(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length > 16) {
-    throw new Error('Workspace folders are invalid.')
+function parseWorkspaceSettings(value: unknown): {
+  additionalFiles: string[]
+  additionalRoots: string[]
+} {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('Workspace paths are invalid.')
   }
 
-  if (value.some((root) => typeof root !== 'string' || !root.trim())) {
-    throw new Error('Workspace folders are invalid.')
+  const input = value as Record<string, unknown>
+  if (
+    Object.keys(input).length !== 2 ||
+    !('additionalFiles' in input) ||
+    !('additionalRoots' in input)
+  ) {
+    throw new Error('Workspace paths are invalid.')
   }
 
-  return value.map((root) => root.trim())
+  const additionalFiles = input['additionalFiles']
+  const additionalRoots = input['additionalRoots']
+  if (
+    !Array.isArray(additionalFiles) ||
+    !Array.isArray(additionalRoots) ||
+    additionalFiles.length + additionalRoots.length > 16 ||
+    [...additionalFiles, ...additionalRoots].some(
+      (path) => typeof path !== 'string' || !path.trim()
+    )
+  ) {
+    throw new Error('Workspace paths are invalid.')
+  }
+
+  return {
+    additionalFiles: additionalFiles.map((path) => (path as string).trim()),
+    additionalRoots: additionalRoots.map((path) => (path as string).trim())
+  }
 }
 
 function createDevelopmentBackendLauncher(): BackendLauncher {
@@ -510,17 +535,20 @@ app.whenReady().then(async () => {
     return getReadyBackendLauncher().deleteModelSettings()
   })
 
-  ipcMain.handle('desktop:get-workspace-settings', (event) => {
+  ipcMain.handle('desktop:get-conversation-file-access', (event, conversationId: unknown) => {
     const frame = event.senderFrame
     if (frame === null) {
       throw new Error('Untrusted renderer IPC request.')
     }
 
     assertTrustedRenderer(frame.url)
-    return getReadyBackendLauncher().getWorkspaceSettings()
+    if (typeof conversationId !== 'string' || !conversationId.trim()) {
+      throw new Error('Conversation ID is invalid.')
+    }
+    return getReadyBackendLauncher().getConversationFileAccess(conversationId.trim())
   })
 
-  ipcMain.handle('desktop:choose-workspace-folder', async (event) => {
+  ipcMain.handle('desktop:choose-workspace-path', async (event) => {
     const frame = event.senderFrame
     if (frame === null) {
       throw new Error('Untrusted renderer IPC request.')
@@ -528,20 +556,41 @@ app.whenReady().then(async () => {
 
     assertTrustedRenderer(frame.url)
     const selection = await dialog.showOpenDialog({
-      properties: ['openDirectory', 'createDirectory']
+      properties: ['openFile', 'openDirectory']
     })
-    return selection.canceled ? null : (selection.filePaths[0] ?? null)
-  })
-
-  ipcMain.handle('desktop:save-workspace-settings', (event, additionalRoots: unknown) => {
-    const frame = event.senderFrame
-    if (frame === null) {
-      throw new Error('Untrusted renderer IPC request.')
+    const selectedPath = selection.filePaths[0]
+    if (selection.canceled || selectedPath === undefined) {
+      return null
     }
 
-    assertTrustedRenderer(frame.url)
-    return getReadyBackendLauncher().saveWorkspaceSettings(parseWorkspaceRoots(additionalRoots))
+    const selectedPathStats = await stat(selectedPath)
+    if (!selectedPathStats.isDirectory() && !selectedPathStats.isFile()) {
+      throw new Error('Selected workspace path is invalid.')
+    }
+    return {
+      path: selectedPath,
+      kind: selectedPathStats.isDirectory() ? 'directory' : 'file'
+    }
   })
+
+  ipcMain.handle(
+    'desktop:save-conversation-file-access',
+    (event, conversationId: unknown, input: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) {
+        throw new Error('Untrusted renderer IPC request.')
+      }
+
+      assertTrustedRenderer(frame.url)
+      if (typeof conversationId !== 'string' || !conversationId.trim()) {
+        throw new Error('Conversation ID is invalid.')
+      }
+      return getReadyBackendLauncher().saveConversationFileAccess(
+        conversationId.trim(),
+        parseWorkspaceSettings(input)
+      )
+    }
+  )
 
   createWindow()
 

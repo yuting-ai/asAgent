@@ -2,6 +2,7 @@ from typing import Protocol, runtime_checkable
 
 from asagent.core.connection import Connection
 from asagent.core.conversation import Conversation
+from asagent.core.conversation_file_scope import ConversationFileScope
 from asagent.core.ids import ConnectionId, ConversationId, RunId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.run import Run
@@ -68,3 +69,10 @@ class ConnectionRepository(Protocol):
     async def save(self, connection: Connection) -> None: ...
 
     async def delete(self, connection_id: ConnectionId) -> bool: ...
+
+
+@runtime_checkable
+class ConversationFileScopeRepository(Protocol):
+    async def get(self, conversation_id: ConversationId) -> ConversationFileScope: ...
+
+    async def save(self, scope: ConversationFileScope) -> None: ...

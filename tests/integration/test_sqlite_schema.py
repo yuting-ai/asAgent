@@ -36,6 +36,7 @@ def test_upgrade_from_empty_database_creates_initial_schema(tmp_path: Path) -> N
 
     assert table_names == {
         "connections",
+        "conversation_file_scopes",
         "conversations",
         "messages",
         "run_events",
@@ -106,6 +107,18 @@ def test_initial_schema_enforces_foreign_keys_and_invariants(tmp_path: Path) -> 
                 ),
                 {"time": timestamp},
             )
+
+            with pytest.raises(sa.exc.IntegrityError):
+                with connection.begin_nested():
+                    connection.execute(
+                        sa.text(
+                            "INSERT INTO conversation_file_scopes "
+                            "(conversation_id, additional_roots_json, "
+                            "additional_files_json) "
+                            "VALUES ('missing-conversation', '[]', '[]')"
+                        ),
+                    )
+
             connection.execute(
                 sa.text(
                     "INSERT INTO runs "

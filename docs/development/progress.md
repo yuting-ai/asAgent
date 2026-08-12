@@ -3429,32 +3429,31 @@
 
 - 在单独的桌面体验任务中，从已持久化的 RunEvent 回放重建历史 Run 的折叠活动摘要；不新增摘要表，也不保存模型或工具正文。
 
-## 2026-08-12 本地文件夹范围授权工作记录
+## 2026-08-12 本地文件/文件夹范围授权工作记录
 
 ### 完成
 
-- 新增 `WorkspaceSettings`，以严格、非敏感的 `config/workspace.json` 保存默认 Workspace 之外的额外允许根。
-  保存时目录必须存在，路径会解析符号链接并去重；文件使用临时文件替换写入。损坏 JSON、未知字段和相对路径配置会明确拒绝。
-- Sidecar 现在确保默认 Workspace 目录存在，并提供 Bearer 认证的 `GET` / `PUT /api/v1/settings/workspace`。
-  API 只返回默认根与额外根；它不读取、扫描或上传用户文件。
-- Electron Preferences 新增 Local file access 区域。Renderer 请求 Main 打开原生目录选择器，再通过窄 Preload/Main
-  IPC 保存或移除完整目录列表；它不能取得 Node、任意文件读取、Token 或通用 HTTP 能力。
+- 新增会话级 `ConversationWorkspaceSettings` 与 SQLite `conversation_file_scopes`，分别保存每个 Conversation 在默认 Workspace 之外的额外允许根和单文件允许项。
+  保存时文件夹或文件必须存在，路径会解析符号链接并去重；文件夹递归覆盖其内容，单文件不会自动扩大为父目录权限。不同 Conversation 互相隔离，旧的全局范围不会被静默扩大到所有 Conversation。
+- Sidecar 现在确保默认 Workspace 目录存在，并提供 Bearer 认证、归属校验的 `GET` / `PUT /api/v1/conversations/{conversation_id}/file-access`。
+  API 只返回当前 Conversation 的默认根、额外根和单文件允许项；它不读取、扫描或上传用户文件。
+- Electron Preferences 和 Chat Composer 的 `+` 共用当前 Conversation 的 Local file access 操作。Renderer 请求 Main 打开原生文件/目录选择器，
+  再通过窄 Preload/Main IPC 保存或移除当前 Conversation 的完整路径列表；它不能取得 Node、任意文件读取、Token 或通用 HTTP 能力。
 - 当前设置仅建立持久、可撤销的未来访问范围；文件工具仍未注册到实际 Runtime，且没有写入、删除、Shell 或模型文件访问能力。
 
 ### 验证
 
-- `tests/unit/test_workspace_settings.py` 与扩展后的设置 API 集成测试共 16 passed，覆盖规范化、持久化、缺失/非目录根、
-  损坏配置、API 保存/移除和无效路径/未知字段拒绝。
-- `scripts/check.sh` 通过：360 passed；Ruff、strict mypy（165 个 source files）与锁文件检查均通过。
+- `tests/unit/test_workspace_settings.py`、`tests/unit/test_workspace_resolver.py`、SQLite Schema 与扩展后的设置 API 集成测试覆盖规范化、Conversation 隔离、单文件精确范围、缺失/错误类型路径、API 保存/移除、归属校验和无效路径/未知字段拒绝。
+- `scripts/check.sh` 通过：361 passed；Ruff、strict mypy（167 个 source files）与锁文件检查均通过。
 - Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm test`（25 passed）和 `npm run build` 均通过。
 
 ### 决策变化
 
-- 新增 DEC-075：已选择文件夹作为持久、可撤销的未来文件范围。
+- 更新 DEC-075：已选择文件或文件夹作为会话级、可撤销的未来文件范围。
 
 ### 下一步
 
-- 在独立任务中，读取已保存的额外根构造实际 `WorkspaceResolver`，并把 `filesystem.list` 与
+- 在独立任务中，读取已保存的额外根和单文件允许项构造实际 `WorkspaceResolver`，并把 `filesystem.list` 与
   `filesystem.read_file` 作为受 `filesystem.read` 权限约束的只读工具接入实际 Runtime；不实现写入、删除、
   全盘访问或递归扫描。
 
@@ -3462,10 +3461,11 @@
 
 ### Complete
 
-- Chat Composer now uses a larger rounded input surface with a separate lower control row, a disabled attachment
-  affordance, and a circular upward-arrow send action. The existing submit and cooperative Stop behavior are unchanged.
-- Attachments remain explicitly unavailable: the new control does not select, upload, read, or expose local files.
-  Actual attachment support must be implemented later through the saved Workspace scope and existing permission path.
+- Chat Composer now uses a larger rounded input surface with a separate lower control row, a `+` control for selecting
+  a local file or folder for the active Conversation, and a circular upward-arrow send action. The existing submit and
+  cooperative Stop behavior are unchanged.
+- The `+` control persists only an authorization scope. It does not upload, read, scan, or expose file content to the
+  model; actual file-tool consumption remains a later task.
 
 ### Verification
 

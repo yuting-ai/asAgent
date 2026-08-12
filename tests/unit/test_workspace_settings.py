@@ -1,62 +1,100 @@
-import json
 from pathlib import Path
 
 import pytest
 
-from asagent.workspace.settings import (
-    WorkspaceSettings,
-    WorkspaceSettingsConfigurationError,
-)
+from asagent.core.conversation_file_scope import ConversationFileScope
+from asagent.core.ids import ConversationId
+from asagent.workspace.settings import ConversationWorkspaceSettings
 
 
-def test_workspace_settings_save_normalizes_and_persists_additional_roots(
+class InMemoryConversationFileScopeRepository:
+    def __init__(self) -> None:
+        self._scopes: dict[ConversationId, ConversationFileScope] = {}
+
+    async def get(self, conversation_id: ConversationId) -> ConversationFileScope:
+        return self._scopes.get(
+            conversation_id,
+            ConversationFileScope(conversation_id=conversation_id),
+        )
+
+    async def save(self, scope: ConversationFileScope) -> None:
+        self._scopes[scope.conversation_id] = scope
+
+
+@pytest.mark.asyncio
+async def test_conversation_workspace_settings_normalizes_selected_paths_per_conversation(
     tmp_path: Path,
 ) -> None:
     workspace_root = tmp_path / "workspace"
     selected_root = tmp_path / "selected"
+    selected_file = tmp_path / "report.md"
     workspace_root.mkdir()
     selected_root.mkdir()
-    settings = WorkspaceSettings(
-        config_dir=tmp_path / "config",
+    selected_file.write_text("report", encoding="utf-8")
+    settings = ConversationWorkspaceSettings(
+        scopes=InMemoryConversationFileScopeRepository(),
+        workspace_root=workspace_root,
+    )
+    conversation_id = ConversationId("conversation-1")
+
+    saved = await settings.save(
+        conversation_id=conversation_id,
+        additional_roots=(selected_root / ".", selected_root),
+        additional_files=(selected_file,),
+    )
+
+    assert saved.conversation_id == conversation_id
+    assert saved.workspace_root == workspace_root.resolve()
+    assert saved.additional_roots == (selected_root.resolve(),)
+    assert saved.additional_files == (selected_file.resolve(),)
+    assert await settings.get_status(conversation_id) == saved
+
+
+@pytest.mark.asyncio
+async def test_conversation_workspace_settings_keeps_scopes_isolated(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    selected_file = tmp_path / "report.md"
+    workspace_root.mkdir()
+    selected_file.write_text("report", encoding="utf-8")
+    settings = ConversationWorkspaceSettings(
+        scopes=InMemoryConversationFileScopeRepository(),
         workspace_root=workspace_root,
     )
 
-    saved = settings.save(additional_roots=(selected_root / ".", selected_root))
+    await settings.save(
+        conversation_id=ConversationId("conversation-1"),
+        additional_roots=(),
+        additional_files=(selected_file,),
+    )
 
-    assert saved.workspace_root == workspace_root.resolve()
-    assert saved.additional_roots == (selected_root.resolve(),)
-    assert settings.get_status() == saved
-    assert json.loads((tmp_path / "config" / "workspace.json").read_text()) == {
-        "additional_roots": [str(selected_root.resolve())],
-    }
+    assert (
+        await settings.get_status(ConversationId("conversation-2"))
+    ).additional_files == ()
 
 
-def test_workspace_settings_rejects_a_missing_or_non_directory_root(
+@pytest.mark.asyncio
+async def test_conversation_workspace_settings_rejects_invalid_selected_paths(
     tmp_path: Path,
 ) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
-    settings = WorkspaceSettings(
-        config_dir=tmp_path / "config",
+    settings = ConversationWorkspaceSettings(
+        scopes=InMemoryConversationFileScopeRepository(),
         workspace_root=workspace_root,
     )
 
     with pytest.raises(ValueError, match="additional_roots must exist"):
-        settings.save(additional_roots=(tmp_path / "missing",))
+        await settings.save(
+            conversation_id=ConversationId("conversation-1"),
+            additional_roots=(tmp_path / "missing",),
+            additional_files=(),
+        )
 
-    file_path = tmp_path / "file.txt"
-    file_path.write_text("not a directory", encoding="utf-8")
-    with pytest.raises(ValueError, match="additional_roots must be a directory"):
-        settings.save(additional_roots=(file_path,))
-
-
-def test_workspace_settings_rejects_invalid_saved_configuration(tmp_path: Path) -> None:
-    workspace_root = tmp_path / "workspace"
-    config_dir = tmp_path / "config"
-    workspace_root.mkdir()
-    config_dir.mkdir()
-    (config_dir / "workspace.json").write_text('{"unexpected": []}', encoding="utf-8")
-    settings = WorkspaceSettings(config_dir=config_dir, workspace_root=workspace_root)
-
-    with pytest.raises(WorkspaceSettingsConfigurationError, match="invalid"):
-        settings.get_status()
+    with pytest.raises(ValueError, match="additional_files must exist"):
+        await settings.save(
+            conversation_id=ConversationId("conversation-1"),
+            additional_roots=(),
+            additional_files=(tmp_path / "missing",),
+        )

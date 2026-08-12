@@ -1932,6 +1932,12 @@
   opacity: 0.58;
 }
 
+.chat-attach-btn:hover:not(:disabled) {
+  border-color: #d9e1ec;
+  background: #f2f5f9;
+  color: #202b3d;
+}
+
 .chat-attach-btn svg {
   width: 21px;
   height: 21px;
@@ -1940,7 +1946,10 @@
 .chat-composer-status {
   min-width: 0;
   flex: 1;
+  overflow: hidden;
   color: #8794a8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
 }
 

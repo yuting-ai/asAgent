@@ -185,7 +185,7 @@ describe('BackendLauncher', () => {
     )
   })
 
-  it('reads and saves workspace folders through its private backend connection', async () => {
+  it('reads and saves one conversation file access through its private backend connection', async () => {
     const child = createChild()
     const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
     const fetchBackend = vi
@@ -195,7 +195,8 @@ describe('BackendLauncher', () => {
         new Response(
           JSON.stringify({
             workspace_root: '/project/workspace',
-            additional_roots: ['/project/files']
+            additional_roots: ['/project/files'],
+            additional_files: ['/project/brief.pdf']
           }),
           { status: 200 }
         )
@@ -204,7 +205,8 @@ describe('BackendLauncher', () => {
         new Response(
           JSON.stringify({
             workspace_root: '/project/workspace',
-            additional_roots: ['/project/files', '/project/notes']
+            additional_roots: ['/project/files', '/project/notes'],
+            additional_files: ['/project/brief.pdf', '/project/todo.md']
           }),
           { status: 200 }
         )
@@ -222,21 +224,29 @@ describe('BackendLauncher', () => {
     )
     await starting
 
-    await expect(launcher.getWorkspaceSettings()).resolves.toEqual({
+    await expect(launcher.getConversationFileAccess('conv-1')).resolves.toEqual({
       workspace_root: '/project/workspace',
-      additional_roots: ['/project/files']
+      additional_roots: ['/project/files'],
+      additional_files: ['/project/brief.pdf']
     })
     await expect(
-      launcher.saveWorkspaceSettings(['/project/files', '/project/notes'])
+      launcher.saveConversationFileAccess('conv-1', {
+        additionalRoots: ['/project/files', '/project/notes'],
+        additionalFiles: ['/project/brief.pdf', '/project/todo.md']
+      })
     ).resolves.toEqual({
       workspace_root: '/project/workspace',
-      additional_roots: ['/project/files', '/project/notes']
+      additional_roots: ['/project/files', '/project/notes'],
+      additional_files: ['/project/brief.pdf', '/project/todo.md']
     })
     expect(fetchBackend).toHaveBeenLastCalledWith(
-      'http://127.0.0.1:43123/api/v1/settings/workspace',
+      'http://127.0.0.1:43123/api/v1/conversations/conv-1/file-access',
       expect.objectContaining({
         method: 'PUT',
-        body: JSON.stringify({ additional_roots: ['/project/files', '/project/notes'] })
+        body: JSON.stringify({
+          additional_roots: ['/project/files', '/project/notes'],
+          additional_files: ['/project/brief.pdf', '/project/todo.md']
+        })
       })
     )
   })

@@ -39,7 +39,10 @@ from asagent.tools.approval import (
     ToolApprovalDecision,
     ToolApprovalRequest,
 )
-from asagent.workspace.settings import WorkspaceSettings, WorkspaceSettingsStatus
+from asagent.workspace.settings import (
+    ConversationWorkspaceSettings,
+    WorkspaceSettingsStatus,
+)
 
 _LOCAL_USER_ID: Final = UserId("local-user")
 _EVENT_POLL_INTERVAL_SECONDS: Final = 0.1
@@ -235,6 +238,7 @@ class UpdateTavilySettingsRequest(BaseModel):
 class WorkspaceSettingsResponse(BaseModel):
     workspace_root: str
     additional_roots: list[str]
+    additional_files: list[str]
 
     @classmethod
     def from_status(
@@ -243,6 +247,7 @@ class WorkspaceSettingsResponse(BaseModel):
         return cls(
             workspace_root=str(status.workspace_root),
             additional_roots=[str(root) for root in status.additional_roots],
+            additional_files=[str(file_path) for file_path in status.additional_files],
         )
 
 
@@ -250,12 +255,20 @@ class UpdateWorkspaceSettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     additional_roots: list[str] = Field(max_length=16)
+    additional_files: list[str] = Field(max_length=16)
 
     @field_validator("additional_roots")
     @classmethod
     def additional_roots_must_be_nonblank(cls, value: list[str]) -> list[str]:
         if any(not root.strip() for root in value):
             raise ValueError("additional_roots must not contain blank paths")
+        return value
+
+    @field_validator("additional_files")
+    @classmethod
+    def additional_files_must_be_nonblank(cls, value: list[str]) -> list[str]:
+        if any(not file_path.strip() for file_path in value):
+            raise ValueError("additional_files must not contain blank paths")
         return value
 
 
@@ -270,7 +283,7 @@ def create_app(
     tool_approvals: PendingToolApprovalPolicy | None = None,
     tavily_settings: TavilySettings | None = None,
     model_settings: ModelSettings | None = None,
-    workspace_settings: WorkspaceSettings | None = None,
+    workspace_settings: ConversationWorkspaceSettings | None = None,
     conversation_id_factory: Callable[[], ConversationId] | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
@@ -298,6 +311,15 @@ def create_app(
             )
 
         return stored_run
+
+    async def get_local_conversation(conversation_id: ConversationId) -> Conversation:
+        conversation = await conversations.get(conversation_id)
+        if conversation is None or conversation.user_id != _LOCAL_USER_ID:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="conversation not found",
+            )
+        return conversation
 
     async def get_pending_approval(approval_id: ApprovalId) -> ToolApprovalRequest:
         if tool_approvals is None:
@@ -636,33 +658,42 @@ def create_app(
     if workspace_settings is not None:
 
         @app.get(
-            "/api/v1/settings/workspace",
+            "/api/v1/conversations/{conversation_id}/file-access",
             response_model=WorkspaceSettingsResponse,
             dependencies=[Depends(authenticate)],
         )
-        async def get_workspace_settings() -> WorkspaceSettingsResponse:
+        async def get_workspace_settings(
+            conversation_id: str,
+        ) -> WorkspaceSettingsResponse:
+            conversation = await get_local_conversation(ConversationId(conversation_id))
             return WorkspaceSettingsResponse.from_status(
-                workspace_settings.get_status()
+                await workspace_settings.get_status(conversation.conversation_id)
             )
 
         @app.put(
-            "/api/v1/settings/workspace",
+            "/api/v1/conversations/{conversation_id}/file-access",
             response_model=WorkspaceSettingsResponse,
             dependencies=[Depends(authenticate)],
         )
         async def update_workspace_settings(
+            conversation_id: str,
             request: UpdateWorkspaceSettingsRequest,
         ) -> WorkspaceSettingsResponse:
+            conversation = await get_local_conversation(ConversationId(conversation_id))
             try:
-                saved_status = workspace_settings.save(
+                saved_status = await workspace_settings.save(
+                    conversation_id=conversation.conversation_id,
                     additional_roots=tuple(
                         Path(root) for root in request.additional_roots
+                    ),
+                    additional_files=tuple(
+                        Path(file_path) for file_path in request.additional_files
                     ),
                 )
             except ValueError as error:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail="workspace folders are invalid",
+                    detail="workspace paths are invalid",
                 ) from error
             return WorkspaceSettingsResponse.from_status(saved_status)
 

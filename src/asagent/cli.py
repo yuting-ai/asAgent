@@ -69,6 +69,9 @@ from asagent.storage.event_publisher import RepositoryEventPublisher
 from asagent.storage.sqlite.connection_repository import (
     SqliteConnectionRepository,
 )
+from asagent.storage.sqlite.conversation_file_scope_repository import (
+    SqliteConversationFileScopeRepository,
+)
 from asagent.storage.sqlite.conversation_repository import (
     SqliteConversationRepository,
 )
@@ -86,7 +89,7 @@ from asagent.tools.mcp_config import load_mcp_server_configs
 from asagent.tools.mcp_manager import McpServerManager
 from asagent.tools.registry import ToolRegistry
 from asagent.tools.snapshot import ToolSnapshot
-from asagent.workspace.settings import WorkspaceSettings
+from asagent.workspace.settings import ConversationWorkspaceSettings
 
 _BUILTIN_TOOL_PERMISSIONS = frozenset({"tool.execute"})
 _MCP_SUBPROCESS_ENVIRONMENT_NAMES = ("PATH",)
@@ -597,6 +600,7 @@ async def _run_main(args: argparse.Namespace) -> None:
             alembic_config_path=_alembic_config_path(),
         )
         conversations = SqliteConversationRepository(database_path)
+        conversation_file_scopes = SqliteConversationFileScopeRepository(database_path)
         connections = SqliteConnectionRepository(database_path)
         runs = SqliteRunRepository(database_path)
         starter = SqliteRunStarter(database_path)
@@ -614,8 +618,8 @@ async def _run_main(args: argparse.Namespace) -> None:
             credential_store=credential_store,
             clock=now,
         )
-        workspace_settings = WorkspaceSettings(
-            config_dir=paths.config_dir,
+        workspace_settings = ConversationWorkspaceSettings(
+            scopes=conversation_file_scopes,
             workspace_root=paths.workspace_dir,
         )
         tool_approvals = PendingToolApprovalPolicy()
@@ -751,6 +755,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                 await http_client.aclose()
             await runs.aclose()
             await conversations.aclose()
+            await conversation_file_scopes.aclose()
             await connections.aclose()
 
         return
