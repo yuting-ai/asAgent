@@ -484,6 +484,11 @@ mcp:{server_name}:{tool_name}:{schema_hash}
 
 其中 `schema_hash` 是对 `input_schema` 做稳定 JSON 规范化后的 SHA-256 截断。不同 Server
 提供同名工具时不得覆盖。当前尚未实现 Server Manager、外部 `mcp.json` 配置或 Loop 自动导入。
+`tests/integration/test_mcp_agent_loop.py` 已验证最小完整链路：测试 MCP Server 经过
+`McpClient`、`McpTool`、`ToolRegistry` 和 `ToolSnapshot` 后，脚本化 Model Provider 能看见
+Provider 可见工具名并请求调用；`AgentLoop` 再经 `ToolExecutor` 的 `mcp.execute` 权限与批准
+Gate 执行，配对 TOOL message 将结果返回下一轮模型上下文。这是受控集成测试，不表示当前
+应用组合根会自动启动、导入或授予任意 MCP Server。
 
 ## 12. Workspace 架构
 

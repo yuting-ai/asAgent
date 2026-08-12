@@ -2928,5 +2928,29 @@
 
 ### 下一步
 
-- 在不扩大 Server Manager / 外部配置范围的前提下，评估是否将已注册 MCP 工具接入一次
-  Agent Loop 冒烟路径；仍不实现 legacy fallback、分页或真实第三方 Server。
+- 在不扩大 Server Manager / 外部配置范围的前提下，设计最小 MCP Server 生命周期所有者：
+  明确谁启动、持有、关闭 Client，并使当前测试导入路径成为可复用的受控组合；仍不实现
+  legacy fallback、分页或真实第三方 Server。
+
+## 2026-08-12 阶段 8 MCP 到 Agent Loop 冒烟工作记录
+
+### 完成
+
+- 新增 `tests/integration/test_mcp_agent_loop.py`，覆盖测试 MCP Server 的 `add` 工具经
+  `McpClient`、`McpTool`、`ToolRegistry`、`ToolSnapshot`、`AgentLoop` 与 `ToolExecutor`
+  回到下一轮模型上下文的完整链路。
+- 脚本化 Fake Model Provider 在第一个请求中看见 Provider 可见工具定义并选择调用；执行路径
+  仍要求 `mcp.execute` 权限与明确同意的审批 Policy，随后把配对 TOOL 结果 `"5"` 交给第二轮
+  模型请求。Fake Model 只固定模型决策，不替代实际的 stdio MCP Client/Server 通信。
+- 当前应用组合根不会自动发现、启动或授权 MCP Server；本测试只确认现有统一工具边界能够承载
+  已受控导入的 MCP 工具。
+
+### 验证
+
+- `tests/integration/test_mcp_agent_loop.py` 通过；完整 `scripts/check.sh` 为 287 passed。
+- Ruff、strict mypy（141 个 source files）与锁文件检查均通过。
+
+### 下一步
+
+- 设计最小 MCP Server 生命周期所有者，明确 Client 的启动、持有、关闭与受控导入位置；不在
+  该任务接入外部配置、legacy fallback、分页、真实第三方 Server 或桌面设置页。
