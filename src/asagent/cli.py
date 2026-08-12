@@ -86,6 +86,7 @@ from asagent.tools.builtin.current_time import CurrentTimeTool
 from asagent.tools.builtin.echo import EchoTool
 from asagent.tools.builtin.filesystem_list import FilesystemListTool
 from asagent.tools.builtin.filesystem_read_file import FilesystemReadFileTool
+from asagent.tools.builtin.filesystem_search_files import FilesystemSearchFilesTool
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.mcp_config import load_mcp_server_configs
 from asagent.tools.mcp_manager import McpServerManager
@@ -198,6 +199,7 @@ async def _registry_for_conversation(
     registry = base_registry.copy()
     registry.register(FilesystemListTool(resolver))
     registry.register(FilesystemReadFileTool(resolver))
+    registry.register(FilesystemSearchFilesTool(resolver))
     return registry
 
 

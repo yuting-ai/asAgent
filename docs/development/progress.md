@@ -3493,6 +3493,28 @@
 
 - 在独立任务中设计 `search_files`：仅搜索当前 Conversation 已授权文件夹，限制匹配数、单文件大小、总输出和超时；它不替代已完成的文件范围可发现性。
 
+## 2026-08-12 会话级文件搜索工具
+
+### 完成
+
+- 新增只读 `filesystem.search_files`，使模型能够在当前 Conversation 已授权目录中递归查找未知位置的文件，而不必猜测精确文件名。
+- 搜索按大小写不敏感的字面查询匹配文件名与 UTF-8 文本；可指定单个已授权目录，省略路径时仅搜索当前 Conversation 可访问的 Workspace 根。
+- 工具不使用正则、不建立索引、不后台扫描，也不返回完整文件正文。它最多扫描 1,000 个文件、每个文件最多读取 64 KiB、最多返回 20 项含相对路径和短片段的匹配；二进制、不可读、超限文件与符号链接都会跳过，截断会明确告知模型。
+- 持久化 Runtime 的 Conversation 专属 Registry 现注册 `filesystem.list`、`filesystem.read_file` 与 `filesystem.search_files`。因此 Tool Snapshot、权限、超时、审计和文件范围仍严格绑定当前 Run 的 Conversation，不会扩大到其他会话或整台电脑。
+
+### 验证
+
+- 定向测试覆盖文件名/内容递归匹配、稳定结果上限、二进制/超限/符号链接跳过、无效参数和目录范围拒绝，并扩展 Runtime 集成测试确认新工具进入当前 Conversation 的模型 Snapshot。
+- 完整 `scripts/check.sh` 通过：375 passed；Ruff、strict mypy（170 个 source files）与锁文件检查均通过。Electron 人工验收也已确认模型可调用 Search files 并读取命中结果。
+
+### 决策变化
+
+- 无；本次落实既有 DEC-039 和 DEC-075 的会话级只读文件范围，没有引入新的权限、写入能力或持久化索引。
+
+### 下一步
+
+- 根据真实需求决定是否进入 DEC-060 的 FileChange/撤回基础；本次不开始写入或编辑能力。
+
 ## 2026-08-12 Desktop Composer visual refinement
 
 ### Complete

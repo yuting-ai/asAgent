@@ -637,7 +637,9 @@ workspace/
 
 `tools.builtin.filesystem_read_file.FilesystemReadFileTool` 是对应的最小正文读取能力。它同样要求 `filesystem.read`，先由 Resolver 规范化并检查目标，再只读取一个存在的普通文件；当前仅接受严格 UTF-8 文本，并以 64 KiB 硬上限阻止大文件进入工具结果或模型上下文。目录、缺失文件、Workspace 外路径、超限文件和非 UTF-8 内容均返回明确错误。它不解析 DOCX、PDF、图片或其他二进制格式。
 
-持久化 Runtime 在每个 Run 开始时，以 Run 的 `conversation_id` 读取 `conversation_file_scopes`，构造该 Conversation 专属 `WorkspaceResolver`，再复制基础 ToolRegistry 并仅向这份 Run 专属 Registry 加入 `filesystem.list` 与 `filesystem.read_file`。基础内置工具和已启动的 MCP Tool 实例保持可复用，但其他 Run 的 Snapshot 不会得到该 Resolver 或额外路径。Runtime 同时将当前 Conversation 明确选择的文件夹和单文件绝对路径附加到本次 `system_prompt`，并指示模型在用户引用附加资源时使用这些路径；该短暂上下文不进入用户可见 Message、SQLite 或工具结果，但会发送给当前模型 Provider，因此选择器 UI 必须继续清晰显示共享范围。两个只读 Tool 因此总是只看见该 Conversation 的默认 Workspace、已授权文件夹和已授权单文件；调用越界路径会作为配对的 TOOL 错误返回模型。该机制已接入持久化开发、真实 Provider 和 Electron Sidecar Runtime；非持久化 CLI 不额外获得外部文件范围。
+`tools.builtin.filesystem_search_files.FilesystemSearchFilesTool` 补足“已授权范围中但文件名未知”的发现能力。它同样要求 `filesystem.read`，只递归搜索当前 Conversation 可访问的目录；可选 `path` 指向一个已授权目录，省略时遍历已授权的 Workspace 根。搜索是大小写不敏感的字面匹配，检查文件名与严格 UTF-8 文本的前 64 KiB；它不支持正则、不建立索引、不后台扫描，也不读取或返回完整正文。每次最多扫描 1,000 个文件、最多返回 20 个含相对路径和短片段的匹配；符号链接、二进制、不可读或超限文件会跳过，任何扫描或结果上限都会在返回文本中明确标记。
+
+持久化 Runtime 在每个 Run 开始时，以 Run 的 `conversation_id` 读取 `conversation_file_scopes`，构造该 Conversation 专属 `WorkspaceResolver`，再复制基础 ToolRegistry 并仅向这份 Run 专属 Registry 加入 `filesystem.list`、`filesystem.read_file` 与 `filesystem.search_files`。基础内置工具和已启动的 MCP Tool 实例保持可复用，但其他 Run 的 Snapshot 不会得到该 Resolver 或额外路径。Runtime 同时将当前 Conversation 明确选择的文件夹和单文件绝对路径附加到本次 `system_prompt`，并指示模型在用户引用附加资源时使用这些路径；该短暂上下文不进入用户可见 Message、SQLite 或工具结果，但会发送给当前模型 Provider，因此选择器 UI 必须继续清晰显示共享范围。这三个只读 Tool 因此总是只看见该 Conversation 的默认 Workspace、已授权文件夹和已授权单文件；调用越界路径会作为配对的 TOOL 错误返回模型。该机制已接入持久化开发、真实 Provider 和 Electron Sidecar Runtime；非持久化 CLI 不额外获得外部文件范围。
 
 `tools.builtin.filesystem_write_file.FilesystemWriteFileTool` 是最小的受控副作用能力：它只在允许根内以独占创建方式写入一个新的 UTF-8 文件，要求 `filesystem.write`、标记为高风险且始终需要批准。它不创建父目录，64 KiB 以上的正文、目录目标和任何已存在文件都会被拒绝；因此它不能覆盖、追加或删除用户文件。当前通用 Approval Protocol 仅保证没有已授予权限或批准时不会进入工具协程；真正展示规范化路径、影响摘要和有效期限的批准请求仍待独立实现。
 

@@ -121,8 +121,11 @@ async def test_runtime_uses_only_the_current_conversations_file_scope(
 
         assert first.run.status is RunStatus.COMPLETED
         assert second.run.status is RunStatus.COMPLETED
-        assert provider.requests[0].tools[-2].name == "filesystem_list"
-        assert provider.requests[0].tools[-1].name == "filesystem_read_file"
+        assert tuple(tool.name for tool in provider.requests[0].tools[-3:]) == (
+            "filesystem_list",
+            "filesystem_read_file",
+            "filesystem_search_files",
+        )
         assert "Folder: " + str(external_folder.resolve()) in (
             provider.requests[0].system_prompt
         )
