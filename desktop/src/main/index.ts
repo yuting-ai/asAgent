@@ -54,7 +54,7 @@ function createWindow(): void {
     ...(process.platform === 'darwin'
       ? {
           titleBarStyle: 'hidden' as const,
-          trafficLightPosition: { x: 16, y: 17 }
+          trafficLightPosition: { x: 20, y: 16 }
         }
       : {}),
     ...(process.platform === 'linux' ? { icon } : {}),
@@ -409,6 +409,46 @@ app.whenReady().then(async () => {
 
     assertTrustedRenderer(frame.url)
     return getReadyBackendLauncher().createConversation()
+  })
+
+  ipcMain.handle(
+    'desktop:update-conversation-title',
+    (event, conversationId: unknown, title: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) {
+        throw new Error('Untrusted renderer IPC request.')
+      }
+
+      assertTrustedRenderer(frame.url)
+
+      if (typeof conversationId !== 'string' || !conversationId.trim()) {
+        throw new Error('Conversation ID is invalid.')
+      }
+
+      if (typeof title !== 'string' || !title.trim()) {
+        throw new Error('Conversation title is invalid.')
+      }
+
+      return getReadyBackendLauncher().updateConversationTitle(
+        conversationId.trim(),
+        title
+      )
+    }
+  )
+
+  ipcMain.handle('desktop:delete-conversation', (event, conversationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+
+    if (typeof conversationId !== 'string' || !conversationId.trim()) {
+      throw new Error('Conversation ID is invalid.')
+    }
+
+    return getReadyBackendLauncher().deleteConversation(conversationId.trim())
   })
 
   ipcMain.handle('desktop:submit-message', (event, conversationId: unknown, content: unknown) => {

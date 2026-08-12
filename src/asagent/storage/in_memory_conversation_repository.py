@@ -41,3 +41,11 @@ class InMemoryConversationRepository:
             raise ValueError("cannot append a message to an unknown conversation")
 
         self._messages.setdefault(message.conversation_id, []).append(message)
+
+    async def delete(self, conversation_id: ConversationId) -> bool:
+        if conversation_id not in self._conversations:
+            return False
+
+        del self._conversations[conversation_id]
+        self._messages.pop(conversation_id, None)
+        return True

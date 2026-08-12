@@ -51,6 +51,7 @@ button,
 input,
 textarea {
   font: inherit;
+  -webkit-app-region: no-drag;
 }
 
 button {

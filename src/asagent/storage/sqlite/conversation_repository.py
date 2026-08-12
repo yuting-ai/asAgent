@@ -2,14 +2,22 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from asagent.core.conversation import Conversation
 from asagent.core.ids import ConversationId, MessageId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.storage.sqlite.connection import create_sqlite_async_engine
-from asagent.storage.sqlite.schema import conversations, messages, users
+from asagent.storage.sqlite.schema import (
+    conversation_file_scopes,
+    conversations,
+    messages,
+    run_events,
+    runs,
+    tool_calls,
+    users,
+)
 
 
 class SqliteConversationRepository:
@@ -124,6 +132,56 @@ class SqliteConversationRepository:
                     created_at=_to_utc(message.created_at),
                 ),
             )
+
+    async def delete(self, conversation_id: ConversationId) -> bool:
+        async with self._engine.begin() as connection:
+            exists = await connection.scalar(
+                select(conversations.c.conversation_id).where(
+                    conversations.c.conversation_id == str(conversation_id),
+                ),
+            )
+            if exists is None:
+                return False
+
+            run_ids = (
+                await connection.scalars(
+                    select(runs.c.run_id).where(
+                        runs.c.conversation_id == str(conversation_id),
+                    ),
+                )
+            ).all()
+
+            if run_ids:
+                await connection.execute(
+                    delete(tool_calls).where(tool_calls.c.run_id.in_(run_ids)),
+                )
+                await connection.execute(
+                    delete(run_events).where(run_events.c.run_id.in_(run_ids)),
+                )
+                await connection.execute(
+                    delete(runs).where(
+                        runs.c.conversation_id == str(conversation_id),
+                    ),
+                )
+
+            await connection.execute(
+                delete(messages).where(
+                    messages.c.conversation_id == str(conversation_id),
+                ),
+            )
+            await connection.execute(
+                delete(conversation_file_scopes).where(
+                    conversation_file_scopes.c.conversation_id
+                    == str(conversation_id),
+                ),
+            )
+            await connection.execute(
+                delete(conversations).where(
+                    conversations.c.conversation_id == str(conversation_id),
+                ),
+            )
+
+        return True
 
 
 def _to_conversation(row: Mapping[str, object]) -> Conversation:

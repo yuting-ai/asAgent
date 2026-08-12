@@ -97,6 +97,13 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:list-conversation-messages', conversationId),
   createConversation: (): Promise<ConversationSummary> =>
     ipcRenderer.invoke('desktop:create-conversation'),
+  updateConversationTitle: (
+    conversationId: string,
+    title: string
+  ): Promise<ConversationSummary> =>
+    ipcRenderer.invoke('desktop:update-conversation-title', conversationId, title),
+  deleteConversation: (conversationId: string): Promise<void> =>
+    ipcRenderer.invoke('desktop:delete-conversation', conversationId),
   submitMessage: (conversationId: string, content: string): Promise<SubmittedMessage> =>
     ipcRenderer.invoke('desktop:submit-message', conversationId, content),
   cancelRun: (runId: string): Promise<void> => ipcRenderer.invoke('desktop:cancel-run', runId),

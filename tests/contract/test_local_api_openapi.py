@@ -69,6 +69,7 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
     assert set(paths) == {
         "/api/v1/health",
         "/api/v1/conversations",
+        "/api/v1/conversations/{conversation_id}",
         "/api/v1/conversations/{conversation_id}/messages",
         "/api/v1/runs/{run_id}",
         "/api/v1/runs/{run_id}/cancel",
@@ -81,6 +82,8 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
         ("/api/v1/health", "get", "200"),
         ("/api/v1/conversations", "get", "200"),
         ("/api/v1/conversations", "post", "201"),
+        ("/api/v1/conversations/{conversation_id}", "patch", "200"),
+        ("/api/v1/conversations/{conversation_id}", "delete", "204"),
         ("/api/v1/conversations/{conversation_id}/messages", "get", "200"),
         (
             "/api/v1/conversations/{conversation_id}/messages",

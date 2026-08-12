@@ -1,13 +1,14 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Final, Literal
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
 
 from asagent.agent.run_submission import (
@@ -54,6 +55,22 @@ class HealthResponse(BaseModel):
 
 class CreateConversationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class UpdateConversationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_blank(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("title must not be blank")
+        if len(normalized) <= 60:
+            return normalized
+        return f"{normalized[:59]}…"
 
 
 class ConversationResponse(BaseModel):
@@ -427,6 +444,46 @@ def create_app(
         await conversations.save(conversation)
 
         return ConversationResponse.from_conversation(conversation)
+
+    @app.patch(
+        "/api/v1/conversations/{conversation_id}",
+        response_model=ConversationResponse,
+        dependencies=[Depends(authenticate)],
+    )
+    async def update_conversation(
+        conversation_id: str,
+        request: UpdateConversationRequest,
+    ) -> ConversationResponse:
+        conversation = await get_local_conversation(ConversationId(conversation_id))
+        updated = replace(
+            conversation,
+            title=request.title,
+            updated_at=current_time(),
+        )
+        await conversations.save(updated)
+        return ConversationResponse.from_conversation(updated)
+
+    @app.delete(
+        "/api/v1/conversations/{conversation_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(authenticate)],
+    )
+    async def delete_conversation(conversation_id: str) -> Response:
+        conversation = await conversations.get(ConversationId(conversation_id))
+        if conversation is None or conversation.user_id != _LOCAL_USER_ID:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="conversation not found",
+            )
+
+        deleted = await conversations.delete(ConversationId(conversation_id))
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="conversation not found",
+            )
+
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post(
         "/api/v1/conversations/{conversation_id}/messages",

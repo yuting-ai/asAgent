@@ -581,7 +581,7 @@
 
 - 日期：2026-08-11
 - 状态：已确认
-- 决策：Electron Main 只向 Renderer 的 App Info 暴露 `local` 或 `external` 的处理模式。此模式由当前 Sidecar 启动配置决定；Renderer 以它切换顶栏与 Privacy 文案，说明离线模式不会外发对话内容，或真实 Provider 模式可能向选定服务商发送请求所需内容及工具结果。
+- 决策：Electron Main 只向 Renderer 的 App Info 暴露 `local` 或 `external` 的处理模式。此模式由当前 Sidecar 启动配置决定；Renderer 以它切换 Privacy 与 Preferences 文案，说明离线模式不会外发对话内容，或真实 Provider 模式可能向选定服务商发送请求所需内容及工具结果。顶栏不再重复展示该状态句。
 - 原因：固定“所有内容均在设备内处理”的文案会在真实 Provider 模式下误导用户。最小处理模式足以让披露真实，又不会泄露 Profile、端口、Token、API Key 或开放通用配置通道。
 - 影响：Privacy 页的权限编辑、历史审计和外发字节计数仍未实现；本次只保证当前模型调用边界的准确披露。
 - 替代方案：始终显示本地处理、把具体 Provider/密钥交给 Renderer、或等完整设置页完成后再纠正文案；当前均不采用。

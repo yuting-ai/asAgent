@@ -92,6 +92,11 @@ interface DesktopBridge {
   listConversations(): Promise<ConversationSummary[]>
   listConversationMessages(conversationId: string): Promise<ConversationMessage[]>
   createConversation(): Promise<ConversationSummary>
+  updateConversationTitle(
+    conversationId: string,
+    title: string
+  ): Promise<ConversationSummary>
+  deleteConversation(conversationId: string): Promise<void>
   submitMessage(conversationId: string, content: string): Promise<SubmittedMessage>
   cancelRun(runId: string): Promise<void>
   decideToolApproval(

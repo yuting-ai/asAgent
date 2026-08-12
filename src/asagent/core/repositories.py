@@ -31,6 +31,8 @@ class ConversationRepository(Protocol):
         message: UserMessage | AssistantMessage,
     ) -> None: ...
 
+    async def delete(self, conversation_id: ConversationId) -> bool: ...
+
 
 @runtime_checkable
 class RunRepository(Protocol):

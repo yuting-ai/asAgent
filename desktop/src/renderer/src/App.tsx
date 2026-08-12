@@ -110,8 +110,10 @@ const MODEL_SETTINGS_LOAD_ERROR = 'Model settings could not be loaded.'
 const MODEL_SETTINGS_UPDATE_ERROR = 'Model settings could not be updated.'
 const MODEL_SETTINGS_REQUIRED = 'Enter a model, base URL, and API key before saving.'
 const MODEL_DELETE_CONFIRM = 'Remove the saved model configuration and API key?'
+const CONVERSATION_DELETE_CONFIRM =
+  'Delete this conversation? This cannot be undone.'
 const DEFAULT_RAIL_WIDTH = 226
-const COLLAPSED_RAIL_WIDTH = 56
+const COLLAPSED_RAIL_WIDTH = 96
 const DEFAULT_THREAD_WIDTH = 210
 const DEFAULT_ATTENTION_WIDTH = 300
 const MIN_RAIL_WIDTH = 180
@@ -333,6 +335,8 @@ export default function App(): React.JSX.Element {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [isCreatingConversation, setIsCreatingConversation] = useState(false)
+  const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
   const [isSubmittingMessage, setIsSubmittingMessage] = useState(false)
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
   const [isCancellingRun, setIsCancellingRun] = useState(false)
@@ -368,6 +372,7 @@ export default function App(): React.JSX.Element {
   const [isRailCollapsed, setIsRailCollapsed] = useState(false)
   const [resizingColumn, setResizingColumn] = useState<ResizableColumn | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const renameInputRef = useRef<HTMLInputElement | null>(null)
   const scrollbarHideTimerRef = useRef<number | null>(null)
   const desktopLayoutRef = useRef(desktopLayout)
   const resizingColumnRef = useRef<ResizableColumn | null>(null)
@@ -711,6 +716,15 @@ export default function App(): React.JSX.Element {
   }, [selectedConversationId])
 
   useEffect(() => {
+    if (renamingConversationId === null) {
+      return
+    }
+
+    renameInputRef.current?.focus()
+    renameInputRef.current?.select()
+  }, [renamingConversationId])
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [
     messages,
@@ -729,22 +743,6 @@ export default function App(): React.JSX.Element {
   const visibleApprovalServer =
     visibleApproval === null ? null : mcpServerNameFromToolId(visibleApproval.tool_id)
   const isBusy = isCreatingConversation || isSubmittingMessage || activeRun !== null
-
-  const backendLabel =
-    backendStatus === 'ready'
-      ? appInfo?.dataProcessingMode === 'external'
-        ? 'RUNNING · EXTERNAL MODEL ENABLED'
-        : 'RUNNING LOCALLY · NO DATA LEAVES THIS DEVICE'
-      : backendStatus === 'checking'
-        ? 'CHECKING LOCAL BACKEND…'
-        : 'BACKEND UNAVAILABLE'
-
-  const agentSub =
-    backendStatus === 'unavailable'
-      ? '● Offline'
-      : activeRun !== null
-        ? '● Working on a run'
-        : '● Idle — ready for chat'
 
   const usesExternalModel = appInfo?.dataProcessingMode === 'external'
 
@@ -860,6 +858,105 @@ export default function App(): React.JSX.Element {
       setErrorMessage('A new conversation could not be created.')
     } finally {
       setIsCreatingConversation(false)
+    }
+  }
+
+  function startRename(conversation: ConversationSummary): void {
+    if (isBusy) {
+      return
+    }
+
+    setRenamingConversationId(conversation.conversation_id)
+    setRenameDraft(conversationLabel(conversation.title))
+    setErrorMessage(null)
+  }
+
+  function cancelRename(): void {
+    setRenamingConversationId(null)
+    setRenameDraft('')
+  }
+
+  async function saveRename(conversationId: string): Promise<void> {
+    if (renamingConversationId !== conversationId) {
+      return
+    }
+
+    const trimmed = renameDraft.trim()
+    const current = conversations.find(
+      (conversation) => conversation.conversation_id === conversationId
+    )
+
+    if (!trimmed || current === undefined) {
+      cancelRename()
+      return
+    }
+
+    if (conversationLabel(current.title) === trimmed) {
+      cancelRename()
+      return
+    }
+
+    try {
+      const updated = await window.desktop.updateConversationTitle(conversationId, trimmed)
+      setConversations((items) =>
+        orderConversations(
+          items.map((conversation) =>
+            conversation.conversation_id === conversationId ? updated : conversation
+          )
+        )
+      )
+      cancelRename()
+    } catch {
+      setErrorMessage('The conversation could not be renamed.')
+      cancelRename()
+    }
+  }
+
+  async function deleteConversation(conversationId: string): Promise<void> {
+    if (isBusy) {
+      return
+    }
+
+    if (!window.confirm(CONVERSATION_DELETE_CONFIRM)) {
+      return
+    }
+
+    setErrorMessage(null)
+
+    try {
+      if (activeRun?.conversationId === conversationId) {
+        await window.desktop.cancelRun(activeRun.runId)
+        setActiveRun(null)
+        setIsCancellingRun(false)
+        setRunActivity(null)
+        setActivityExpanded(false)
+      }
+
+      if (pendingApproval?.conversation_id === conversationId) {
+        setPendingApproval(null)
+        setIsDecidingApproval(false)
+      }
+
+      await window.desktop.deleteConversation(conversationId)
+
+      setConversations((items) => {
+        const next = items.filter(
+          (conversation) => conversation.conversation_id !== conversationId
+        )
+
+        if (selectedConversationId === conversationId) {
+          setSelectedConversationId(next[0]?.conversation_id ?? null)
+          setMessages([])
+        }
+
+        return next
+      })
+
+      if (renamingConversationId === conversationId) {
+        cancelRename()
+      }
+    } catch {
+      setErrorMessage('The conversation could not be deleted.')
     }
   }
 
@@ -1215,55 +1312,6 @@ export default function App(): React.JSX.Element {
           } as CSSProperties
         }
       >
-        <header className="titlebar">
-          <div className="brand">
-            <div className="brand-mark" />
-            asAgent
-          </div>
-
-          <label className="titlebar-search">
-            <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <circle cx="11" cy="11" r="7" />
-              <path d="m21 21-4.3-4.3" />
-            </svg>
-            <input disabled placeholder="Search tasks, files, history…" type="search" />
-            <kbd>⌘K</kbd>
-          </label>
-
-          <div className="titlebar-status">
-            <span
-              className={`dot-live${
-                backendStatus === 'ready'
-                  ? ''
-                  : backendStatus === 'checking'
-                    ? ' checking'
-                    : ' offline'
-              }`}
-            />
-            {backendLabel}
-          </div>
-
-          <button
-            className="titlebar-icon-btn"
-            onClick={() => setActiveView('preferences')}
-            title="Notifications (placeholder)"
-            type="button"
-          >
-            <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-            </svg>
-          </button>
-          <button
-            className="titlebar-icon-btn"
-            onClick={() => setActiveView('preferences')}
-            title="Settings"
-            type="button"
-          >
-            <Icon path="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </button>
-        </header>
-
         <div
           aria-label="Resize navigation panel"
           className="column-resizer column-resizer-left"
@@ -1278,8 +1326,8 @@ export default function App(): React.JSX.Element {
         />
 
         <nav aria-label="Primary" className="rail" id="primary-sidebar">
+          <div aria-hidden="true" className="rail-window-controls" />
           <div className="rail-control">
-            <div className="rail-label">Agent</div>
             <button
               aria-controls="primary-sidebar"
               aria-expanded={!isRailCollapsed}
@@ -1448,32 +1496,6 @@ export default function App(): React.JSX.Element {
               <Icon path="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
               <span className="rail-item-label">Agent preferences</span>
             </button>
-            <div className="agent-card">
-              <div className="agent-card-top">
-                <div className="agent-avatar">aA</div>
-                <div>
-                  <div className="agent-name">asAgent</div>
-                  <div
-                    className={`agent-sub${
-                      backendStatus === 'unavailable'
-                        ? ' offline'
-                        : activeRun !== null
-                          ? ' busy'
-                          : ''
-                    }`}
-                  >
-                    {agentSub}
-                  </div>
-                </div>
-              </div>
-              <div className="agent-meter">
-                <div className="agent-meter-fill" />
-              </div>
-              <div className="agent-meter-label">
-                <span>{appInfo ? `${appInfo.appName} ${appInfo.version}` : 'Loading…'}</span>
-                <span>Local</span>
-              </div>
-            </div>
           </div>
         </nav>
 
@@ -1485,7 +1507,14 @@ export default function App(): React.JSX.Element {
                 onWheel={() => revealScrollbar('threads')}
               >
                 <div className="chat-threads-header">
-                  <div className="chat-threads-title">Conversations</div>
+                  <label className="chat-threads-search">
+                    <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <circle cx="11" cy="11" r="7" />
+                      <path d="m21 21-4.3-4.3" />
+                    </svg>
+                    <input disabled placeholder="Search…" type="search" />
+                    <kbd>⌘K</kbd>
+                  </label>
                   <button
                     className="chat-new-btn"
                     disabled={isBusy}
@@ -1500,24 +1529,104 @@ export default function App(): React.JSX.Element {
                 {conversations.length === 0 ? (
                   <p className="chat-context-sub">No conversations yet. Create one to start.</p>
                 ) : (
-                  conversations.map((conversation) => (
-                    <button
-                      className={`chat-thread-item${
-                        conversation.conversation_id === selectedConversationId ? ' active' : ''
-                      }`}
-                      disabled={isBusy}
-                      key={conversation.conversation_id}
-                      onClick={() => setSelectedConversationId(conversation.conversation_id)}
-                      type="button"
-                    >
-                      <div className="chat-thread-name">
-                        {conversationLabel(conversation.title)}
+                  conversations.map((conversation) =>
+                    renamingConversationId === conversation.conversation_id ? (
+                      <div
+                        className={`chat-thread-item chat-thread-item-renaming${
+                          conversation.conversation_id === selectedConversationId
+                            ? ' active'
+                            : ''
+                        }`}
+                        key={conversation.conversation_id}
+                      >
+                        <input
+                          ref={renameInputRef}
+                          className="chat-thread-rename-input"
+                          onBlur={() => void saveRename(conversation.conversation_id)}
+                          onChange={(event) => setRenameDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              void saveRename(conversation.conversation_id)
+                            }
+
+                            if (event.key === 'Escape') {
+                              event.preventDefault()
+                              cancelRename()
+                            }
+                          }}
+                          type="text"
+                          value={renameDraft}
+                        />
                       </div>
-                      <div className="chat-thread-time">
-                        {formatThreadTime(conversation.updated_at)}
+                    ) : (
+                      <div
+                        className={`chat-thread-item${
+                          conversation.conversation_id === selectedConversationId
+                            ? ' active'
+                            : ''
+                        }`}
+                        key={conversation.conversation_id}
+                      >
+                        <button
+                          className="chat-thread-body"
+                          disabled={isBusy}
+                          onClick={() =>
+                            setSelectedConversationId(conversation.conversation_id)
+                          }
+                          type="button"
+                        >
+                          <div className="chat-thread-name">
+                            {conversationLabel(conversation.title)}
+                          </div>
+                          <div className="chat-thread-time">
+                            {formatThreadTime(conversation.updated_at)}
+                          </div>
+                        </button>
+                        <div className="chat-thread-actions">
+                          <button
+                            aria-label="Rename conversation"
+                            className="chat-thread-action-btn"
+                            disabled={isBusy}
+                            onClick={() => startRename(conversation)}
+                            title="Rename"
+                            type="button"
+                          >
+                            <svg
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              viewBox="0 0 24 24"
+                            >
+                              <path d="M12 20h9" />
+                              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                            </svg>
+                          </button>
+                          <button
+                            aria-label="Delete conversation"
+                            className="chat-thread-action-btn chat-thread-action-btn-danger"
+                            disabled={isBusy}
+                            onClick={() => void deleteConversation(conversation.conversation_id)}
+                            title="Delete"
+                            type="button"
+                          >
+                            <svg
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              viewBox="0 0 24 24"
+                            >
+                              <path d="M3 6h18" />
+                              <path d="M8 6V4h8v2" />
+                              <path d="M19 6 18 20H6L5 6" />
+                              <path d="M10 11v6" />
+                              <path d="M14 11v6" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
-                    </button>
-                  ))
+                    )
+                  )
                 )}
               </div>
               <div

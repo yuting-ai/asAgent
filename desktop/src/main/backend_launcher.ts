@@ -264,6 +264,28 @@ export class BackendLauncher {
     return this.requestJson('/api/v1/conversations', 'POST', {})
   }
 
+  async updateConversationTitle(
+    conversationId: string,
+    title: string
+  ): Promise<ConversationSummary> {
+    if (!title.trim()) {
+      throw new Error('Conversation title is invalid.')
+    }
+
+    return this.requestJson<ConversationSummary>(
+      `/api/v1/conversations/${encodeURIComponent(conversationId)}`,
+      'PATCH',
+      { title }
+    )
+  }
+
+  async deleteConversation(conversationId: string): Promise<void> {
+    await this.request(
+      `/api/v1/conversations/${encodeURIComponent(conversationId)}`,
+      'DELETE'
+    )
+  }
+
   async submitMessage(conversationId: string, content: string): Promise<SubmittedMessage> {
     if (!content.trim()) {
       throw new Error('Message content is invalid.')
@@ -360,7 +382,7 @@ export class BackendLauncher {
 
   private async requestJson<T>(
     path: string,
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     body?: unknown
   ): Promise<T> {
     const response = await this.request(path, method, body)
@@ -369,7 +391,7 @@ export class BackendLauncher {
 
   private async request(
     path: string,
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     body?: unknown,
     signal?: AbortSignal
   ): Promise<Response> {

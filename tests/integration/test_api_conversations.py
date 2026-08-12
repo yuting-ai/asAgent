@@ -463,6 +463,184 @@ async def test_create_conversation_requires_the_current_local_api_token(
 
 
 @pytest.mark.asyncio
+async def test_update_conversation_title_persists_for_local_user(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    created_at = datetime(2026, 8, 11, 8, 0, tzinfo=UTC)
+    conversation = Conversation(
+        conversation_id=ConversationId("conv-local"),
+        user_id=UserId("local-user"),
+        created_at=created_at,
+        updated_at=created_at,
+        title="Original title",
+    )
+    updated_at = datetime(2026, 8, 11, 13, 0, tzinfo=UTC)
+    repository = SqliteConversationRepository(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=repository,
+        runs=_UNUSED_RUNS,
+        run_submission=_unused_run_submission(repository),
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+        clock=lambda: updated_at,
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        await repository.save(conversation)
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            response = await client.patch(
+                "/api/v1/conversations/conv-local",
+                headers={"Authorization": "Bearer test-token"},
+                json={"title": "  Renamed conversation  "},
+            )
+
+        stored = await repository.get(conversation.conversation_id)
+    finally:
+        await repository.aclose()
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "conversation_id": "conv-local",
+        "created_at": "2026-08-11T08:00:00Z",
+        "updated_at": "2026-08-11T13:00:00Z",
+        "title": "Renamed conversation",
+    }
+    assert stored is not None
+    assert stored.title == "Renamed conversation"
+    assert stored.updated_at == updated_at
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation_removes_local_conversation_and_related_data(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    created_at = datetime(2026, 8, 11, 8, 0, tzinfo=UTC)
+    conversation = Conversation(
+        conversation_id=ConversationId("conv-local"),
+        user_id=UserId("local-user"),
+        created_at=created_at,
+        updated_at=created_at,
+        title="Delete me",
+    )
+    user_message = UserMessage(
+        message_id=MessageId("msg-user"),
+        conversation_id=conversation.conversation_id,
+        content="Hello",
+        created_at=created_at,
+    )
+    conversations = SqliteConversationRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    starter = SqliteRunStarter(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=conversations,
+        runs=runs,
+        run_submission=_unused_run_submission(conversations),
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        await conversations.save(conversation)
+        await starter.start(
+            conversation=conversation,
+            user_message=user_message,
+            run=Run(
+                run_id=RunId("run-local"),
+                conversation_id=conversation.conversation_id,
+                status=RunStatus.COMPLETED,
+                created_at=created_at,
+                updated_at=created_at,
+            ),
+        )
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            response = await client.delete(
+                "/api/v1/conversations/conv-local",
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+        stored_conversation = await conversations.get(conversation.conversation_id)
+        stored_messages = await conversations.list_messages(
+            conversation.conversation_id,
+        )
+        stored_runs = await runs.list_for_conversation(conversation.conversation_id)
+    finally:
+        await starter.aclose()
+        await runs.aclose()
+        await conversations.aclose()
+
+    assert response.status_code == 204
+    assert stored_conversation is None
+    assert stored_messages == ()
+    assert stored_runs == ()
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation_hides_unknown_or_other_user_conversations(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    other_user_conversation = _conversation(
+        ConversationId("conv-other-user"),
+        UserId("other-user"),
+        datetime(2026, 8, 11, 8, 0, tzinfo=UTC),
+        datetime(2026, 8, 11, 8, 0, tzinfo=UTC),
+    )
+    repository = SqliteConversationRepository(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=repository,
+        runs=_UNUSED_RUNS,
+        run_submission=_unused_run_submission(repository),
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        await repository.save(other_user_conversation)
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            missing = await client.delete(
+                "/api/v1/conversations/missing",
+                headers={"Authorization": "Bearer test-token"},
+            )
+            other_user = await client.delete(
+                "/api/v1/conversations/conv-other-user",
+                headers={"Authorization": "Bearer test-token"},
+            )
+    finally:
+        await repository.aclose()
+
+    assert missing.status_code == 404
+    assert other_user.status_code == 404
+    assert missing.json() == {"detail": "conversation not found"}
+    assert other_user.json() == {"detail": "conversation not found"}
+
+
+@pytest.mark.asyncio
 async def test_submit_message_creates_a_visible_message_and_created_run(
     tmp_path: Path,
 ) -> None:
