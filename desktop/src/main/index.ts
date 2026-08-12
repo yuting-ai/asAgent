@@ -3,7 +3,12 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { BackendLauncher, type SubmittedMessage, type ToolApproval } from './backend_launcher'
+import {
+  BackendLauncher,
+  isToolApprovalDecision,
+  type SubmittedMessage,
+  type ToolApproval
+} from './backend_launcher'
 
 let backendLauncher: BackendLauncher | undefined
 let isQuitting = false
@@ -298,7 +303,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'desktop:decide-tool-approval',
-    async (event, approvalId: unknown, approved: unknown) => {
+    async (event, approvalId: unknown, decision: unknown) => {
       const frame = event.senderFrame
       if (frame === null) {
         throw new Error('Untrusted renderer IPC request.')
@@ -309,11 +314,11 @@ app.whenReady().then(async () => {
       if (typeof approvalId !== 'string' || !approvalId.trim()) {
         throw new Error('Tool approval ID is invalid.')
       }
-      if (typeof approved !== 'boolean') {
+      if (!isToolApprovalDecision(decision)) {
         throw new Error('Tool approval decision is invalid.')
       }
 
-      await getReadyBackendLauncher().decideToolApproval(approvalId, approved)
+      await getReadyBackendLauncher().decideToolApproval(approvalId, decision)
     }
   )
 

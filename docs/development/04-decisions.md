@@ -686,6 +686,26 @@
 - 影响：MCP Server 不获得模型 API Key、Local API Token 或任意 `.env` 值，也不自动继承本地文件、浏览器或 OAuth 范围。需要凭据的 Server 必须等待独立 Secret Store 引用设计。当前持久化 CLI、设置页、热刷新、重连、分页和 legacy fallback 不因此实现。
 - 替代方案：继承完整宿主环境、将 Token/环境值放入 `mcp.json`、逐个 Server 成功即向 Runtime 注册、或允许 Renderer 直接启动 Server；当前均不采用。
 
+### DEC-068：工具审批按会话与内部 tool_id 授权，而不是全局布尔值
+
+- 日期：2026-08-12
+- 状态：已确认
+- 背景：首次桌面审批只有 Allow/Deny 布尔值，无法表达“本会话连续使用同一 MCP 工具”。若做成全局记住，会把 Gmail 搜索与发信、或不同 Server 的同名工具混成一次授权。
+- 决策：审批决定改为 `deny`、`allow_once`、`allow_conversation` 三种。会话授权键为 `(conversation_id, definition.tool_id)`；MCP 的内部 ID 已包含 Server、工具名和 Schema Hash，因此不同 Server、不同工具或接口版本不会共用授权。`allow_once` 只放行当前调用；`allow_conversation` 写入 Sidecar 内存 grants，后续同键调用不再弹窗。grants 不持久化，Sidecar `aclose()` 时清空。Local API、Main 与 Renderer 传递字符串 `decision`，不再使用 `approved: bool`。
+- 原因：这保持一次性确认的安全默认，又让同一对话里重复使用同一工具不必连点；授权范围仍然小于全局或跨会话记住。
+- 影响：换 Conversation、重启 Sidecar、更换工具或 Schema 后仍需批准。Renderer 横幅提供 `Deny`、`Allow for this conversation`（次级）和 `Allow once`（主按钮）。长期授权、撤销 UI、审批历史和审计仍需单独设计。
+- 替代方案：全局布尔记住、按 Server 记住全部工具、把 grants 写入 SQLite、或继续只用 Allow/Deny；当前均不采用。
+
+### DEC-069：专用集成工作区使用账户范围的持久偏好，不复用 Chat 授权
+
+- 日期：2026-08-12
+- 状态：已确认，留待 Gmail OAuth/Secret Store/专用 UI 阶段实现
+- 背景：用户从 Chat 请求工具与从专用 Email 页面管理已连接邮箱是两种意图。若只用 Conversation grant，专用页面会重复弹窗；若把 OAuth 连接或 Chat grant 解释为全局许可，又会把不同账户、入口与高副作用邮件操作混为一谈。
+- 决策：未来授权上下文至少区分 `interaction_surface`、账户/资源范围、OAuth scope、内部 `tool_id` 与操作风险。Email 工作区可在用户明确设置后，对指定账户的低风险只读工具自动执行；Chat 仍使用临时会话级授权。OAuth 连接只证明第三方允许 asAgent 访问，不代表模型可自动使用该能力。发送、删除、修改规则、范围扩大等操作即使来自专用页面仍保留逐次确认或默认拒绝。
+- 原因：专用工作区应减少符合用户预期的只读重复确认，同时把账户、入口和副作用保留为可解释、可撤销的边界。
+- 影响：该策略需要未来持久化设置与撤销 UI，并与 Gmail OAuth、Secret Store、风险覆盖策略一起设计；不在当前 `PendingToolApprovalPolicy`、`mcp.json` 或会话授权任务中预建数据库表、设置页面或凭据注入。
+- 替代方案：OAuth 成功即全局自动允许、所有入口都只按 Conversation grant、或所有 Email 操作永久逐次弹窗；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

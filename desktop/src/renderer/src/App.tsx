@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 
+import { TOOL_APPROVAL_BANNER_ACTIONS, type ToolApprovalDecision } from './tool_approval'
+
 type AppInfo = {
   appName: string
   version: string
@@ -67,6 +69,22 @@ type ActivityTab = 'approvals' | 'schedule'
 
 function conversationLabel(title: string | null): string {
   return title ?? 'New conversation'
+}
+
+function mcpServerNameFromToolId(toolId: string): string | null {
+  const match = /^mcp:([a-z][a-z0-9-]{0,63}):[^:]+:[0-9a-f]+$/i.exec(toolId)
+  return match?.[1] ?? null
+}
+
+function approvalActivityMessage(decision: ToolApprovalDecision): string {
+  switch (decision) {
+    case 'deny':
+      return 'Tool denied.'
+    case 'allow_once':
+      return 'Tool approved once. Continuing…'
+    case 'allow_conversation':
+      return 'Tool allowed for this conversation.'
+  }
 }
 
 function orderConversations(conversations: ConversationSummary[]): ConversationSummary[] {
@@ -342,6 +360,10 @@ export default function App(): React.JSX.Element {
     (conversation) => conversation.conversation_id === selectedConversationId
   )
   const visibleMessages = selectedConversationId === null ? [] : messages
+  const visibleApproval =
+    pendingApproval?.conversation_id === selectedConversationId ? pendingApproval : null
+  const visibleApprovalServer =
+    visibleApproval === null ? null : mcpServerNameFromToolId(visibleApproval.tool_id)
   const isBusy = isCreatingConversation || isSubmittingMessage || activeRun !== null
 
   const backendLabel =
@@ -481,7 +503,7 @@ export default function App(): React.JSX.Element {
     }
   }
 
-  async function decidePendingApproval(approved: boolean): Promise<void> {
+  async function decidePendingApproval(decision: ToolApprovalDecision): Promise<void> {
     const approval = pendingApproval
     if (approval === null || isDecidingApproval) {
       return
@@ -491,8 +513,8 @@ export default function App(): React.JSX.Element {
     setErrorMessage(null)
 
     try {
-      await window.desktop.decideToolApproval(approval.approval_id, approved)
-      appendRunActivity(approval.run_id, approved ? 'Tool approved. Continuing…' : 'Tool denied.')
+      await window.desktop.decideToolApproval(approval.approval_id, decision)
+      appendRunActivity(approval.run_id, approvalActivityMessage(decision))
       setPendingApproval(null)
     } catch {
       setErrorMessage('Tool approval decision could not be sent.')
@@ -840,10 +862,6 @@ export default function App(): React.JSX.Element {
                           runActivity?.conversationId === selectedConversationId
                             ? runActivity
                             : null
-                        const visibleApproval =
-                          pendingApproval?.conversation_id === selectedConversationId
-                            ? pendingApproval
-                            : null
                         const activityAnchorIndex =
                           visibleActivity === null
                             ? -1
@@ -927,40 +945,6 @@ export default function App(): React.JSX.Element {
                           )
                         }
 
-                        function renderToolApproval(approval: ToolApproval): React.JSX.Element {
-                          return (
-                            <div className="msg agent tool-approval-msg">
-                              <div className="msg-bubble tool-approval-card">
-                                <div className="tool-approval-eyebrow">Approval required</div>
-                                <div className="tool-approval-title">{approval.display_name}</div>
-                                <p className="tool-approval-description">{approval.description}</p>
-                                <div className="tool-approval-id">{approval.tool_id}</div>
-                                <pre className="tool-approval-arguments">
-                                  {JSON.stringify(approval.arguments, null, 2)}
-                                </pre>
-                                <div className="tool-approval-actions">
-                                  <button
-                                    className="tool-approval-deny"
-                                    disabled={isDecidingApproval}
-                                    onClick={() => void decidePendingApproval(false)}
-                                    type="button"
-                                  >
-                                    Deny
-                                  </button>
-                                  <button
-                                    className="tool-approval-allow"
-                                    disabled={isDecidingApproval}
-                                    onClick={() => void decidePendingApproval(true)}
-                                    type="button"
-                                  >
-                                    {isDecidingApproval ? 'Sending…' : 'Allow once'}
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          )
-                        }
-
                         return (
                           <>
                             {visibleMessages.map((message, index) => (
@@ -986,7 +970,6 @@ export default function App(): React.JSX.Element {
                             {visibleActivity !== null && activityAnchorIndex === -1
                               ? renderRunActivity(visibleActivity)
                               : null}
-                            {visibleApproval !== null ? renderToolApproval(visibleApproval) : null}
                           </>
                         )
                       })()}
@@ -994,6 +977,35 @@ export default function App(): React.JSX.Element {
                     </>
                   )}
                 </div>
+
+                {visibleApproval !== null ? (
+                  <div aria-label="Tool approval" className="tool-approval-banner" role="region">
+                    <span className="tool-approval-kind">
+                      {visibleApprovalServer === null ? 'Tool' : 'MCP'}
+                    </span>
+                    <p className="tool-approval-banner-copy">
+                      <span className="tool-approval-banner-title">
+                        Allow {visibleApproval.display_name}?
+                      </span>
+                      {visibleApprovalServer !== null ? (
+                        <span className="tool-approval-banner-source">{visibleApprovalServer}</span>
+                      ) : null}
+                    </p>
+                    <div className="tool-approval-banner-actions">
+                      {TOOL_APPROVAL_BANNER_ACTIONS.map((action) => (
+                        <button
+                          className={action.className}
+                          disabled={isDecidingApproval}
+                          key={action.decision}
+                          onClick={() => void decidePendingApproval(action.decision)}
+                          type="button"
+                        >
+                          {action.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
                 <form className="chat-composer" onSubmit={(event) => void submitMessage(event)}>
                   <div className="chat-composer-box">

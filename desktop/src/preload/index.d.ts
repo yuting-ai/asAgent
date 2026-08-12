@@ -63,7 +63,10 @@ interface DesktopBridge {
   createConversation(): Promise<ConversationSummary>
   submitMessage(conversationId: string, content: string): Promise<SubmittedMessage>
   cancelRun(runId: string): Promise<void>
-  decideToolApproval(approvalId: string, approved: boolean): Promise<void>
+  decideToolApproval(
+    approvalId: string,
+    decision: 'allow_once' | 'allow_conversation' | 'deny'
+  ): Promise<void>
   onRunEvent(callback: (update: RunUpdate) => void): () => void
   onRunStreamError(callback: (error: RunStreamError) => void): () => void
   onToolApprovalRequested(callback: (approval: ToolApproval) => void): () => void

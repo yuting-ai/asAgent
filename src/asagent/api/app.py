@@ -23,7 +23,11 @@ from asagent.core.repositories import ConversationRepository, RunRepository
 from asagent.core.run import Run
 from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
-from asagent.tools.approval import PendingToolApprovalPolicy, ToolApprovalRequest
+from asagent.tools.approval import (
+    PendingToolApprovalPolicy,
+    ToolApprovalDecision,
+    ToolApprovalRequest,
+)
 
 _LOCAL_USER_ID: Final = UserId("local-user")
 _EVENT_POLL_INTERVAL_SECONDS: Final = 0.1
@@ -145,12 +149,12 @@ class ToolApprovalResponse(BaseModel):
 class ToolApprovalDecisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    approved: bool
+    decision: ToolApprovalDecision
 
 
 class ToolApprovalDecisionResponse(BaseModel):
     approval_id: str
-    approved: bool
+    decision: ToolApprovalDecision
 
 
 def create_app(
@@ -403,7 +407,7 @@ def create_app(
         pending = await get_pending_approval(ApprovalId(approval_id))
         assert tool_approvals is not None
 
-        if not tool_approvals.decide(pending.approval_id, request.approved):
+        if not tool_approvals.decide(pending.approval_id, request.decision):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="tool approval not found",
@@ -411,7 +415,7 @@ def create_app(
 
         return ToolApprovalDecisionResponse(
             approval_id=str(pending.approval_id),
-            approved=request.approved,
+            decision=request.decision,
         )
 
     @app.get(

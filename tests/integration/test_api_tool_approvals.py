@@ -109,7 +109,7 @@ async def test_local_api_reads_and_decides_a_pending_tool_approval(
             decided = await client.post(
                 "/api/v1/tool-approvals/approval-1/decision",
                 headers={"Authorization": "Bearer test-token"},
-                json={"approved": True},
+                json={"decision": "allow_once"},
             )
 
         assert read.status_code == 200
@@ -124,7 +124,10 @@ async def test_local_api_reads_and_decides_a_pending_tool_approval(
             "arguments": {"left": 2, "right": 3},
         }
         assert decided.status_code == 200
-        assert decided.json() == {"approval_id": "approval-1", "approved": True}
+        assert decided.json() == {
+            "approval_id": "approval-1",
+            "decision": "allow_once",
+        }
         assert await waiting is True
     finally:
         await approvals.aclose()

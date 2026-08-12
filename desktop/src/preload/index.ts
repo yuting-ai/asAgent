@@ -68,8 +68,10 @@ const desktopBridge = {
   submitMessage: (conversationId: string, content: string): Promise<SubmittedMessage> =>
     ipcRenderer.invoke('desktop:submit-message', conversationId, content),
   cancelRun: (runId: string): Promise<void> => ipcRenderer.invoke('desktop:cancel-run', runId),
-  decideToolApproval: (approvalId: string, approved: boolean): Promise<void> =>
-    ipcRenderer.invoke('desktop:decide-tool-approval', approvalId, approved),
+  decideToolApproval: (
+    approvalId: string,
+    decision: 'allow_once' | 'allow_conversation' | 'deny'
+  ): Promise<void> => ipcRenderer.invoke('desktop:decide-tool-approval', approvalId, decision),
   onRunEvent: (callback: (update: RunUpdate) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, update: RunUpdate): void => {
       callback(update)

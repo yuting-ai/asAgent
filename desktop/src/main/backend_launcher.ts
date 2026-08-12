@@ -47,6 +47,18 @@ export type RunEvent = {
   data: Record<string, unknown>
 }
 
+export type ToolApprovalDecision = 'deny' | 'allow_once' | 'allow_conversation'
+
+const TOOL_APPROVAL_DECISIONS: ReadonlySet<ToolApprovalDecision> = new Set([
+  'deny',
+  'allow_once',
+  'allow_conversation'
+])
+
+export function isToolApprovalDecision(value: unknown): value is ToolApprovalDecision {
+  return typeof value === 'string' && TOOL_APPROVAL_DECISIONS.has(value as ToolApprovalDecision)
+}
+
 export type ToolApproval = {
   approval_id: string
   run_id: string
@@ -243,11 +255,11 @@ export class BackendLauncher {
     return this.requestJson(`/api/v1/tool-approvals/${encodeURIComponent(approvalId)}`, 'GET')
   }
 
-  async decideToolApproval(approvalId: string, approved: boolean): Promise<void> {
+  async decideToolApproval(approvalId: string, decision: ToolApprovalDecision): Promise<void> {
     await this.requestJson(
       `/api/v1/tool-approvals/${encodeURIComponent(approvalId)}/decision`,
       'POST',
-      { approved }
+      { decision }
     )
   }
 

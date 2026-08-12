@@ -4,7 +4,7 @@ import { PassThrough } from 'node:stream'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { BackendLauncher } from './backend_launcher'
+import { BackendLauncher, isToolApprovalDecision } from './backend_launcher'
 
 type FakeChildProcess = ChildProcess & {
   stdin: PassThrough
@@ -207,7 +207,7 @@ describe('BackendLauncher', () => {
         )
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ approval_id: 'approval-1', approved: true }), {
+        new Response(JSON.stringify({ approval_id: 'approval-1', decision: 'allow_once' }), {
           status: 200
         })
       )
@@ -228,18 +228,69 @@ describe('BackendLauncher', () => {
       approval_id: 'approval-1',
       arguments: { left: 2, right: 3 }
     })
-    await expect(launcher.decideToolApproval('approval-1', true)).resolves.toBeUndefined()
+    await expect(launcher.decideToolApproval('approval-1', 'allow_once')).resolves.toBeUndefined()
 
     expect(fetchBackend).toHaveBeenLastCalledWith(
       'http://127.0.0.1:43123/api/v1/tool-approvals/approval-1/decision',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ approved: true }),
+        body: JSON.stringify({ decision: 'allow_once' }),
         headers: expect.objectContaining({
           Authorization: expect.stringMatching(/^Bearer /)
         })
       })
     )
+  })
+
+  it.each(['deny', 'allow_once', 'allow_conversation'] as const)(
+    'posts the %s tool approval decision to the backend',
+    async (decision) => {
+      const child = createChild()
+      const spawnBackend = vi.fn(
+        () => child
+      ) as unknown as typeof import('node:child_process').spawn
+      const fetchBackend = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ approval_id: 'approval-1', decision }), {
+            status: 200
+          })
+        )
+
+      const launcher = new BackendLauncher({
+        projectRoot: '/project',
+        appHome: '/project/.local-data',
+        spawnBackend,
+        fetchBackend
+      })
+      const starting = launcher.start()
+      child.stdout.write(
+        'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+      )
+      await starting
+
+      await expect(launcher.decideToolApproval('approval-1', decision)).resolves.toBeUndefined()
+
+      expect(fetchBackend).toHaveBeenLastCalledWith(
+        'http://127.0.0.1:43123/api/v1/tool-approvals/approval-1/decision',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ decision }),
+          headers: expect.objectContaining({
+            Authorization: expect.stringMatching(/^Bearer /)
+          })
+        })
+      )
+    }
+  )
+
+  it('accepts the renderer banner decisions and rejects a boolean flag', () => {
+    expect(isToolApprovalDecision('deny')).toBe(true)
+    expect(isToolApprovalDecision('allow_once')).toBe(true)
+    expect(isToolApprovalDecision('allow_conversation')).toBe(true)
+    expect(isToolApprovalDecision(true)).toBe(false)
+    expect(isToolApprovalDecision(false)).toBe(false)
   })
 
   it('creates a conversation and submits a message through its private backend connection', async () => {

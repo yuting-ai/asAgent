@@ -3093,3 +3093,34 @@
 ### 下一步
 
 - 使用桌面真实 Provider 模式和一个显式 `mcp.json` 完成首次人工 MCP 验收：模型请求 MCP Tool，桌面审批卡 Allow/Deny 后验证结果与 RunEvent；不在该任务扩展配置 UI 或 Secret Store。
+
+## 2026-08-12 会话内按 tool_id 授权工作记录
+
+### 完成
+
+- 审批决定由布尔值改为 `deny` / `allow_once` / `allow_conversation`。`PendingToolApprovalPolicy`
+  以内存 `(conversation_id, definition.tool_id)` grants 记住本会话对某一内部工具的授权；
+  `allow_once` 不记 grant，`deny` 不产生授权，Sidecar `aclose()` 清空 grants 且不写 SQLite。
+- Local API 的决定请求/响应使用字符串 `decision`；Electron Main / Preload / Renderer 传递同一
+  三种值。桌面横幅提供 `Deny`、次级 `Allow for this conversation` 和主按钮 `Allow once`。
+
+### 验证
+
+- `tests/unit/test_tool_approval.py` 覆盖一次性仍弹窗、会话授权跳过同工具、新会话/不同工具仍弹窗、
+  Deny 不授权、关闭后 grants 消失；`tests/integration/test_api_tool_approvals.py` 覆盖三种
+  字符串 decision 的本地 API 边界。
+- Desktop 测试覆盖 Main 向 API 发送三种字符串 decision，以及 Renderer 三个按钮到 API 决定的映射。
+- Python `scripts/check.sh` 通过：310 passed；Ruff、strict mypy（149 个 source files）与锁文件检查均通过。
+- Desktop 执行 `npm run format`、`npm run typecheck`、`npm run lint`、`npm test`（12 tests）和
+  `npm run build` 均通过。
+- 手动 MCP 验收通过：同一会话对同一工具的会话授权不再弹窗；Allow once、Deny、换会话、换工具和
+  重启 Sidecar 都保持各自预期边界。
+
+### 决策变化
+
+- 新增 DEC-068：工具审批按会话与内部 tool_id 授权，而不是全局布尔值。
+
+### 下一步
+
+- 设计 Gmail 的最小只读 MCP 接入：先定义 Desktop OAuth、系统 Secret Store、账户/Scope 资源范围和
+  Email 专用工作区的授权边界；不把 Token 写入 `mcp.json`，不先实现发送或删除邮件。
