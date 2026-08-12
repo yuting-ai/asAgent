@@ -528,7 +528,8 @@ JSON，顶层只允许 `servers`。每个显式命名 Server 只声明非空的�
 接收 credential 的环境变量名；两者都不是 Secret。Token、密码、API Key 和环境变量值都不能进入
 此文件。可选 `allowed_tools` 是该 Server 的精确工具名称白名单：省略时保持导入全部工具的兼容行为；
 空列表、重复或空名称会在配置加载时被拒绝；若启动后 Server 没有暴露所列名称，导入失败且不会污染正式
-Registry。
+Registry。`save_mcp_server_configs()` 是此配置的唯一写回边界：显式保存时创建配置目录，先写临时文件再
+替换 `mcp.json`，且以完整 `McpServerConfigs` 重新序列化，因此更新单个 Server 时不会丢失其他 Server。
 
 `tools.mcp_manager.McpServerManager` 是多个已校验配置项的最小生命周期所有者。它为每个配置
 创建带对应工作目录和显式子进程环境的 `McpClient` 与 `McpServerSession`，但先将远程工具导入临时 Registry；
@@ -556,6 +557,14 @@ Provider-managed search，必须作为明确的 Provider 专用能力另行设�
 credential，不会收到模型 API Key、Local API Token、其他连接的 credential 或完整宿主环境。
 这一实现目前只支持 macOS Keychain；OAuth、刷新、Connection API、设置 UI、Windows/Linux 系统存储
 以及除环境变量以外的受控交付机制仍是后续独立工作。
+
+首个桌面可配置的 API key 连接是 Tavily。`bootstrap.tavily_settings.TavilySettings` 协调 API key、
+Connection 与 MCP 配置，但不成为新的通用设置框架：`GET` / `PUT` / disable / `DELETE`
+`/api/v1/settings/tavily` 只在 Local API 已注入该对象时可用，仍受本地 Bearer 认证。保存或替换 key 时，
+Keychain 保存 `connection-tavily` 的不透明值，SQLite 保存 `service_id="tavily"` 的非敏感 Connection，
+而 `mcp.json` 只保存定向的 `TAVILY_API_KEY` 引用与 `allowed_tools=["tavily-search"]`。禁用只移除该
+Server 配置；删除才同时删除配置、Keychain 值与 Connection。响应只包含 `enabled` 与 `api_key_saved`，
+不返回 API key。设置变更不热更新当前 Tool Snapshot，必须重启 Sidecar 才会生效。
 
 MCP 工具内部 ID：
 

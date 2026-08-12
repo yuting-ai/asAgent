@@ -16,6 +16,11 @@ from asagent.agent.run_submission import (
     UnknownConversationError,
 )
 from asagent.api.auth import BearerTokenAuthenticator, LocalApiToken
+from asagent.bootstrap.tavily_settings import (
+    TavilyApiKeyMissingError,
+    TavilySettings,
+    TavilySettingsStatus,
+)
 from asagent.core.conversation import Conversation
 from asagent.core.ids import ApprovalId, ConversationId, RunId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
@@ -157,6 +162,31 @@ class ToolApprovalDecisionResponse(BaseModel):
     decision: ToolApprovalDecision
 
 
+class TavilySettingsResponse(BaseModel):
+    enabled: bool
+    api_key_saved: bool
+
+    @classmethod
+    def from_status(cls, status: TavilySettingsStatus) -> "TavilySettingsResponse":
+        return cls(
+            enabled=status.enabled,
+            api_key_saved=status.api_key_saved,
+        )
+
+
+class UpdateTavilySettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_key: str | None = None
+
+    @field_validator("api_key")
+    @classmethod
+    def api_key_must_not_be_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("api_key must not be blank")
+        return value
+
+
 def create_app(
     *,
     access_token: LocalApiToken,
@@ -166,6 +196,7 @@ def create_app(
     dispatch_submitted_run: Callable[[SubmittedRun], object],
     cancel_run: Callable[[RunId], bool],
     tool_approvals: PendingToolApprovalPolicy | None = None,
+    tavily_settings: TavilySettings | None = None,
     conversation_id_factory: Callable[[], ConversationId] | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
@@ -440,6 +471,53 @@ def create_app(
             stored_conversation.conversation_id,
         )
         return [MessageResponse.from_message(message) for message in stored_messages]
+
+    if tavily_settings is not None:
+
+        @app.get(
+            "/api/v1/settings/tavily",
+            response_model=TavilySettingsResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def get_tavily_settings() -> TavilySettingsResponse:
+            tavily_status = await tavily_settings.get_status()
+            return TavilySettingsResponse.from_status(tavily_status)
+
+        @app.put(
+            "/api/v1/settings/tavily",
+            response_model=TavilySettingsResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def update_tavily_settings(
+            request: UpdateTavilySettingsRequest,
+        ) -> TavilySettingsResponse:
+            try:
+                tavily_status = await tavily_settings.enable(api_key=request.api_key)
+            except TavilyApiKeyMissingError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="tavily api key is not saved",
+                ) from error
+
+            return TavilySettingsResponse.from_status(tavily_status)
+
+        @app.post(
+            "/api/v1/settings/tavily/disable",
+            response_model=TavilySettingsResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def disable_tavily_settings() -> TavilySettingsResponse:
+            tavily_status = await tavily_settings.disable()
+            return TavilySettingsResponse.from_status(tavily_status)
+
+        @app.delete(
+            "/api/v1/settings/tavily",
+            response_model=TavilySettingsResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def delete_tavily_settings() -> TavilySettingsResponse:
+            tavily_status = await tavily_settings.delete()
+            return TavilySettingsResponse.from_status(tavily_status)
 
     return app
 

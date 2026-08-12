@@ -156,3 +156,27 @@ def load_mcp_server_configs(config_dir: Path) -> McpServerConfigs:
         raise McpConfigurationError(
             "MCP configuration is invalid",
         ) from error
+
+
+def save_mcp_server_configs(
+    config_dir: Path,
+    configs: McpServerConfigs,
+) -> None:
+    """Write non-sensitive MCP configuration to config_dir/mcp.json."""
+
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "mcp.json"
+    temporary_path = config_path.with_suffix(".json.tmp")
+    payload = configs.model_dump(mode="json")
+    serialized = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+    try:
+        temporary_path.write_text(serialized, encoding="utf-8")
+        temporary_path.replace(config_path)
+    except OSError as error:
+        raise McpConfigurationError(
+            "MCP configuration file is unavailable",
+        ) from error
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink(missing_ok=True)

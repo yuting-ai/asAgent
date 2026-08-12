@@ -25,6 +25,7 @@ from asagent.bootstrap.keychain_credential_store import (
     MacOSKeychainCredentialStore,
 )
 from asagent.bootstrap.provider_factory import create_model_provider
+from asagent.bootstrap.tavily_settings import TavilySettings
 from asagent.chat.service import ChatService
 from asagent.core.connection import CredentialStore
 from asagent.core.conversation import Conversation
@@ -56,6 +57,9 @@ from asagent.models.provider import ModelProvider
 from asagent.models.tool_names import openai_compatible_tool_name
 from asagent.paths import AppPaths
 from asagent.storage.event_publisher import RepositoryEventPublisher
+from asagent.storage.sqlite.connection_repository import (
+    SqliteConnectionRepository,
+)
 from asagent.storage.sqlite.conversation_repository import (
     SqliteConversationRepository,
 )
@@ -580,9 +584,17 @@ async def _run_main(args: argparse.Namespace) -> None:
             alembic_config_path=_alembic_config_path(),
         )
         conversations = SqliteConversationRepository(database_path)
+        connections = SqliteConnectionRepository(database_path)
         runs = SqliteRunRepository(database_path)
         starter = SqliteRunStarter(database_path)
         finisher = SqliteRunFinisher(database_path)
+        credential_store = MacOSKeychainCredentialStore()
+        tavily_settings = TavilySettings(
+            config_dir=paths.config_dir,
+            connections=connections,
+            credential_store=credential_store,
+            clock=now,
+        )
         tool_approvals = PendingToolApprovalPolicy()
         run_submission = RunSubmissionService(
             conversations=conversations,
@@ -681,6 +693,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     dispatch_submitted_run=dispatcher.dispatch,
                     cancel_run=dispatcher.cancel,
                     tool_approvals=tool_approvals,
+                    tavily_settings=tavily_settings,
                 ),
                 host=args.host,
                 port=args.port,
@@ -700,6 +713,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                 await http_client.aclose()
             await runs.aclose()
             await conversations.aclose()
+            await connections.aclose()
 
         return
 

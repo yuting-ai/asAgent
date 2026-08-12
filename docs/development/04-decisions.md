@@ -766,6 +766,8 @@
   首次验收仅通过每 Server 的 `allowed_tools` 白名单开放基础搜索，不导入 extract、map、crawl 或 research。
   省略白名单才保留“导入 Server 全部工具”的兼容行为；无效或未暴露的白名单名称会阻止整个原子导入。
   Tavily 需通过现有 Connection/Keychain 以 `TAVILY_API_KEY` 定向注入，不将 Key 写入 `mcp.json`。
+  当前已提供受 Local API Bearer 认证的 Tavily 状态、保存/启用、禁用和完全删除操作；其响应不含 key，
+  设置变更需重启 Sidecar 后才影响 Tool Snapshot。
   Provider-managed search 如有需求，必须作为独立的 Provider 专用能力重新设计。
 - 替代方案：直接依赖 DeepSeek/其他模型厂商的内置搜索、复制 CowAgent 的多搜索 API 路由、或用 Browser
   抓取搜索结果页替代搜索服务；当前均不作为 asAgent 的默认搜索架构。

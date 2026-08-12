@@ -3340,3 +3340,28 @@
 - 实现 Tavily 的最小安全配置后端：在 macOS Keychain 保存 API key、在 SQLite 保存非敏感 Connection
   元数据、在 `mcp.json` 写入不含 Key 的 Tavily Server 引用和 `allowed_tools`；不在本项制作 Settings UI
   或热重启 Sidecar。
+
+## 2026-08-12 阶段 8 Tavily 安全配置后端工作记录
+
+### 完成
+
+- 新增 `save_mcp_server_configs()`：显式保存时原子替换 `config_dir/mcp.json`，并保留同一配置中的其他
+  Server；文件只序列化严格校验过的非敏感 `McpServerConfigs`。
+- 新增 `bootstrap.tavily_settings.TavilySettings`，统一协调 `connection-tavily` 的 macOS Keychain API key、
+  SQLite `Connection` 元数据和 Tavily MCP 配置。启用时只写入 `tavily-search` 白名单；禁用保留 key 与
+  Connection；删除才清理三处状态。
+- Local API 在注入该对象时提供经 Bearer 认证的 Tavily 状态、保存/启用、禁用和删除端点。任何响应只含
+  `enabled`、`api_key_saved` 或标准错误，不返回 API key。
+- `asagent serve` 创建 SQLite Connection Repository、macOS Keychain Store 与 Tavily Settings，并在关闭时
+  关闭 Connection Repository。配置变更不热重启或修改当前 Runtime，重启 Sidecar 后才被 MCP 组合根读取。
+
+### 验证
+
+- `tests/integration/test_api_tavily_settings.py` 为 9 passed，覆盖初始状态、保存后的三层持久化、无 key
+  重启用的 409、禁用保留、完全删除、其他 Server 保留、严格请求体和 API key 不泄露。
+- `scripts/check.sh` 通过：348 passed；Ruff、strict mypy（159 个 source files）与锁文件检查均通过。
+
+### 下一步
+
+- 在 Electron Settings 页面加入 Tavily 开关、临时密码输入、保存/禁用/删除状态和“Restart asAgent to apply
+  this change”提示；Renderer 只能通过窄 Preload/Main IPC 调用上述 API，不能获取、缓存或打印 API key。
