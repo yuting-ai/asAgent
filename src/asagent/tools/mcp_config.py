@@ -33,6 +33,7 @@ class McpServerConfig(BaseModel):
     working_directory: Path
     connection_id: str | None = None
     credential_environment_variable: str | None = None
+    allowed_tools: tuple[str, ...] | None = None
 
     @field_validator("command")
     @classmethod
@@ -74,6 +75,22 @@ class McpServerConfig(BaseModel):
                 "MCP credential_environment_variable is invalid",
             )
         return environment_variable
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def validate_allowed_tools(
+        cls,
+        allowed_tools: tuple[str, ...] | None,
+    ) -> tuple[str, ...] | None:
+        if allowed_tools is None:
+            return None
+        if not allowed_tools:
+            raise ValueError("MCP allowed_tools must not be empty")
+        if any(not name for name in allowed_tools):
+            raise ValueError("MCP allowed_tools must not contain empty names")
+        if len(set(allowed_tools)) != len(allowed_tools):
+            raise ValueError("MCP allowed_tools must not contain duplicates")
+        return allowed_tools
 
     @model_validator(mode="after")
     def validate_credential_reference(self) -> Self:

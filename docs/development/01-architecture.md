@@ -526,7 +526,9 @@ JSON，顶层只允许 `servers`。每个显式命名 Server 只声明非空的�
 存在、不启动进程、不读取环境变量或 Secret。可选的 `connection_id` 与
 `credential_environment_variable` 必须成对出现，前者只是系统凭据的稳定引用，后者只是目标子进程
 接收 credential 的环境变量名；两者都不是 Secret。Token、密码、API Key 和环境变量值都不能进入
-此文件。
+此文件。可选 `allowed_tools` 是该 Server 的精确工具名称白名单：省略时保持导入全部工具的兼容行为；
+空列表、重复或空名称会在配置加载时被拒绝；若启动后 Server 没有暴露所列名称，导入失败且不会污染正式
+Registry。
 
 `tools.mcp_manager.McpServerManager` 是多个已校验配置项的最小生命周期所有者。它为每个配置
 创建带对应工作目录和显式子进程环境的 `McpClient` 与 `McpServerSession`，但先将远程工具导入临时 Registry；
@@ -538,6 +540,16 @@ JSON，顶层只允许 `servers`。每个显式命名 Server 只声明非空的�
 Manager 不读取文件、不管理热刷新、重连、分页或 legacy fallback。
 
 MCP Server 的权限独立于宿主工具权限：stdio Server 使用显式工作目录、最小环境变量和自身配置；远程 Server 仅使用为该 Server 配置的 Token 与能力。它们不继承 asAgent 的文件范围、浏览器 Profile 或其他账户 Token。`McpClient` 默认以空环境启动子进程，避免独立调用时意外继承宿主 Secret；当前 Sidecar 组合根仅显式传入 `PATH`，不传模型 API Key、Local API Token 或任意 `.env` 值。
+
+外部 Web Search 也遵循这一边界：首选由用户显式配置的 MCP Search Server 提供，而不是把某个模型厂商的
+managed search 私有参数写入通用 Provider 或 Agent Core。用户选择 Server、其网络能力和凭据；Server 的
+工具仍通过现有 Registry、`mcp.execute` 权限、审批、超时和审计链路。当前不提供内置搜索服务，也不假定
+DeepSeek 或其他 OpenAI-compatible Profile 的 Chat Completions API 存在通用联网搜索参数。未来若接入
+Provider-managed search，必须作为明确的 Provider 专用能力另行设计，不能伪装成可审计的本地 Tool。
+首个真实 Search Server 选择 Tavily 官方的本地 stdio MCP Server；当前 Transport 尚未实现 Streamable HTTP，
+因此不使用 Tavily 的远程 MCP URL。首次只允许其基础 search 能力，避免把搜索、网页提取、站点映射、爬取和
+研究等不同成本与风险的能力一次性授权给模型；该限制由 Tavily 配置的 `allowed_tools` 实际执行，而不是
+仅靠提示词或审批文案约定。
 
 因此，MCP credential 不会绕过最小环境策略：未引用 Connection 的 Server 继续仅接收 Sidecar
 显式允许的基础环境（当前为 `PATH`）；引用 Connection 的 Server 只额外接收自身声明变量名下的

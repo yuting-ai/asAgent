@@ -747,6 +747,29 @@
 - 影响：OAuth Foundation 已作为可恢复的离线基础完成；真实 Gmail OAuth 和受控 Gmail MCP 当前均后置到产品完善阶段，再根据实际产品需求决定是否恢复。未来原生 UI 不是 MCP 的自动副产物，需作为独立产品任务规划。
 - 替代方案：立即建设第一方 Gmail API + 原生 UI、以 Playwright 自动登录和操作 Gmail 网页、或永久只提供 MCP 而不考虑 UI；当前均不采用。
 
+### DEC-074：外部 Web Search 优先采用用户配置的 MCP Server
+
+- 日期：2026-08-12
+- 状态：已确认
+- 背景：搜索可以由模型厂商的 App、专用 Agent 集成、直接搜索 API、浏览器自动化或 MCP Server 提供。
+  当前 asAgent 使用 DeepSeek 的 OpenAI-compatible Chat Completions Adapter；其标准请求契约不应假定
+  存在可移植的“模型内置搜索”参数。把某一厂商的私有开关扩散到 Core 会降低可替换性，也会使搜索请求、
+  结果、权限和审计的边界变得不明确。
+- 决策：外部 Web Search 首选作为用户显式配置的 MCP Server 接入。首个真实验收选择 Tavily 的官方
+  本地 stdio MCP Server（`tavily-mcp`），而不是其远程 HTTP URL；用户负责创建 Tavily API key、选择
+  Server、连接凭据及其网络范围。asAgent 仅按现有 `mcp.json`、Connection/CredentialStore、最小子进程
+  环境、ToolRegistry、`mcp.execute`、审批、超时和审计链路运行其导出的工具。
+- 原因：MCP 让搜索提供方、凭据所有权和能力范围保持显式；同一 Agent 机制可接入不同 Search Server，
+  不把搜索逻辑或供应商私有协议塞入 ModelProvider。模型提出工具调用不等于获得联网权限。
+- 影响：当前不增加内置 Web Search Tool，也不直接接入 DeepSeek managed search。Tavily 的免费计划当前为
+  每月 1,000 API credits，且无需信用卡；基础搜索每次消耗 1 credit，高级搜索每次消耗 2 credits，因此
+  首次验收仅通过每 Server 的 `allowed_tools` 白名单开放基础搜索，不导入 extract、map、crawl 或 research。
+  省略白名单才保留“导入 Server 全部工具”的兼容行为；无效或未暴露的白名单名称会阻止整个原子导入。
+  Tavily 需通过现有 Connection/Keychain 以 `TAVILY_API_KEY` 定向注入，不将 Key 写入 `mcp.json`。
+  Provider-managed search 如有需求，必须作为独立的 Provider 专用能力重新设计。
+- 替代方案：直接依赖 DeepSeek/其他模型厂商的内置搜索、复制 CowAgent 的多搜索 API 路由、或用 Browser
+  抓取搜索结果页替代搜索服务；当前均不作为 asAgent 的默认搜索架构。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

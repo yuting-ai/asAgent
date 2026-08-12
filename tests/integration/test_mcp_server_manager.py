@@ -51,7 +51,7 @@ def _configs(
     *,
     working_directory: Path,
     servers: dict[str, tuple[str, ...]],
-    credential_references: dict[str, dict[str, str]] | None = None,
+    credential_references: dict[str, dict[str, object]] | None = None,
 ) -> McpServerConfigs:
     references = credential_references or {}
     return McpServerConfigs.model_validate(
@@ -66,6 +66,12 @@ def _configs(
             }
         }
     )
+
+
+_MULTI_TOOL_SERVER_COMMAND: Final = (
+    *_SERVER_COMMAND,
+    "--expose-multiply",
+)
 
 
 @pytest.mark.asyncio
@@ -184,6 +190,88 @@ async def test_manager_injects_a_connection_credential_only_into_its_server(
         assert len(registry.definitions()) == 2
         assert isinstance(store, FakeCredentialStore)
         assert store.requested_connection_ids == [connection_id]
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_manager_imports_only_allowed_tools(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    manager = McpServerManager(
+        configs=_configs(
+            working_directory=tmp_path,
+            servers={"test-server": _MULTI_TOOL_SERVER_COMMAND},
+            credential_references={
+                "test-server": {
+                    "allowed_tools": ["add"],
+                }
+            },
+        ),
+        registry=registry,
+    )
+
+    try:
+        await manager.start()
+
+        tool_ids = {definition.tool_id for definition in registry.definitions()}
+        assert len(tool_ids) == 1
+        assert next(iter(tool_ids)).startswith("mcp:test-server:add:")
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_manager_imports_all_tools_when_allowed_tools_is_omitted(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    manager = McpServerManager(
+        configs=_configs(
+            working_directory=tmp_path,
+            servers={"test-server": _MULTI_TOOL_SERVER_COMMAND},
+        ),
+        registry=registry,
+    )
+
+    try:
+        await manager.start()
+
+        tool_ids = {definition.tool_id for definition in registry.definitions()}
+        assert len(tool_ids) == 2
+        assert any(tool_id.startswith("mcp:test-server:add:") for tool_id in tool_ids)
+        assert any(
+            tool_id.startswith("mcp:test-server:multiply:") for tool_id in tool_ids
+        )
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_manager_rejects_missing_allowed_tool_without_registry_pollution(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    manager = McpServerManager(
+        configs=_configs(
+            working_directory=tmp_path,
+            servers={"test-server": _MULTI_TOOL_SERVER_COMMAND},
+            credential_references={
+                "test-server": {
+                    "allowed_tools": ["add", "missing-tool"],
+                }
+            },
+        ),
+        registry=registry,
+    )
+
+    try:
+        with pytest.raises(
+            ValueError,
+            match="MCP allowed tool is not exposed by server .test-server.: .missing-tool.",
+        ):
+            await manager.start()
+
+        assert registry.definitions() == ()
     finally:
         await manager.aclose()
 

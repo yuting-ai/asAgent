@@ -30,6 +30,20 @@ _ADD_TOOL: Final = {
         "required": ["left", "right"],
     },
 }
+_MULTIPLY_TOOL: Final = {
+    "name": "multiply",
+    "title": "Multiply numbers",
+    "description": "Multiply two numbers.",
+    "inputSchema": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "left": {"type": "number"},
+            "right": {"type": "number"},
+        },
+        "required": ["left", "right"],
+    },
+}
 
 
 def main() -> None:
@@ -122,11 +136,18 @@ def _list_tools(
         request_id,
         {
             "resultType": "complete",
-            "tools": [_ADD_TOOL],
+            "tools": _listed_tools(),
             "ttlMs": 60_000,
             "cacheScope": "public",
         },
     )
+
+
+def _listed_tools() -> list[Mapping[str, object]]:
+    tools: list[Mapping[str, object]] = [_ADD_TOOL]
+    if "--expose-multiply" in sys.argv:
+        tools.append(_MULTIPLY_TOOL)
+    return tools
 
 
 def _call_tool(
@@ -139,6 +160,34 @@ def _call_tool(
         return _error(request_id, -32602, "tools/call requires name and arguments")
 
     if name != "add":
+        if name == "multiply":
+            left = arguments.get("left")
+            right = arguments.get("right")
+            if not _is_number(left) or not _is_number(right):
+                return _result(
+                    request_id,
+                    {
+                        "resultType": "complete",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "left and right must both be numbers",
+                            },
+                        ],
+                        "isError": True,
+                    },
+                )
+
+            product = left * right
+            return _result(
+                request_id,
+                {
+                    "resultType": "complete",
+                    "content": [{"type": "text", "text": str(product)}],
+                    "isError": False,
+                },
+            )
+
         return _error(request_id, -32602, f"Unknown tool: {name}")
 
     left = arguments.get("left")

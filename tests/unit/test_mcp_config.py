@@ -22,7 +22,8 @@ def test_load_mcp_server_configs_from_json(tmp_path: Path) -> None:
       "command": ["python", "-u", "/opt/mcp/server.py"],
       "working_directory": "/opt/mcp",
       "connection_id": "connection-test",
-      "credential_environment_variable": "TEST_MCP_TOKEN"
+      "credential_environment_variable": "TEST_MCP_TOKEN",
+      "allowed_tools": ["tavily-search"]
     }
   }
 }
@@ -37,7 +38,19 @@ def test_load_mcp_server_configs_from_json(tmp_path: Path) -> None:
         working_directory=Path("/opt/mcp"),
         connection_id="connection-test",
         credential_environment_variable="TEST_MCP_TOKEN",
+        allowed_tools=("tavily-search",),
     )
+
+
+def test_allowed_tools_may_be_omitted_for_full_import() -> None:
+    config = McpServerConfig.model_validate(
+        {
+            "command": ["python"],
+            "working_directory": "/opt/mcp",
+        }
+    )
+
+    assert config.allowed_tools is None
 
 
 def test_missing_mcp_configuration_means_no_servers(tmp_path: Path) -> None:
@@ -108,6 +121,33 @@ def test_missing_mcp_configuration_means_no_servers(tmp_path: Path) -> None:
                     "working_directory": "/opt/mcp",
                     "connection_id": "connection-1",
                     "credential_environment_variable": "invalid-name",
+                }
+            }
+        },
+        {
+            "servers": {
+                "test-server": {
+                    "command": ["python"],
+                    "working_directory": "/opt/mcp",
+                    "allowed_tools": [],
+                }
+            }
+        },
+        {
+            "servers": {
+                "test-server": {
+                    "command": ["python"],
+                    "working_directory": "/opt/mcp",
+                    "allowed_tools": ["search", "search"],
+                }
+            }
+        },
+        {
+            "servers": {
+                "test-server": {
+                    "command": ["python"],
+                    "working_directory": "/opt/mcp",
+                    "allowed_tools": [""],
                 }
             }
         },

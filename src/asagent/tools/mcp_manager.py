@@ -49,6 +49,7 @@ class McpServerManager:
                     ),
                     registry=staging_registry,
                     server_name=server_name,
+                    allowed_tools=config.allowed_tools,
                 )
                 self._sessions.append(session)
                 await session.start()

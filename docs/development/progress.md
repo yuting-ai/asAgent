@@ -3302,3 +3302,41 @@
 - 先定义一个不依赖第三方账户的最小 `web_search` MCP 体验范围：明确搜索提供方、网络/域名限制、
   结果正文上限、缓存与审批策略；确定后才实现 Server 配置、工具和桌面人工验收。该任务不自动扩展到
   `tools/list` 分页、`listChanged`、Streamable HTTP 或 Gmail。
+
+## 2026-08-12 外部 Web Search 接入策略
+
+### 决策
+
+- 确认外部搜索优先采用用户配置的 MCP Server，而非当前阶段直接调用某个模型厂商的 managed search 或
+  在 asAgent Core 内置多搜索 API 路由。
+- 用户决定搜索 Server、凭据和网络能力；模型只经既有 MCP 工具、权限、审批、超时和审计链路请求搜索。
+  没有配置 Server 时，模型没有联网搜索能力。
+
+### 下一步
+
+- 以 Tavily 官方本地 stdio MCP Server 完成首次真实 Web Search 人工验收：用户在 Tavily 创建 API key，
+  Keychain 以 Connection 保存凭据，并仅向该 Server 的 `TAVILY_API_KEY` 定向注入。首轮只启用基础
+  `tavily-search`，确认每次审批、结果大小与免费额度体验；不启用 advanced search、extract、map、crawl、
+  research 或远程 HTTP Transport。
+
+## 2026-08-12 阶段 8 MCP 工具白名单工作记录
+
+### 完成
+
+- `mcp.json` 的单个 Server 现可选 `allowed_tools`；省略时保持既有的全量导入行为，空列表、重复项或
+  空名称在严格配置校验时拒绝。
+- `McpServerSession` 将白名单传给工具导入；只将明确列出的远程工具注册到临时 Registry。若 Server 未
+  暴露任一所列名称，启动失败、已有 Session 关闭且正式 Registry 保持无残留。
+- 测试 stdio Server 以可选 `multiply` 工具验证筛选路径，默认仍只暴露 `add`，不改变既有 MCP 验收语义。
+
+### 验证
+
+- `tests/unit/test_mcp_config.py` 与 `tests/integration/test_mcp_server_manager.py` 共 22 passed，覆盖省略
+  白名单的全量导入、合法筛选、非法配置与未知远程工具的原子失败。
+- `scripts/check.sh` 通过：339 passed；Ruff、strict mypy（157 个 source files）与锁文件检查均通过。
+
+### 下一步
+
+- 实现 Tavily 的最小安全配置后端：在 macOS Keychain 保存 API key、在 SQLite 保存非敏感 Connection
+  元数据、在 `mcp.json` 写入不含 Key 的 Tavily Server 引用和 `allowed_tools`；不在本项制作 Settings UI
+  或热重启 Sidecar。

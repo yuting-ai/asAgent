@@ -101,13 +101,33 @@ async def register_mcp_tools(
     client: "McpClient",
     *,
     server_name: str,
+    allowed_tools: tuple[str, ...] | None = None,
 ) -> None:
     """List tools from a started MCP client and register each as McpTool."""
 
     if not server_name:
         raise ValueError("server_name must not be empty")
 
-    for description in await client.list_tools():
+    available_tools = {
+        description.name: description for description in await client.list_tools()
+    }
+
+    if allowed_tools is None:
+        tools_to_register = tuple(available_tools.values())
+    else:
+        missing_tools = [
+            tool_name for tool_name in allowed_tools if tool_name not in available_tools
+        ]
+        if missing_tools:
+            raise ValueError(
+                "MCP allowed tool is not exposed by server "
+                f"{server_name!r}: {missing_tools[0]!r}",
+            )
+        tools_to_register = tuple(
+            available_tools[tool_name] for tool_name in allowed_tools
+        )
+
+    for description in tools_to_register:
         registry.register(
             McpTool(
                 client=client,
@@ -390,6 +410,7 @@ class McpServerSession:
         client: McpClient,
         registry: ToolRegistry,
         server_name: str,
+        allowed_tools: tuple[str, ...] | None = None,
     ) -> None:
         if not server_name:
             raise ValueError("server_name must not be empty")
@@ -397,6 +418,7 @@ class McpServerSession:
         self._client = client
         self._registry = registry
         self._server_name = server_name
+        self._allowed_tools = allowed_tools
         self._started = False
         self._closed = False
 
@@ -412,6 +434,7 @@ class McpServerSession:
                 self._registry,
                 self._client,
                 server_name=self._server_name,
+                allowed_tools=self._allowed_tools,
             )
         except BaseException:
             await self._client.aclose()
