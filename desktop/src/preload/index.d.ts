@@ -73,6 +73,11 @@ interface ModelSettingsInput {
   apiKey?: string
 }
 
+interface WorkspaceSettingsStatus {
+  workspace_root: string
+  additional_roots: string[]
+}
+
 interface DesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>
   openExternalLink(url: string): Promise<void>
@@ -94,6 +99,9 @@ interface DesktopBridge {
   getModelSettings(): Promise<ModelSettingsStatus>
   saveModelSettings(input: ModelSettingsInput): Promise<ModelSettingsStatus>
   deleteModelSettings(): Promise<ModelSettingsStatus>
+  getWorkspaceSettings(): Promise<WorkspaceSettingsStatus>
+  chooseWorkspaceFolder(): Promise<string | null>
+  saveWorkspaceSettings(additionalRoots: string[]): Promise<WorkspaceSettingsStatus>
   onRunEvent(callback: (update: RunUpdate) => void): () => void
   onRunStreamError(callback: (error: RunStreamError) => void): () => void
   onToolApprovalRequested(callback: (approval: ToolApproval) => void): () => void

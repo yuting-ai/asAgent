@@ -631,6 +631,8 @@ workspace/
 
 阶段 5 的第一块基础已实现于 `workspace.resolver.WorkspaceResolver`：它持有规范化后的 `workspace_root` 与可选额外允许根，将相对路径解释为 Workspace 内路径，并只返回位于任一允许根内的规范化目标。根目录必须是已存在的目录；目标可以尚不存在，以支持后续安全创建文件。`resolve(strict=False)` 会解析已存在的符号链接，因此 `..` 或指向允许根外的链接都会以 `WorkspacePathOutsideAllowedRootsError` 拒绝。Resolver 不创建目录、不读取或写入文件、不展开 `~`，也不自行扫描真实用户目录；File Tool 与 Policy 必须在执行前调用它。
 
+`workspace.settings.WorkspaceSettings` 是当前桌面文件范围偏好的最小持久化边界。它将 `AppPaths.workspace_dir` 作为默认根，并把用户通过 Preferences 原生目录选择器添加的额外根以规范化绝对路径写入 `config_dir/workspace.json`；保存时每个根必须是存在的目录，重复根和默认根会被移除，写入采用临时文件替换。读取严格拒绝损坏、未知字段或相对路径配置。Local API 的固定 `GET`/`PUT /api/v1/settings/workspace` 仅返回或替换这些路径；Electron Main 持有目录选择器和认证 API 调用，Preload 只暴露具名操作，Renderer 不获得 Node、文件系统、Token 或任意 HTTP 能力。该配置现在只表达可撤销的未来访问范围：文件工具尚未进入实际 Runtime，因此保存目录不会读取、扫描或上传任何文件，也不会授予写入、删除、Shell 或模型访问权限。
+
 首个 File Tool 是 `tools.builtin.filesystem_list.FilesystemListTool`。它要求 `filesystem.read` 能力，先用 Resolver 验证目标，再非递归地列出一层目录项；结果只含文件、目录或符号链接的名称和类型，不读取正文、不跟随链接、不返回绝对路径。它使用稳定名称排序和 `offset`/`max_entries` 分页：默认每页 50、最多 100，结果始终说明目录总数、当前页范围，以及存在时的下一页 offset，因此模型和用户不会把截断结果误解为完整目录。当前该工具尚未注册到 CLI 或真实 Provider 路径，也没有用户范围设置或审批 UI。
 
 `tools.builtin.filesystem_read_file.FilesystemReadFileTool` 是对应的最小正文读取能力。它同样要求 `filesystem.read`，先由 Resolver 规范化并检查目标，再只读取一个存在的普通文件；当前仅接受严格 UTF-8 文本，并以 64 KiB 硬上限阻止大文件进入工具结果或模型上下文。目录、缺失文件、Workspace 外路径、超限文件和非 UTF-8 内容均返回明确错误。它不解析 DOCX、PDF、图片或其他二进制格式，也尚未注册到 CLI 或真实 Provider 路径。
@@ -641,7 +643,7 @@ workspace/
 
 多格式文档能力将独立于基础 File Tool 演进：未来的 `document.extract_text` 负责 DOCX、带文本层 PDF 等格式的确定性正文提取；扫描型 PDF 与图片仅在显式 OCR 工具中处理。两者都必须在 Workspace 范围、文件/页数/输出大小、超时、权限和审计边界内执行，不能以“读取文件”为名自动扫描或上传用户文档。
 
-文件系统范围是用户在设置窗口中选择的持久、可撤销偏好：仅 Workspace（默认）、用户明确选择的文件夹或整台电脑。每次请求仍绑定操作类型和规范化后的目标路径；路径穿越与符号链接都不得逃逸当前允许根。整台电脑模式须经高风险二次确认和平台所需系统授权，且只扩大可寻址路径范围；它不会自动允许写入、删除、命令执行或敏感位置读取。用户也可以把外部文件导入 Workspace。
+文件系统范围是用户在设置窗口中选择的持久、可撤销偏好：仅 Workspace（默认）、用户明确选择的文件夹或整台电脑。当前桌面已实现默认 Workspace 与多个明确选择文件夹的保存、显示和撤销；整台电脑模式仍未实现。每次未来文件请求仍绑定操作类型和规范化后的目标路径；路径穿越与符号链接都不得逃逸当前允许根。整台电脑模式须经高风险二次确认和平台所需系统授权，且只扩大可寻址路径范围；它不会自动允许写入、删除、命令执行或敏感位置读取。用户也可以把外部文件导入 Workspace。
 
 设置窗口展示当前范围、已授权根与撤销入口；整台电脑模式必须展示风险说明。逐次批准 UI 将展示精确目标或根目录、操作、权限、递归范围、影响摘要和有效期限，而非只展示宽泛工具能力。阶段 5 的审计记录授权/拒绝和所有文件变更的最小必要元数据，不保存文件正文、Secret 或无关路径。阶段 2 的 `granted_permissions` 仅决定工具类别是否有资格执行，不能代替路径范围与逐次高副作用批准。
 

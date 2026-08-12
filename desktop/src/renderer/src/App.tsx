@@ -79,6 +79,11 @@ type ModelSettingsStatus = {
   base_url: string | null
 }
 
+type WorkspaceSettingsStatus = {
+  workspace_root: string
+  additional_roots: string[]
+}
+
 type ActivityTab = 'approvals' | 'schedule'
 
 const TAVILY_SETTINGS_LOAD_ERROR = 'Tavily settings could not be loaded.'
@@ -89,6 +94,8 @@ const MODEL_SETTINGS_LOAD_ERROR = 'Model settings could not be loaded.'
 const MODEL_SETTINGS_UPDATE_ERROR = 'Model settings could not be updated.'
 const MODEL_SETTINGS_REQUIRED = 'Enter a model, base URL, and API key before saving.'
 const MODEL_DELETE_CONFIRM = 'Remove the saved model configuration and API key?'
+const WORKSPACE_SETTINGS_LOAD_ERROR = 'File access settings could not be loaded.'
+const WORKSPACE_SETTINGS_UPDATE_ERROR = 'File access settings could not be updated.'
 
 function conversationLabel(title: string | null): string {
   return title ?? 'New conversation'
@@ -263,6 +270,11 @@ export default function App(): React.JSX.Element {
   const [modelApiKey, setModelApiKey] = useState('')
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [isModelBusy, setIsModelBusy] = useState(false)
+  const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettingsStatus | null>(null)
+  const [workspaceLoadError, setWorkspaceLoadError] = useState<string | null>(null)
+  const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null)
+  const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(true)
+  const [isWorkspaceBusy, setIsWorkspaceBusy] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -294,6 +306,34 @@ export default function App(): React.JSX.Element {
 
     void loadInitialData()
 
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadWorkspaceSettings(): Promise<void> {
+      setIsWorkspaceLoading(true)
+      try {
+        const status = await window.desktop.getWorkspaceSettings()
+        if (!cancelled) {
+          setWorkspaceSettings(status)
+          setWorkspaceLoadError(null)
+        }
+      } catch {
+        if (!cancelled) {
+          setWorkspaceLoadError(WORKSPACE_SETTINGS_LOAD_ERROR)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsWorkspaceLoading(false)
+        }
+      }
+    }
+
+    void loadWorkspaceSettings()
     return () => {
       cancelled = true
     }
@@ -847,6 +887,52 @@ export default function App(): React.JSX.Element {
       setModelActionError(MODEL_SETTINGS_UPDATE_ERROR)
     } finally {
       setIsModelBusy(false)
+    }
+  }
+
+  async function handleAddWorkspaceFolder(): Promise<void> {
+    if (isWorkspaceBusy || workspaceSettings === null) {
+      return
+    }
+
+    const selectedFolder = await window.desktop.chooseWorkspaceFolder()
+    if (selectedFolder === null || workspaceSettings.additional_roots.includes(selectedFolder)) {
+      return
+    }
+
+    setIsWorkspaceBusy(true)
+    setWorkspaceActionError(null)
+    try {
+      setWorkspaceSettings(
+        await window.desktop.saveWorkspaceSettings([
+          ...workspaceSettings.additional_roots,
+          selectedFolder
+        ])
+      )
+    } catch {
+      setWorkspaceActionError(WORKSPACE_SETTINGS_UPDATE_ERROR)
+    } finally {
+      setIsWorkspaceBusy(false)
+    }
+  }
+
+  async function handleRemoveWorkspaceFolder(folder: string): Promise<void> {
+    if (isWorkspaceBusy || workspaceSettings === null) {
+      return
+    }
+
+    setIsWorkspaceBusy(true)
+    setWorkspaceActionError(null)
+    try {
+      setWorkspaceSettings(
+        await window.desktop.saveWorkspaceSettings(
+          workspaceSettings.additional_roots.filter((root) => root !== folder)
+        )
+      )
+    } catch {
+      setWorkspaceActionError(WORKSPACE_SETTINGS_UPDATE_ERROR)
+    } finally {
+      setIsWorkspaceBusy(false)
     }
   }
 
@@ -1724,6 +1810,72 @@ export default function App(): React.JSX.Element {
                 <p className="settings-section-placeholder">
                   Anthropic and Gemini providers are not available yet.
                 </p>
+              </section>
+
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div>
+                    <div className="settings-section-title">Local file access</div>
+                    <p className="settings-section-copy">
+                      Choose folders that asAgent may use in a future file task. This does not
+                      enable file tools or grant write access.
+                    </p>
+                  </div>
+                </div>
+
+                {isWorkspaceLoading ? (
+                  <p className="settings-section-status">Loading file access settings…</p>
+                ) : null}
+                {workspaceLoadError !== null ? (
+                  <p className="settings-section-error">{workspaceLoadError}</p>
+                ) : null}
+                {!isWorkspaceLoading &&
+                workspaceLoadError === null &&
+                workspaceSettings !== null ? (
+                  <>
+                    <p className="settings-section-status">
+                      Default workspace: <code>{workspaceSettings.workspace_root}</code>
+                    </p>
+                    {workspaceSettings.additional_roots.length === 0 ? (
+                      <p className="settings-section-placeholder">
+                        No additional folders are authorized.
+                      </p>
+                    ) : (
+                      <ul className="settings-directory-list">
+                        {workspaceSettings.additional_roots.map((folder) => (
+                          <li key={folder}>
+                            <code>{folder}</code>
+                            <button
+                              className="settings-button settings-button-danger"
+                              disabled={isWorkspaceBusy}
+                              onClick={() => {
+                                void handleRemoveWorkspaceFolder(folder)
+                              }}
+                              type="button"
+                            >
+                              Remove
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="settings-card-actions">
+                      <button
+                        className="settings-button settings-button-primary"
+                        disabled={isWorkspaceBusy}
+                        onClick={() => {
+                          void handleAddWorkspaceFolder()
+                        }}
+                        type="button"
+                      >
+                        Add folder
+                      </button>
+                    </div>
+                  </>
+                ) : null}
+                {workspaceActionError !== null ? (
+                  <p className="settings-section-error">{workspaceActionError}</p>
+                ) : null}
               </section>
 
               <section className="settings-section">

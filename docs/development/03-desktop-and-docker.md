@@ -56,6 +56,8 @@ Docker 不是桌面客户端依赖。最终用户安装 Electron 应用后，不
 
 Main 不负责 Agent 业务。
 
+Preferences 中的本地文件范围由 Main 的原生 `showOpenDialog` 选择目录；Main 在校验 Renderer 来源后，将目录路径交给受 Bearer 保护的固定 Workspace Settings API。Renderer 仅能读取已授权目录列表、请求选择一个目录或替换该列表，不能取得 Node 文件系统、任意路径读取或通用 IPC。当前该选择只保存未来可访问范围，不会启动文件扫描或启用文件 Tool；受控 File Tool 接入属于后续独立任务。
+
 ### Preload
 
 只暴露最小、类型明确的 IPC：

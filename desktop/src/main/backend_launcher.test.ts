@@ -185,6 +185,62 @@ describe('BackendLauncher', () => {
     )
   })
 
+  it('reads and saves workspace folders through its private backend connection', async () => {
+    const child = createChild()
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+    const fetchBackend = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            workspace_root: '/project/workspace',
+            additional_roots: ['/project/files']
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            workspace_root: '/project/workspace',
+            additional_roots: ['/project/files', '/project/notes']
+          }),
+          { status: 200 }
+        )
+      )
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      spawnBackend,
+      fetchBackend
+    })
+
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+    await starting
+
+    await expect(launcher.getWorkspaceSettings()).resolves.toEqual({
+      workspace_root: '/project/workspace',
+      additional_roots: ['/project/files']
+    })
+    await expect(
+      launcher.saveWorkspaceSettings(['/project/files', '/project/notes'])
+    ).resolves.toEqual({
+      workspace_root: '/project/workspace',
+      additional_roots: ['/project/files', '/project/notes']
+    })
+    expect(fetchBackend).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:43123/api/v1/settings/workspace',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ additional_roots: ['/project/files', '/project/notes'] })
+      })
+    )
+  })
+
   it('reads and decides a tool approval through its private backend connection', async () => {
     const child = createChild()
     const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn

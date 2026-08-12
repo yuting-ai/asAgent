@@ -90,6 +90,11 @@ export type ModelSettingsInput = {
   apiKey?: string
 }
 
+export type WorkspaceSettingsStatus = {
+  workspace_root: string
+  additional_roots: string[]
+}
+
 type BackendLauncherOptions = {
   projectRoot: string
   appHome: string
@@ -315,6 +320,16 @@ export class BackendLauncher {
 
   async deleteModelSettings(): Promise<ModelSettingsStatus> {
     return this.requestJson('/api/v1/settings/model', 'DELETE')
+  }
+
+  async getWorkspaceSettings(): Promise<WorkspaceSettingsStatus> {
+    return this.requestJson('/api/v1/settings/workspace', 'GET')
+  }
+
+  async saveWorkspaceSettings(additionalRoots: string[]): Promise<WorkspaceSettingsStatus> {
+    return this.requestJson('/api/v1/settings/workspace', 'PUT', {
+      additional_roots: additionalRoots
+    })
   }
 
   watchRunEvents(

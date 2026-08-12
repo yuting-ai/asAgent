@@ -138,6 +138,18 @@ function parseModelSettingsInput(value: unknown): {
   }
 }
 
+function parseWorkspaceRoots(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 16) {
+    throw new Error('Workspace folders are invalid.')
+  }
+
+  if (value.some((root) => typeof root !== 'string' || !root.trim())) {
+    throw new Error('Workspace folders are invalid.')
+  }
+
+  return value.map((root) => root.trim())
+}
+
 function createDevelopmentBackendLauncher(): BackendLauncher {
   const projectRoot = join(app.getAppPath(), '..')
   const providerProfile = process.env['ASAGENT_DESKTOP_PROFILE']
@@ -496,6 +508,39 @@ app.whenReady().then(async () => {
 
     assertTrustedRenderer(frame.url)
     return getReadyBackendLauncher().deleteModelSettings()
+  })
+
+  ipcMain.handle('desktop:get-workspace-settings', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().getWorkspaceSettings()
+  })
+
+  ipcMain.handle('desktop:choose-workspace-folder', async (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    const selection = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory']
+    })
+    return selection.canceled ? null : (selection.filePaths[0] ?? null)
+  })
+
+  ipcMain.handle('desktop:save-workspace-settings', (event, additionalRoots: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().saveWorkspaceSettings(parseWorkspaceRoots(additionalRoots))
   })
 
   createWindow()

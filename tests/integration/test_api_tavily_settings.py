@@ -33,6 +33,7 @@ from asagent.storage.sqlite.connection_repository import (
     SqliteConnectionRepository,
 )
 from asagent.tools.mcp_config import load_mcp_server_configs
+from asagent.workspace.settings import WorkspaceSettings
 
 _TOKEN = LocalApiToken("test-token")
 _FIXED_NOW = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
@@ -117,13 +118,16 @@ class TavilyApiContext:
     config_dir: Path
     credential_store: InMemoryCredentialStore
     connections: SqliteConnectionRepository
+    workspace_root: Path
 
 
 @pytest.fixture
 async def tavily_api_context(tmp_path: Path) -> AsyncIterator[TavilyApiContext]:
     database_path = tmp_path / "asagent.sqlite3"
     config_dir = tmp_path / "config"
+    workspace_root = tmp_path / "workspace"
     config_dir.mkdir()
+    workspace_root.mkdir()
     _upgrade(database_path)
 
     credential_store = InMemoryCredentialStore()
@@ -139,6 +143,10 @@ async def tavily_api_context(tmp_path: Path) -> AsyncIterator[TavilyApiContext]:
         connections=connections,
         credential_store=credential_store,
         clock=lambda: _FIXED_NOW,
+    )
+    workspace_settings = WorkspaceSettings(
+        config_dir=config_dir,
+        workspace_root=workspace_root,
     )
     conversations = InMemoryConversationRepository()
     app = create_app(
@@ -156,6 +164,7 @@ async def tavily_api_context(tmp_path: Path) -> AsyncIterator[TavilyApiContext]:
         cancel_run=_cancel_nothing,
         tavily_settings=tavily_settings,
         model_settings=model_settings,
+        workspace_settings=workspace_settings,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -169,6 +178,7 @@ async def tavily_api_context(tmp_path: Path) -> AsyncIterator[TavilyApiContext]:
             config_dir=config_dir,
             credential_store=credential_store,
             connections=connections,
+            workspace_root=workspace_root,
         )
 
     await connections.aclose()
@@ -256,6 +266,59 @@ async def test_model_settings_reject_missing_or_blank_key_before_one_is_saved(
 
     assert missing_key.status_code == 409
     assert blank_key.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_workspace_settings_persist_selected_directories(
+    tavily_api_context: TavilyApiContext,
+    tmp_path: Path,
+) -> None:
+    selected_directory = tmp_path / "selected"
+    selected_directory.mkdir()
+
+    initial = await tavily_api_context.client.get("/api/v1/settings/workspace")
+    assert initial.status_code == 200
+    assert initial.json() == {
+        "workspace_root": str(tavily_api_context.workspace_root.resolve()),
+        "additional_roots": [],
+    }
+
+    saved = await tavily_api_context.client.put(
+        "/api/v1/settings/workspace",
+        json={"additional_roots": [str(selected_directory)]},
+    )
+    assert saved.status_code == 200
+    assert saved.json() == {
+        "workspace_root": str(tavily_api_context.workspace_root.resolve()),
+        "additional_roots": [str(selected_directory.resolve())],
+    }
+
+    removed = await tavily_api_context.client.put(
+        "/api/v1/settings/workspace",
+        json={"additional_roots": []},
+    )
+    assert removed.status_code == 200
+    assert removed.json()["additional_roots"] == []
+
+
+@pytest.mark.asyncio
+async def test_workspace_settings_reject_invalid_paths_and_unknown_fields(
+    tavily_api_context: TavilyApiContext,
+    tmp_path: Path,
+) -> None:
+    missing_directory = tmp_path / "missing"
+
+    missing = await tavily_api_context.client.put(
+        "/api/v1/settings/workspace",
+        json={"additional_roots": [str(missing_directory)]},
+    )
+    unknown_field = await tavily_api_context.client.put(
+        "/api/v1/settings/workspace",
+        json={"additional_roots": [], "unexpected": True},
+    )
+
+    assert missing.status_code == 422
+    assert unknown_field.status_code == 422
 
 
 @pytest.mark.asyncio

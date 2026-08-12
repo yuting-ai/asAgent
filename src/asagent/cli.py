@@ -86,6 +86,7 @@ from asagent.tools.mcp_config import load_mcp_server_configs
 from asagent.tools.mcp_manager import McpServerManager
 from asagent.tools.registry import ToolRegistry
 from asagent.tools.snapshot import ToolSnapshot
+from asagent.workspace.settings import WorkspaceSettings
 
 _BUILTIN_TOOL_PERMISSIONS = frozenset({"tool.execute"})
 _MCP_SUBPROCESS_ENVIRONMENT_NAMES = ("PATH",)
@@ -589,6 +590,7 @@ async def _run_main(args: argparse.Namespace) -> None:
 
         access_token = read_local_api_token(sys.stdin.readline)
         paths = AppPaths.from_root(args.app_home)
+        paths.workspace_dir.mkdir(parents=True, exist_ok=True)
         database_path = paths.data_dir / "asagent.sqlite3"
         upgrade_sqlite_database(
             database_path=database_path,
@@ -611,6 +613,10 @@ async def _run_main(args: argparse.Namespace) -> None:
             connections=connections,
             credential_store=credential_store,
             clock=now,
+        )
+        workspace_settings = WorkspaceSettings(
+            config_dir=paths.config_dir,
+            workspace_root=paths.workspace_dir,
         )
         tool_approvals = PendingToolApprovalPolicy()
         run_submission = RunSubmissionService(
@@ -725,6 +731,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     tool_approvals=tool_approvals,
                     tavily_settings=tavily_settings,
                     model_settings=model_settings,
+                    workspace_settings=workspace_settings,
                 ),
                 host=args.host,
                 port=args.port,

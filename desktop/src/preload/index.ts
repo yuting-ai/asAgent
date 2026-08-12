@@ -69,6 +69,11 @@ type ModelSettingsInput = {
   apiKey?: string
 }
 
+type WorkspaceSettingsStatus = {
+  workspace_root: string
+  additional_roots: string[]
+}
+
 const desktopBridge = {
   getAppInfo: (): Promise<{
     appName: string
@@ -105,6 +110,12 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:save-model-settings', input),
   deleteModelSettings: (): Promise<ModelSettingsStatus> =>
     ipcRenderer.invoke('desktop:delete-model-settings'),
+  getWorkspaceSettings: (): Promise<WorkspaceSettingsStatus> =>
+    ipcRenderer.invoke('desktop:get-workspace-settings'),
+  chooseWorkspaceFolder: (): Promise<string | null> =>
+    ipcRenderer.invoke('desktop:choose-workspace-folder'),
+  saveWorkspaceSettings: (additionalRoots: string[]): Promise<WorkspaceSettingsStatus> =>
+    ipcRenderer.invoke('desktop:save-workspace-settings', additionalRoots),
   onRunEvent: (callback: (update: RunUpdate) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, update: RunUpdate): void => {
       callback(update)
