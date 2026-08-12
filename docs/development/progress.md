@@ -3243,3 +3243,36 @@
 - 实现离线可测的 Gmail OAuth Foundation：严格验证非敏感 Desktop client 配置，生成 PKCE/state/
   authorization URL，并定义一次性 loopback callback 与脱敏失败结果；不在该任务执行真实浏览器授权、
   token 交换、Connection 写入、Keychain 写入或 Gmail MCP Tool。
+
+## 2026-08-12 Gmail OAuth Foundation 与功能后置记录
+
+### 完成
+
+- 新增离线 `bootstrap.gmail_oauth`：仅接受非敏感 Google Desktop client ID，生成 PKCE S256
+  verifier/challenge、随机 state、固定的 `gmail.readonly` scope 和受限 `127.0.0.1` callback URL。
+- 一次性授权 Session 只在内存保留 verifier/state；它只接受单值、匹配 state 的 callback code，明确区分
+  用户拒绝、无效 query、状态不匹配和重复消费，且错误不回显授权码、state 或 Google 错误详情。
+- 本任务没有网络、浏览器、loopback listener、token exchange、Connection/SQLite 写入、Keychain 写入或
+  Gmail MCP Tool；因此可离线稳定测试而不要求 Google Cloud 项目或真实账户。
+
+### 验证
+
+- 单元测试覆盖 PKCE URL 参数、一次性成功回调、state 不匹配、用户拒绝、无效 client/redirect 配置和无效端口。
+- `scripts/check.sh` 通过：331 passed；Ruff、strict mypy（156 个 source files）与锁文件检查均通过。
+
+### 决策变化
+
+- DEC-072 更新为“Foundation 已完成，真实授权后置”；DEC-073 更新为 Gmail MCP 也暂不继续，等待产品完善阶段的
+  真实需求恢复。
+
+### 后置范围
+
+- 暂停 Gmail 的真实 Google Cloud 配置、系统浏览器授权、loopback listener、token exchange、Connection/
+  Keychain 持久化、refresh、Gmail MCP Server 和原生 Email workspace。
+- Foundation、通用 Connection、Keychain 与 MCP 定向 credential 注入均保留；恢复时从真实 OAuth callback +
+  token exchange 的独立任务继续，不必重做已验证的安全边界。
+
+### 下一步
+
+- 回到阶段 8 通用 MCP 主线，选择不依赖外部账户、收益更高的剩余协议能力；优先评估 modern-first 的
+  legacy stdio fallback、`tools/list` 分页/`listChanged`，或按实际需要明确结束阶段 8 后进入 Skills。

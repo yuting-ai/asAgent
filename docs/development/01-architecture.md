@@ -372,7 +372,11 @@ Connection 元数据，并把 refresh token 写入 Keychain；access token、授
 Gmail MCP Server，而不是 asAgent 内置 Gmail API Gateway；它将通过既有 `connection_id` 定向 credential
 注入进入统一 ToolRegistry。原生 Email workspace、其专用 Local API 和直接 Gmail API Gateway 留待以后
 真实产品需求出现时再设计；届时必须复用同一 Connection、OAuth 和 Keychain 生命周期，不能另建第二套
-token 或账户主数据。当前尚没有 OAuth 代码、自动刷新、Connection API、设置 UI 或 Gmail MCP Tool。
+token 或账户主数据。当前 `bootstrap.gmail_oauth` 已提供离线可测的 Foundation：严格校验非敏感
+Desktop client ID，生成 PKCE S256 verifier/challenge、state、`gmail.readonly` authorization URL，并仅能
+一次性消费匹配 state 的 callback query。它不启动 listener、不打开浏览器、不联网交换 code、不保存
+Connection 或 Keychain credential。真实 Gmail OAuth、自动刷新、Connection API、设置 UI 和 Gmail MCP
+Tool 已明确后置到产品完善阶段。
 
 开发入口可使用 `bootstrap.EnvironmentSecretProvider` 作为临时后备：入口显式传入环境 Mapping，并为每个 `secret_id` 提供允许的环境变量名称绑定。该适配器只读取绑定过且非空的值；它不导入 `os`、不扫描任意环境变量，也不被 Provider、ChatService 或 Core 直接构造。系统 Keychain/Secret Store 仍是后续正式实现。
 

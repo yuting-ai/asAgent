@@ -729,11 +729,11 @@
 ### DEC-072：Gmail 以本地 Desktop OAuth、PKCE 与 loopback callback 连接
 
 - 日期：2026-08-12
-- 状态：已确认，尚未实现
+- 状态：OAuth Foundation 已完成；真实授权与 Gmail MCP 后置
 - 背景：asAgent 已有通用 Connection 和 macOS Keychain，但需要一条真实、可在本机开发体验且不让 Renderer 接触 OAuth credential 的账户连接路径。Gmail 邮箱读取需要 Google 用户授权；把浏览器登录嵌进 Electron、使用已废弃的复制授权码流程，或把 token 放到 `.env` 都会破坏安全或体验边界。
 - 决策：首个 Gmail 连接使用 Google OAuth `Desktop app` client、系统默认浏览器、Authorization Code + PKCE，以及仅绑定 `127.0.0.1` 随机端口的一次性 loopback callback。Python Sidecar 生成并在内存保留 state、PKCE verifier 和 callback 生命周期，验证回调 state 后交换 code；Electron Main 只请求开始流程并打开获得的 URL，Renderer 只看到已脱敏的连接进度/结果。成功时 SQLite 保存 `service_id="gmail"`、账户显示名、已授予 scope 和 ACTIVE Connection，refresh token 写入 macOS Keychain；授权码、access token、refresh token、state、verifier、client secret 和 callback query 不写入 SQLite、`mcp.json`、日志或 Renderer。
 - 原因：Google 当前仍建议 macOS、Windows、Linux desktop 应用使用 loopback IP callback；PKCE 与一次性 state 使本地随机端口回调仍能绑定到发起授权的 Sidecar。系统浏览器保留用户对 Google 登录页来源的判断，Connection/Keychain 边界可供未来 Gmail MCP、GitHub 和 Calendar 复用。
-- 影响：本地开发只使用 External Testing 项目中明确加入的 Test user；首版仅请求 `https://www.googleapis.com/auth/gmail.readonly`。这是 restricted scope，Testing 授权会过期并要求重新连接；本项目不会在该状态下宣称已通过 Google 验证或适合公开用户。第一实现不做邮件读取工具、发送/删除/修改、token 自动刷新、公开 OAuth 发布、Electron 设置页、Windows/Linux Store 或常驻 callback Server。
+- 影响：离线 Foundation 已实现严格 Desktop client ID 校验、PKCE S256、随机 state、授权 URL 与一次性 callback state/code/error 验证，不执行网络或持久化副作用。本地开发只使用 External Testing 项目中明确加入的 Test user；首版仅请求 `https://www.googleapis.com/auth/gmail.readonly`。这是 restricted scope，Testing 授权会过期并要求重新连接；本项目不会在该状态下宣称已通过 Google 验证或适合公开用户。真实浏览器授权、code 交换、Connection/Keychain 写入、邮件读取工具、发送/删除/修改、token 自动刷新、公开 OAuth 发布、Electron 设置页、Windows/Linux Store 或常驻 callback Server 都后置。
 - 替代方案：Electron 内嵌浏览器、手动复制授权码、固定端口、custom URI scheme、Web client、把 refresh token 放入 `.env`/SQLite，或先为 Gmail 编写 MCP Tool 再补连接流程；当前均不采用。
 
 ### DEC-073：Gmail 首版经受控 MCP 使用，原生邮箱页后置
@@ -743,7 +743,7 @@
 - 背景：Gmail API 可以支持完整的原生邮箱页面，浏览器自动化又看似可快速复用 Gmail 网页；但当前阶段的目标是尽快验证外部工具如何进入统一 ToolRegistry，而不是同时建设邮件客户端、专用 API 和 Agent 工具的两套业务入口。
 - 决策：首版完成 Desktop OAuth 后，将 credential 只定向提供给一个受控 Gmail MCP Server，由其工具进入现有 MCP/审批/审计路径。当前不实现 Playwright 控制 Gmail 网页，也不实现 asAgent 原生 Email workspace、直接 Gmail API Gateway 或专用邮件 Local API。未来若产品需要原生邮箱页，必须复用已有 Connection、OAuth、Keychain 和账户范围；它可直接调用正式 Gmail API，但不得维护第二份 credential、独立账户表或与 MCP 不一致的权限语义。
 - 原因：MCP 是当前阶段已经验证的统一 Agent 工具边界；延后邮箱 UI 可避免在真实邮件读取能力尚未体验前同时维护界面、同步、草稿、工具和审批等多个不确定面。Playwright 会依赖易变网页 DOM 与敏感浏览器会话状态，不适合作为高隐私邮箱的主路径。
-- 影响：下一项 OAuth Foundation 仍然有效；其后接入受控 Gmail MCP，再根据实际使用决定是否投入原生 Email workspace。未来原生 UI 不是 MCP 的自动副产物，需作为独立产品任务规划。
+- 影响：OAuth Foundation 已作为可恢复的离线基础完成；真实 Gmail OAuth 和受控 Gmail MCP 当前均后置到产品完善阶段，再根据实际产品需求决定是否恢复。未来原生 UI 不是 MCP 的自动副产物，需作为独立产品任务规划。
 - 替代方案：立即建设第一方 Gmail API + 原生 UI、以 Playwright 自动登录和操作 Gmail 网页、或永久只提供 MCP 而不考虑 UI；当前均不采用。
 
 ## 2. 技术选型
