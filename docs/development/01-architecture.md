@@ -458,14 +458,21 @@ config_dir/mcp.json
 一行一个 JSON-RPC 消息，启动日志写入 stderr，为未来 Client 的传输、错误和 fallback
 测试提供可控对端。
 
-当前最小实现位于 `tools.mcp.McpClient`。它仅面向现代 `2026-07-28` stdio Server：以
+当前最小实现位于 `tools.mcp`：`McpClient` 仅面向现代 `2026-07-28` stdio Server，以
 命令元组启动子进程，为每个 JSON-RPC Request 写入一行 JSON，并在同一受限连接上按递增
 request id 等待配对 Response。当前 Agent Loop 的工具回合本来就是顺序执行，因此 Client
 明确一次只允许一个在途请求，避免在尚无通知消费需求时引入后台读循环和复杂的响应分发器。
 Client 完成 `server/discover`、`tools/list` 与 `tools/call`；JSON-RPC `error` 转为传输/远端
-异常，而 `tools/call` 的 `result.isError` 保持为正常的工具结果，使上层未来可以把可纠正的
-工具失败交回模型。请求超时、EOF、无效 JSON 或 id 不匹配会关闭该子进程并明确失败。当前只
-支持文本 Tool content、无分页、无通知处理、无 legacy fallback，且尚未接入 `ToolRegistry`。
+异常，而 `tools/call` 的 `result.isError` 由 `McpTool.execute` 变成以 `Error: ...` 前缀的
+普通字符串结果返回模型，便于模型据结果修正参数。请求超时、EOF、无效 JSON 或 id 不匹配会
+关闭该子进程并明确失败。当前只支持文本 Tool content、无分页、无通知处理和无 legacy
+fallback。
+
+`McpTool` 把一次 `list_tools` 得到的远程描述包装为现有 `Tool` / `ToolDefinition`：
+`display_name` 优先 MCP `title` 否则 `name`，description 与 `input_schema` 直接沿用远端描述，
+`risk_level=medium`，`required_permissions={"mcp.execute"}`，且 `requires_approval=True`。
+`register_mcp_tools(registry, client, server_name=...)` 负责列举并注册；`server_name` 来自
+宿主导入时的显式命名空间，不强制等于远端 `serverInfo.name`。
 
 MCP Server 的权限独立于宿主工具权限：stdio Server 使用显式工作目录、最小环境变量和自身配置；远程 Server 仅使用为该 Server 配置的 Token 与能力。它们不继承 asAgent 的文件范围、浏览器 Profile 或其他账户 Token。
 
@@ -475,7 +482,8 @@ MCP 工具内部 ID：
 mcp:{server_name}:{tool_name}:{schema_hash}
 ```
 
-不同 Server 提供同名工具时不得覆盖。
+其中 `schema_hash` 是对 `input_schema` 做稳定 JSON 规范化后的 SHA-256 截断。不同 Server
+提供同名工具时不得覆盖。当前尚未实现 Server Manager、外部 `mcp.json` 配置或 Loop 自动导入。
 
 ## 12. Workspace 架构
 

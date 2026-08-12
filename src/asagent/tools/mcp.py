@@ -1,13 +1,18 @@
 import asyncio
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
 
+from asagent.core.tool_definition import ToolDefinition
+from asagent.tools.registry import ToolRegistry
+
 _PROTOCOL_VERSION: Final = "2026-07-28"
 _DEFAULT_REQUEST_TIMEOUT_SECONDS: Final = 5.0
 _CLOSE_TIMEOUT_SECONDS: Final = 2.0
+_MCP_TOOL_TIMEOUT_SECONDS: Final = 10.0
 
 
 class McpClientError(RuntimeError):
@@ -49,6 +54,65 @@ class McpToolDescription:
 class McpToolCallResult:
     text_content: tuple[str, ...]
     is_error: bool
+
+
+class McpTool:
+    """Wraps one remote MCP tool as a host-side Tool for ToolRegistry."""
+
+    def __init__(
+        self,
+        *,
+        client: "McpClient",
+        server_name: str,
+        description: McpToolDescription,
+    ) -> None:
+        if not server_name:
+            raise ValueError("server_name must not be empty")
+
+        self._client = client
+        self._server_name = server_name
+        self._description = description
+        self._definition = _tool_definition_from(
+            server_name=server_name,
+            description=description,
+        )
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments: Mapping[str, object]) -> str:
+        result = await self._client.call_tool(
+            name=self._description.name,
+            arguments=arguments,
+        )
+        content = "\n".join(result.text_content)
+
+        if result.is_error:
+            return f"Error: {content}"
+
+        return content
+
+
+async def register_mcp_tools(
+    registry: ToolRegistry,
+    client: "McpClient",
+    *,
+    server_name: str,
+) -> None:
+    """List tools from a started MCP client and register each as McpTool."""
+
+    if not server_name:
+        raise ValueError("server_name must not be empty")
+
+    for description in await client.list_tools():
+        registry.register(
+            McpTool(
+                client=client,
+                server_name=server_name,
+                description=description,
+            ),
+        )
 
 
 class McpClient:
@@ -346,3 +410,33 @@ def _as_object(value: object) -> Mapping[str, object] | None:
     if not all(isinstance(key, str) for key in value):
         return None
     return value
+
+
+def _tool_definition_from(
+    *,
+    server_name: str,
+    description: McpToolDescription,
+) -> ToolDefinition:
+    display_name = description.title if description.title else description.name
+    schema_hash = _schema_hash(description.input_schema)
+
+    return ToolDefinition(
+        tool_id=f"mcp:{server_name}:{description.name}:{schema_hash}",
+        display_name=display_name,
+        description=description.description,
+        input_schema=description.input_schema,
+        risk_level="medium",
+        required_permissions=frozenset({"mcp.execute"}),
+        requires_approval=True,
+        timeout_seconds=_MCP_TOOL_TIMEOUT_SECONDS,
+    )
+
+
+def _schema_hash(input_schema: Mapping[str, object]) -> str:
+    canonical = json.dumps(
+        dict(input_schema),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]

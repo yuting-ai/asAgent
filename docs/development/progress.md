@@ -2905,3 +2905,28 @@
 
 - 将发现到的 MCP Tool 包装为现有 `ToolDefinition` / `Tool`，并以明确命名空间接入
   `ToolRegistry`；保持本次 Client 的现代协议和错误边界不变。
+
+## 2026-08-12 阶段 8 MCP Tool 接入 Registry 工作记录
+
+### 完成
+
+- 在 `src/asagent/tools/mcp.py` 增加 `McpTool` 与异步 `register_mcp_tools`：从已启动的
+  `McpClient.list_tools()` 创建工具并注册到现有 `ToolRegistry`。
+- 工具 ID 为 `mcp:{server_name}:{tool_name}:{schema_hash}`；`display_name` 优先 MCP
+  `title`；schema/description 沿用远端描述；声明为 `medium` 风险、需要 `mcp.execute`
+  权限且需要审批。
+- `execute` 调用 `client.call_tool`：`result.isError` 以 `Error: ...` 普通文本返回模型；
+  JSON-RPC / 传输层错误仍抛异常，由既有 Agent Loop 配对错误结果。
+
+### 验证
+
+- `tests/integration/test_mcp_tool_registry.py` 通过：启动测试 MCP Server、注册后找到
+  `mcp:test-server:add:` 前缀工具，经 `ToolExecutor`（`mcp.execute` + 同意审批）调用
+  `{"left": 2, "right": 3}` 得到 `"5"`，并断言 risk / 权限 / 审批元数据。
+- 完整 `scripts/check.sh` 为 286 passed；Ruff、strict mypy（140 个 source files）与锁文件检查
+  均通过。
+
+### 下一步
+
+- 在不扩大 Server Manager / 外部配置范围的前提下，评估是否将已注册 MCP 工具接入一次
+  Agent Loop 冒烟路径；仍不实现 legacy fallback、分页或真实第三方 Server。
