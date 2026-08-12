@@ -3154,3 +3154,42 @@
 - 设计并实现最小 MCP connection reference：非敏感配置只引用 `connection_id`，组合根只向目标
   Server 提供所需 credential；不接入 Gmail OAuth、不向所有 MCP 子进程广播 Secret，也不开始
   Windows/Linux 适配器。
+
+## 2026-08-12 阶段 8 MCP Connection 定向凭据注入工作记录
+
+### 完成
+
+- `config_dir/mcp.json` 的单个 Server 现在可成对声明非敏感的 `connection_id` 与
+  `credential_environment_variable`。前者引用系统 CredentialStore，后者只表示该 Server 子进程
+  接收 credential 的变量名；严格配置继续拒绝 token、API Key、密码和环境变量值，也拒绝只提供其中
+  一个字段或不合法变量名。
+- Sidecar 仅在配置实际引用 Connection 时构造 macOS Keychain Store。`McpServerManager` 为每个
+  Server 从最小基础环境复制独立 Mapping，只读取其引用的 credential，并只注入该 Server 声明的变量；
+  未引用 Connection 的 Server 仍只得到显式允许的 `PATH`。
+- 缺少 Store、缺少 Keychain credential 或后续 Session 启动失败时，Manager 保持既有原子启动语义：
+  清理已启动子进程，正式 ToolRegistry 不导入任何远程工具，且异常文本不包含 Secret。
+
+### 验证
+
+- 配置单元测试覆盖成对引用、字段缺失和不合法变量名；Manager 集成测试覆盖目标 Server 收到假
+  credential、并行的未引用 Server 明确收不到它，以及缺少 credential 时拒绝启动。
+- Sidecar Runtime 集成测试覆盖配置引用经过组合根、Manager、真实测试 stdio Server、ToolRegistry 与
+  Persistent Runtime 的完整工具回合，同时保留父进程 Secret 不继承断言。
+- `scripts/check.sh` 通过：321 passed；Ruff、strict mypy（154 个 source files）与锁文件检查均通过。
+
+### 决策变化
+
+- 新增 DEC-071：MCP Connection credential 按配置 Server 定向注入，而非作为 Sidecar 或 Manager 的
+  全局环境。
+
+### 风险或问题
+
+- 当前交付机制仅为 stdio 子进程环境变量，并且只有 macOS Keychain 可用；Windows/Linux、OAuth、
+  refresh、Connection API/设置页和 Gmail 专用 UI 尚未实现。
+- 当前尚不读取 Connection Repository 以校验归属、服务类型或 `reauthentication_required` 状态；这些
+  与 OAuth 连接生命周期一起作为后续独立任务设计，不能在本次用配置推断账户授权。
+
+### 下一步
+
+- 在用户确认后，选择一个真实但受限的 MCP 连接体验路径：优先设计 Gmail 的 OAuth 登录、Connection
+  元数据创建/状态和最小只读账户范围；不开始发信、删除、刷新自动化或通用设置页。

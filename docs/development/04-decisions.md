@@ -716,6 +716,16 @@
 - 影响：本次没有 Gmail OAuth、刷新逻辑、Provider Keychain 接入、MCP 子进程 Secret 注入、Connection API 或桌面设置页。`mcp.json` 继续禁止 Secret，McpClient 继续只接收显式最小环境；下一项必须设计非敏感 connection reference 如何被组合根解析为仅对目标 Server 可用的凭据。
 - 替代方案：每个服务各自维护 token 文件、让所有 MCP 子进程继承完整 Sidecar 环境、把 token 写入 `mcp.json`，或将 macOS 实现伪装为跨平台支持；当前均不采用。
 
+### DEC-071：MCP 连接凭据按 Server 定向注入
+
+- 日期：2026-08-12
+- 状态：已确认并完成最小 macOS 实现
+- 背景：`Connection` 和 macOS Keychain 已能安全保存通用 credential，但已配置的 stdio MCP Server 仍只能接收 `PATH`。若让全部 MCP 子进程继承同一 credential，或把值写回 `mcp.json`，一个不相关或被替换的 Server 就可能读取其他账户的 Secret。
+- 决策：`mcp.json` 的每个 Server 可选且必须成对声明 `connection_id` 和 `credential_environment_variable`。它们分别是非敏感 Connection 引用和目标子进程变量名，严格配置不接受 credential 值。Sidecar 仅在至少一个引用存在时构造 `MacOSKeychainCredentialStore`；`McpServerManager` 对每项配置复制最小基础环境，按其 `connection_id` 读取 credential，并且只在该项子进程环境设置声明变量。缺少 Store、缺少 credential 或任一 Server 启动失败时，整个导入失败且正式 ToolRegistry 不变。
+- 原因：Manager 已拥有“每个配置项对应一个 Client 子进程”的生命周期，因此是把非敏感配置映射为受限进程环境的最小位置；按 Server 构造环境避免了全局 Secret 广播，也保持既有原子导入和最小环境策略。
+- 影响：当前唯一交付机制是 stdio 子进程环境变量，且系统 Store 只有 macOS Keychain；没有 OAuth、token 刷新、Connection 元数据归属/状态校验、Gmail 专用逻辑、设置/API/UI、热刷新或 Windows/Linux 适配器。测试使用固定假 credential，仅验证目标 Server 获得它、另一个 Server 不获得它，以及缺失值拒绝启动。
+- 替代方案：把凭据作为全局 Manager 环境、让每个 Server 读取宿主 `.env`、在 `mcp.json` 保存 token、为 Gmail 预建专属注入器，或在 Core 增加新的通用进程服务；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

@@ -1,10 +1,19 @@
 import json
 import re
 from pathlib import Path
+from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 _SERVER_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
+_ENVIRONMENT_VARIABLE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class McpConfigurationError(RuntimeError):
@@ -22,6 +31,8 @@ class McpServerConfig(BaseModel):
 
     command: tuple[str, ...] = Field(min_length=1)
     working_directory: Path
+    connection_id: str | None = None
+    credential_environment_variable: str | None = None
 
     @field_validator("command")
     @classmethod
@@ -36,6 +47,48 @@ class McpServerConfig(BaseModel):
         if not directory.is_absolute():
             raise ValueError("MCP server working_directory must be absolute")
         return directory
+
+    @field_validator("connection_id")
+    @classmethod
+    def validate_connection_id(
+        cls,
+        connection_id: str | None,
+    ) -> str | None:
+        if connection_id == "":
+            raise ValueError("MCP connection_id must not be empty")
+        return connection_id
+
+    @field_validator("credential_environment_variable")
+    @classmethod
+    def validate_credential_environment_variable(
+        cls,
+        environment_variable: str | None,
+    ) -> str | None:
+        if (
+            environment_variable is not None
+            and not _ENVIRONMENT_VARIABLE_PATTERN.fullmatch(
+                environment_variable,
+            )
+        ):
+            raise ValueError(
+                "MCP credential_environment_variable is invalid",
+            )
+        return environment_variable
+
+    @model_validator(mode="after")
+    def validate_credential_reference(self) -> Self:
+        if (self.connection_id is None) != (
+            self.credential_environment_variable is None
+        ):
+            raise ValueError(
+                "MCP connection_id and credential_environment_variable "
+                "must be provided together",
+            )
+        return self
+
+    @property
+    def requires_credential(self) -> bool:
+        return self.connection_id is not None
 
 
 class McpServerConfigs(BaseModel):

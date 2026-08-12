@@ -21,8 +21,12 @@ from asagent.api.server import READY_PREFIX, LocalApiServer
 from asagent.bootstrap.environment_secret_provider import (
     EnvironmentSecretProvider,
 )
+from asagent.bootstrap.keychain_credential_store import (
+    MacOSKeychainCredentialStore,
+)
 from asagent.bootstrap.provider_factory import create_model_provider
 from asagent.chat.service import ChatService
+from asagent.core.connection import CredentialStore
 from asagent.core.conversation import Conversation
 from asagent.core.event_publisher import EventPublisher
 from asagent.core.ids import (
@@ -172,13 +176,19 @@ async def _start_configured_mcp_servers(
     *,
     config_dir: Path,
     environment: Mapping[str, str],
+    credential_store: CredentialStore | None = None,
 ) -> tuple[ToolRegistry, McpServerManager, bool]:
     configs = load_mcp_server_configs(config_dir)
     registry = _register_builtin_tools()
+
+    if any(config.requires_credential for config in configs.servers.values()):
+        credential_store = credential_store or MacOSKeychainCredentialStore()
+
     manager = McpServerManager(
         configs=configs,
         registry=registry,
         environment=_mcp_subprocess_environment(environment),
+        credential_store=credential_store,
     )
     await manager.start()
     return registry, manager, bool(configs.servers)

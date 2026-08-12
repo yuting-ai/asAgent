@@ -20,7 +20,9 @@ def test_load_mcp_server_configs_from_json(tmp_path: Path) -> None:
   "servers": {
     "test-server": {
       "command": ["python", "-u", "/opt/mcp/server.py"],
-      "working_directory": "/opt/mcp"
+      "working_directory": "/opt/mcp",
+      "connection_id": "connection-test",
+      "credential_environment_variable": "TEST_MCP_TOKEN"
     }
   }
 }
@@ -33,6 +35,8 @@ def test_load_mcp_server_configs_from_json(tmp_path: Path) -> None:
     assert configs.servers["test-server"] == McpServerConfig(
         command=("python", "-u", "/opt/mcp/server.py"),
         working_directory=Path("/opt/mcp"),
+        connection_id="connection-test",
+        credential_environment_variable="TEST_MCP_TOKEN",
     )
 
 
@@ -76,6 +80,34 @@ def test_missing_mcp_configuration_means_no_servers(tmp_path: Path) -> None:
                     "command": ["python"],
                     "working_directory": "/opt/mcp",
                     "token": "must-not-be-here",
+                }
+            }
+        },
+        {
+            "servers": {
+                "test-server": {
+                    "command": ["python"],
+                    "working_directory": "/opt/mcp",
+                    "connection_id": "connection-1",
+                }
+            }
+        },
+        {
+            "servers": {
+                "test-server": {
+                    "command": ["python"],
+                    "working_directory": "/opt/mcp",
+                    "credential_environment_variable": "TEST_TOKEN",
+                }
+            }
+        },
+        {
+            "servers": {
+                "test-server": {
+                    "command": ["python"],
+                    "working_directory": "/opt/mcp",
+                    "connection_id": "connection-1",
+                    "credential_environment_variable": "invalid-name",
                 }
             }
         },

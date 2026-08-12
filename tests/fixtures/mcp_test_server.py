@@ -14,6 +14,8 @@ _REQUEST_METADATA_KEYS: Final = {
     "io.modelcontextprotocol/clientInfo",
     "io.modelcontextprotocol/clientCapabilities",
 }
+_EXPECTED_CREDENTIAL_ENVIRONMENT = "ASAGENT_TEST_MCP_CREDENTIAL"
+_EXPECTED_CREDENTIAL = "test-connection-credential"
 _ADD_TOOL: Final = {
     "name": "add",
     "title": "Add numbers",
@@ -33,6 +35,14 @@ _ADD_TOOL: Final = {
 def main() -> None:
     if os.environ.get("ASAGENT_TEST_MCP_PARENT_SECRET") is not None:
         raise RuntimeError("MCP server inherited a parent secret")
+
+    if "--require-credential" in sys.argv:
+        if os.environ.get(_EXPECTED_CREDENTIAL_ENVIRONMENT) != _EXPECTED_CREDENTIAL:
+            raise RuntimeError("MCP server credential was not supplied")
+
+    if "--reject-credential" in sys.argv:
+        if os.environ.get(_EXPECTED_CREDENTIAL_ENVIRONMENT) is not None:
+            raise RuntimeError("MCP server received another server credential")
 
     print("asagent MCP test server started", file=sys.stderr, flush=True)
 

@@ -358,8 +358,10 @@ Provider 的代码实现与用户选择的配置 Profile 分开。`models.config
 该表、`mcp.json`、日志或普通配置。Core 的 `CredentialStore` 只按 `connection_id` 读取、保存和删除
 credential；首个边缘适配器 `MacOSKeychainCredentialStore` 通过当前 macOS 用户的 Keychain 实现它。
 Windows Credential Manager 与 Linux Secret Service 以后实现同一 Protocol，未实现的平台必须明确报错，
-不得静默降级到 `.env`、SQLite 或文件。Connection 目前还没有 OAuth、自动刷新、MCP 注入或设置 UI；
-这些由后续独立任务在不改变该存储边界的前提下接入。
+不得静默降级到 `.env`、SQLite 或文件。当前 `mcp.json` 可为某一 Server 成对声明非敏感的
+`connection_id` 和 `credential_environment_variable`；Sidecar 仅在存在该引用时构造 CredentialStore，
+由 Manager 读取对应 credential 并只把它放入该 Server 子进程的指定环境变量。Connection 目前还没有
+OAuth、自动刷新、Connection API 或设置 UI；这些由后续独立任务在不改变该存储边界的前提下接入。
 
 开发入口可使用 `bootstrap.EnvironmentSecretProvider` 作为临时后备：入口显式传入环境 Mapping，并为每个 `secret_id` 提供允许的环境变量名称绑定。该适配器只读取绑定过且非空的值；它不导入 `os`、不扫描任意环境变量，也不被 Provider、ChatService 或 Core 直接构造。系统 Keychain/Secret Store 仍是后续正式实现。
 
@@ -502,22 +504,27 @@ fallback。
 `config_dir/mcp.json`：缺失文件等价于空 Server 集合，且不会创建目录；存在文件必须为严格
 JSON，顶层只允许 `servers`。每个显式命名 Server 只声明非空的命令参数元组和绝对工作目录；
 名称是受限的小写标识符，未知字段、相对工作目录与空参数都会被拒绝。该加载器不验证路径是否
-存在、不启动进程、不读取环境变量或 Secret。Token、密码、API Key 和带凭据的环境变量都不能
-进入此文件，未来只能通过独立 Secret Store 引用注入。
+存在、不启动进程、不读取环境变量或 Secret。可选的 `connection_id` 与
+`credential_environment_variable` 必须成对出现，前者只是系统凭据的稳定引用，后者只是目标子进程
+接收 credential 的环境变量名；两者都不是 Secret。Token、密码、API Key 和环境变量值都不能进入
+此文件。
 
 `tools.mcp_manager.McpServerManager` 是多个已校验配置项的最小生命周期所有者。它为每个配置
 创建带对应工作目录和显式子进程环境的 `McpClient` 与 `McpServerSession`，但先将远程工具导入临时 Registry；
 只有所有 Session 均成功启动后，才检查工具 ID 冲突并合并到调用方的正式 Registry。任一启动
 失败时，Manager 关闭已创建的 Session，正式 Registry 保持不变。关闭时它以反向创建顺序关闭
-全部 Session，且之后拒绝再次启动。Manager 不读取文件、不管理热刷新、重连、分页、legacy
-fallback 或 Secret。
+全部 Session，且之后拒绝再次启动。若某项配置引用 Connection，Manager 只从注入的
+`CredentialStore` 读取该 `connection_id`，并仅在该项子进程环境中设置其声明的
+`credential_environment_variable`；缺少 Store 或 credential 会在启动前失败并保持原子的无导入语义。
+Manager 不读取文件、不管理热刷新、重连、分页或 legacy fallback。
 
 MCP Server 的权限独立于宿主工具权限：stdio Server 使用显式工作目录、最小环境变量和自身配置；远程 Server 仅使用为该 Server 配置的 Token 与能力。它们不继承 asAgent 的文件范围、浏览器 Profile 或其他账户 Token。`McpClient` 默认以空环境启动子进程，避免独立调用时意外继承宿主 Secret；当前 Sidecar 组合根仅显式传入 `PATH`，不传模型 API Key、Local API Token 或任意 `.env` 值。
 
-未来需要凭据的 MCP Server 不会绕过这项最小环境策略：非敏感 Server 配置只能引用一个
-`connection_id`，组合根再从 `CredentialStore` 取得该连接的 credential，并按该 Server 明确声明的
-受控方式交付。该“连接引用到受限子进程凭据”的边界尚未实现；当前任何 MCP 子进程仍不会收到
-Connection credential。
+因此，MCP credential 不会绕过最小环境策略：未引用 Connection 的 Server 继续仅接收 Sidecar
+显式允许的基础环境（当前为 `PATH`）；引用 Connection 的 Server 只额外接收自身声明变量名下的
+credential，不会收到模型 API Key、Local API Token、其他连接的 credential 或完整宿主环境。
+这一实现目前只支持 macOS Keychain；OAuth、刷新、Connection API、设置 UI、Windows/Linux 系统存储
+以及除环境变量以外的受控交付机制仍是后续独立工作。
 
 MCP 工具内部 ID：
 

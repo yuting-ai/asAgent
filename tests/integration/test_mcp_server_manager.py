@@ -5,9 +5,11 @@ from typing import Final
 
 import pytest
 
+from asagent.core.connection import CredentialStore
+from asagent.core.ids import ConnectionId
 from asagent.tools.mcp import McpProtocolError
 from asagent.tools.mcp_config import McpServerConfigs
-from asagent.tools.mcp_manager import McpServerManager
+from asagent.tools.mcp_manager import McpServerCredentialError, McpServerManager
 from asagent.tools.registry import ToolRegistry
 
 _SERVER_PATH: Final = Path(__file__).parents[1] / "fixtures" / "mcp_test_server.py"
@@ -21,19 +23,44 @@ _EXITING_SERVER_COMMAND: Final = (
     "-c",
     "import sys; sys.stdin.readline()",
 )
+_TEST_CREDENTIAL_ENVIRONMENT: Final = "ASAGENT_TEST_MCP_CREDENTIAL"
+_TEST_CREDENTIAL: Final = "test-connection-credential"
+
+
+class FakeCredentialStore:
+    def __init__(self, credentials: dict[ConnectionId, str]) -> None:
+        self._credentials = credentials
+        self.requested_connection_ids: list[ConnectionId] = []
+
+    def get_credential(self, connection_id: ConnectionId) -> str | None:
+        self.requested_connection_ids.append(connection_id)
+        return self._credentials.get(connection_id)
+
+    def save_credential(
+        self,
+        connection_id: ConnectionId,
+        credential: str,
+    ) -> None:
+        raise AssertionError("not used by MCP server startup")
+
+    def delete_credential(self, connection_id: ConnectionId) -> None:
+        raise AssertionError("not used by MCP server startup")
 
 
 def _configs(
     *,
     working_directory: Path,
     servers: dict[str, tuple[str, ...]],
+    credential_references: dict[str, dict[str, str]] | None = None,
 ) -> McpServerConfigs:
+    references = credential_references or {}
     return McpServerConfigs.model_validate(
         {
             "servers": {
                 name: {
                     "command": command,
                     "working_directory": str(working_directory),
+                    **references.get(name, {}),
                 }
                 for name, command in servers.items()
             }
@@ -110,6 +137,82 @@ async def test_manager_closes_started_sessions_without_importing_partial_tools(
 
     try:
         with pytest.raises(McpProtocolError, match="closed stdout"):
+            await manager.start()
+
+        assert registry.definitions() == ()
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_manager_injects_a_connection_credential_only_into_its_server(
+    tmp_path: Path,
+) -> None:
+    connection_id = ConnectionId("connection-1")
+    store: CredentialStore = FakeCredentialStore(
+        {connection_id: _TEST_CREDENTIAL},
+    )
+    registry = ToolRegistry()
+    manager = McpServerManager(
+        configs=_configs(
+            working_directory=tmp_path,
+            servers={
+                "credential-server": (
+                    *_SERVER_COMMAND,
+                    "--require-credential",
+                ),
+                "plain-server": (
+                    *_SERVER_COMMAND,
+                    "--reject-credential",
+                ),
+            },
+            credential_references={
+                "credential-server": {
+                    "connection_id": str(connection_id),
+                    "credential_environment_variable": (_TEST_CREDENTIAL_ENVIRONMENT),
+                }
+            },
+        ),
+        registry=registry,
+        environment={"PATH": os.environ["PATH"]},
+        credential_store=store,
+    )
+
+    try:
+        await manager.start()
+
+        assert len(registry.definitions()) == 2
+        assert isinstance(store, FakeCredentialStore)
+        assert store.requested_connection_ids == [connection_id]
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_manager_rejects_missing_configured_connection_credential(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    manager = McpServerManager(
+        configs=_configs(
+            working_directory=tmp_path,
+            servers={"credential-server": _SERVER_COMMAND},
+            credential_references={
+                "credential-server": {
+                    "connection_id": "connection-missing",
+                    "credential_environment_variable": (_TEST_CREDENTIAL_ENVIRONMENT),
+                }
+            },
+        ),
+        registry=registry,
+        credential_store=FakeCredentialStore({}),
+    )
+
+    try:
+        with pytest.raises(
+            McpServerCredentialError,
+            match="credential is unavailable",
+        ):
             await manager.start()
 
         assert registry.definitions() == ()
