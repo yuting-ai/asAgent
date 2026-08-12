@@ -493,16 +493,20 @@ config_dir/mcp.json
 一行一个 JSON-RPC 消息，启动日志写入 stderr，为未来 Client 的传输、错误和 fallback
 测试提供可控对端。
 
-当前最小实现位于 `tools.mcp`：`McpClient` 仅面向现代 `2026-07-28` stdio Server，以
-命令元组启动子进程，为每个 JSON-RPC Request 写入一行 JSON，并在同一受限连接上按递增
-request id 等待配对 Response。可选 `working_directory` 必须是绝对路径，并作为子进程
+当前最小实现位于 `tools.mcp`：`McpClient` 先以现代 `2026-07-28` 请求启动 stdio 子进程，
+为每个 JSON-RPC Request 写入一行 JSON，并在同一受限连接上按递增 request id 等待配对
+Response。现代 `server/discover` 返回 MCP 协议/远端错误时，Client 会关闭探测进程、重新启动
+全新子进程，并以 `2025-11-25` 的 `initialize` 与 `notifications/initialized` 进入 legacy
+生命周期；旧版后续 `tools/list` / `tools/call` 不携带现代 `_meta`，但仍返回同一统一的
+`McpServerInfo`、工具描述和调用结果。可选 `working_directory` 必须是绝对路径，并作为子进程
 `cwd`；省略时沿用宿主当前目录。相对路径在构造时拒绝，避免 Server 依赖调用方 cwd。当前 Agent Loop 的工具回合本来就是顺序执行，因此 Client
 明确一次只允许一个在途请求，避免在尚无通知消费需求时引入后台读循环和复杂的响应分发器。
 Client 完成 `server/discover`、`tools/list` 与 `tools/call`；JSON-RPC `error` 转为传输/远端
 异常，而 `tools/call` 的 `result.isError` 由 `McpTool.execute` 变成以 `Error: ...` 前缀的
 普通字符串结果返回模型，便于模型据结果修正参数。请求超时、EOF、无效 JSON 或 id 不匹配会
-关闭该子进程并明确失败。当前只支持文本 Tool content、无分页、无通知处理和无 legacy
-fallback。
+关闭该子进程并明确失败。测试 legacy Server 在收到现代探测后主动退出，因此仅当 Client 使用
+新进程完成旧握手、列举和调用时才会通过。当前只支持文本 Tool content、无分页、无通知处理，
+且尚未支持配置固定协议版本。
 
 `McpTool` 把一次 `list_tools` 得到的远程描述包装为现有 `Tool` / `ToolDefinition`：
 `display_name` 优先 MCP `title` 否则 `name`，description 与 `input_schema` 直接沿用远端描述，

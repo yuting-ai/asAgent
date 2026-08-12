@@ -660,9 +660,10 @@
   的正式 stdin/stdout 会话；协议差异被收敛在 McpClient，不渗透到 AgentLoop、ToolExecutor
   或模型 Provider。
 - 影响：首个测试 Server 只验证现代协议；随后 McpClient 负责现代发现、请求元数据、超时和
-  旧版 fallback。上层仍只消费统一的 ToolDefinition 与 Tool 结果。测试必须覆盖现代成功、
-  旧版 fallback 和不兼容/超时隔离。此前路线图中把旧握手描述为默认 MCP 流程的内容由本决策
-  替代。
+  旧版 fallback。上层仍只消费统一的 ToolDefinition 与 Tool 结果。该 fallback 已实现：测试
+  legacy Server 会在现代 `server/discover` 后退出，Client 必须以新进程完成旧握手、列举和调用。
+  测试仍需覆盖现代成功、旧版 fallback 和不兼容/超时隔离。此前路线图中把旧握手描述为默认
+  MCP 流程的内容由本决策替代。
 - 替代方案：锁定 `2025-11-25` 及以前的旧生命周期；只支持 `2026-07-28` 而拒绝旧 Server；
   在同一已探测 stdio 子进程内直接发送旧版 initialize；当前均不采用。
 

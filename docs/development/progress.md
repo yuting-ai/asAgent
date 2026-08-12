@@ -3276,3 +3276,29 @@
 
 - 回到阶段 8 通用 MCP 主线，选择不依赖外部账户、收益更高的剩余协议能力；优先评估 modern-first 的
   legacy stdio fallback、`tools/list` 分页/`listChanged`，或按实际需要明确结束阶段 8 后进入 Skills。
+
+## 2026-08-12 阶段 8 MCP legacy stdio fallback 工作记录
+
+### 完成
+
+- `McpClient.start()` 现在先在受限 stdio 子进程中尝试现代 `server/discover`；探测收到 MCP
+  Client 错误时，关闭该进程后重新启动全新子进程，以 `2025-11-25` 的 `initialize` 和
+  `notifications/initialized` 完成 legacy 生命周期。
+- 旧版会话的后续 `tools/list` 与 `tools/call` 不携带现代 `_meta`；现代和旧版响应继续映射为同一
+  `McpServerInfo`、`McpToolDescription` 与 `McpToolCallResult`，因此 ToolRegistry、Executor、
+  审批和 Agent Loop 均不需要协议分支。
+- 新增专用 legacy stdio 测试 Server：它在收到现代 `server/discover` 后返回方法不存在并立即退出；
+  重启后的进程要求完成 `initialize` 和 initialized 通知，才允许列举或调用 `add`。这证明 fallback
+  没有复用已被现代探测影响的连接。
+
+### 验证
+
+- `tests/integration/test_mcp_client.py` 通过：3 passed，覆盖现代发现/列举/调用、远端工具错误，以及
+  legacy fallback 后的 `20 + 22 = 42`。
+- `scripts/check.sh` 通过：332 passed；Ruff、strict mypy（157 个 source files）与锁文件检查均通过。
+
+### 下一步
+
+- 先定义一个不依赖第三方账户的最小 `web_search` MCP 体验范围：明确搜索提供方、网络/域名限制、
+  结果正文上限、缓存与审批策略；确定后才实现 Server 配置、工具和桌面人工验收。该任务不自动扩展到
+  `tools/list` 分页、`listChanged`、Streamable HTTP 或 Gmail。

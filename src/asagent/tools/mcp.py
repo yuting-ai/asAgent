@@ -11,6 +11,7 @@ from asagent.core.tool_definition import ToolDefinition
 from asagent.tools.registry import ToolRegistry
 
 _PROTOCOL_VERSION: Final = "2026-07-28"
+_LEGACY_PROTOCOL_VERSION: Final = "2025-11-25"
 _DEFAULT_REQUEST_TIMEOUT_SECONDS: Final = 5.0
 _CLOSE_TIMEOUT_SECONDS: Final = 2.0
 _MCP_TOOL_TIMEOUT_SECONDS: Final = 10.0
@@ -149,23 +150,43 @@ class McpClient:
         self._server_info: McpServerInfo | None = None
         self._next_request_id = 1
         self._request_lock = asyncio.Lock()
+        self._uses_legacy_protocol = False
 
     async def start(self) -> McpServerInfo:
         if self._process is not None:
             raise RuntimeError("MCP client is already started")
 
-        self._process = await asyncio.create_subprocess_exec(
-            *self._command,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            cwd=self._working_directory,
-            env=self._environment,
-        )
+        await self._start_process()
 
         try:
             result = await self._request("server/discover", {})
             self._server_info = _parse_server_info(result)
+        except McpClientError:
+            await self.aclose()
+            await self._start_process()
+
+            try:
+                result = await self._request(
+                    "initialize",
+                    {
+                        "protocolVersion": _LEGACY_PROTOCOL_VERSION,
+                        "capabilities": {},
+                        "clientInfo": {
+                            "name": self._client_name,
+                            "version": self._client_version,
+                        },
+                    },
+                    include_metadata=False,
+                )
+                self._server_info = _parse_legacy_server_info(result)
+                self._uses_legacy_protocol = True
+                await self._notify(
+                    "notifications/initialized",
+                    {},
+                )
+            except BaseException:
+                await self.aclose()
+                raise
         except BaseException:
             await self.aclose()
             raise
@@ -177,8 +198,12 @@ class McpClient:
         if not server_info.supports_tools:
             raise McpProtocolError("MCP server does not declare tools capability")
 
-        result = await self._request("tools/list", {})
-        if result.get("resultType") != "complete":
+        result = await self._request(
+            "tools/list",
+            {},
+            include_metadata=not self._uses_legacy_protocol,
+        )
+        if not self._uses_legacy_protocol and result.get("resultType") != "complete":
             raise McpProtocolError("tools/list did not complete")
 
         raw_tools = result.get("tools")
@@ -201,8 +226,9 @@ class McpClient:
                 "name": name,
                 "arguments": dict(arguments),
             },
+            include_metadata=not self._uses_legacy_protocol,
         )
-        if result.get("resultType") != "complete":
+        if not self._uses_legacy_protocol and result.get("resultType") != "complete":
             raise McpProtocolError("tools/call did not complete")
 
         raw_content = result.get("content")
@@ -237,6 +263,7 @@ class McpClient:
         process = self._process
         self._process = None
         self._server_info = None
+        self._uses_legacy_protocol = False
 
         if process is None:
             return
@@ -254,10 +281,43 @@ class McpClient:
                 process.kill()
                 await process.wait()
 
+    async def _start_process(self) -> None:
+        self._next_request_id = 1
+        self._process = await asyncio.create_subprocess_exec(
+            *self._command,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            cwd=self._working_directory,
+            env=self._environment,
+        )
+
+    async def _notify(
+        self,
+        method: str,
+        params: Mapping[str, object],
+    ) -> None:
+        process = self._require_process()
+        if process.stdin is None:
+            raise McpProtocolError("MCP server stdin is unavailable")
+
+        async with self._request_lock:
+            payload = {
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": dict(params),
+            }
+            process.stdin.write(
+                json.dumps(payload, separators=(",", ":")).encode() + b"\n",
+            )
+            await process.stdin.drain()
+
     async def _request(
         self,
         method: str,
         params: Mapping[str, object],
+        *,
+        include_metadata: bool = True,
     ) -> Mapping[str, object]:
         process = self._require_process()
         if process.stdin is None or process.stdout is None:
@@ -267,14 +327,15 @@ class McpClient:
             request_id = self._next_request_id
             self._next_request_id += 1
 
+            request_params = dict(params)
+            if include_metadata:
+                request_params["_meta"] = self._request_metadata()
+
             payload = {
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "method": method,
-                "params": {
-                    **params,
-                    "_meta": self._request_metadata(),
-                },
+                "params": request_params,
             }
             process.stdin.write(
                 json.dumps(payload, separators=(",", ":")).encode() + b"\n",
@@ -400,6 +461,36 @@ def _parse_response(line: bytes, request_id: int) -> Mapping[str, object]:
         raise McpProtocolError("MCP server response has no result")
 
     return result
+
+
+def _parse_legacy_server_info(result: Mapping[str, object]) -> McpServerInfo:
+    protocol_version = result.get("protocolVersion")
+    capabilities = _as_object(result.get("capabilities"))
+    raw_server_info = _as_object(result.get("serverInfo"))
+    instructions = result.get("instructions")
+
+    if (
+        not isinstance(protocol_version, str)
+        or not protocol_version
+        or capabilities is None
+        or raw_server_info is None
+    ):
+        raise McpProtocolError("initialize response is incomplete")
+
+    name = raw_server_info.get("name")
+    version = raw_server_info.get("version")
+    if not isinstance(name, str) or not isinstance(version, str):
+        raise McpProtocolError("initialize response has invalid server info")
+    if instructions is not None and not isinstance(instructions, str):
+        raise McpProtocolError("initialize response has invalid instructions")
+
+    return McpServerInfo(
+        protocol_version=protocol_version,
+        name=name,
+        version=version,
+        supports_tools=isinstance(capabilities.get("tools"), Mapping),
+        instructions=instructions,
+    )
 
 
 def _parse_server_info(result: Mapping[str, object]) -> McpServerInfo:
