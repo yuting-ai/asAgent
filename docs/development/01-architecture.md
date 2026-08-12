@@ -352,6 +352,15 @@ Provider 的代码实现与用户选择的配置 Profile 分开。`models.config
 
 `models.profile_loader.load_provider_profiles(config_dir)` 是该文件进入系统的唯一当前加载路径：它只读取 `config_dir/providers.toml`，使用标准库 `tomllib` 解析后交给 `ProviderProfiles` 验证；文件不存在、TOML 语法错误和 Profile Schema 错误统一转换为脱敏 `ProviderConfigurationError`。加载过程不创建目录、不读取 Secret、环境变量或 Keychain，也不选择或实例化 Provider。
 
+阶段 8 的通用外部连接基础将非敏感 `Connection` 与实际凭据分开：Connection 由稳定
+`connection_id`、`user_id`、`service_id`、账户显示名、已授予 scope、状态和时间组成，并由
+`ConnectionRepository` 持久化到 SQLite；refresh token、API Key 或其他不透明 credential 不进入
+该表、`mcp.json`、日志或普通配置。Core 的 `CredentialStore` 只按 `connection_id` 读取、保存和删除
+credential；首个边缘适配器 `MacOSKeychainCredentialStore` 通过当前 macOS 用户的 Keychain 实现它。
+Windows Credential Manager 与 Linux Secret Service 以后实现同一 Protocol，未实现的平台必须明确报错，
+不得静默降级到 `.env`、SQLite 或文件。Connection 目前还没有 OAuth、自动刷新、MCP 注入或设置 UI；
+这些由后续独立任务在不改变该存储边界的前提下接入。
+
 开发入口可使用 `bootstrap.EnvironmentSecretProvider` 作为临时后备：入口显式传入环境 Mapping，并为每个 `secret_id` 提供允许的环境变量名称绑定。该适配器只读取绑定过且非空的值；它不导入 `os`、不扫描任意环境变量，也不被 Provider、ChatService 或 Core 直接构造。系统 Keychain/Secret Store 仍是后续正式实现。
 
 `bootstrap.create_model_provider()` 是当前 Provider 组合根：它按 Profile 名称取得经验证配置，并将 `SecretProvider` 与由入口拥有生命周期的 `httpx.AsyncClient` 注入已实现的 Adapter。未知 Profile 与尚未实现的 Adapter 都转换为 `ProviderConfigurationError`；当前仅创建 OpenAI-compatible Adapter，Claude Profile 会明确拒绝而不伪装为兼容协议。
@@ -504,6 +513,11 @@ JSON，顶层只允许 `servers`。每个显式命名 Server 只声明非空的�
 fallback 或 Secret。
 
 MCP Server 的权限独立于宿主工具权限：stdio Server 使用显式工作目录、最小环境变量和自身配置；远程 Server 仅使用为该 Server 配置的 Token 与能力。它们不继承 asAgent 的文件范围、浏览器 Profile 或其他账户 Token。`McpClient` 默认以空环境启动子进程，避免独立调用时意外继承宿主 Secret；当前 Sidecar 组合根仅显式传入 `PATH`，不传模型 API Key、Local API Token 或任意 `.env` 值。
+
+未来需要凭据的 MCP Server 不会绕过这项最小环境策略：非敏感 Server 配置只能引用一个
+`connection_id`，组合根再从 `CredentialStore` 取得该连接的 credential，并按该 Server 明确声明的
+受控方式交付。该“连接引用到受限子进程凭据”的边界尚未实现；当前任何 MCP 子进程仍不会收到
+Connection credential。
 
 MCP 工具内部 ID：
 

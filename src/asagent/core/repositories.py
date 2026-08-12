@@ -1,7 +1,8 @@
 from typing import Protocol, runtime_checkable
 
+from asagent.core.connection import Connection
 from asagent.core.conversation import Conversation
-from asagent.core.ids import ConversationId, RunId, UserId
+from asagent.core.ids import ConnectionId, ConversationId, RunId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.run import Run
 from asagent.core.run_event import RunEvent
@@ -53,3 +54,17 @@ class RunRepository(Protocol):
     async def save_tool_call(self, tool_call: ToolCall) -> None: ...
 
     async def list_tool_calls(self, run_id: RunId) -> tuple[ToolCall, ...]: ...
+
+
+@runtime_checkable
+class ConnectionRepository(Protocol):
+    async def get(
+        self,
+        connection_id: ConnectionId,
+    ) -> Connection | None: ...
+
+    async def list_for_user(self, user_id: UserId) -> tuple[Connection, ...]: ...
+
+    async def save(self, connection: Connection) -> None: ...
+
+    async def delete(self, connection_id: ConnectionId) -> bool: ...

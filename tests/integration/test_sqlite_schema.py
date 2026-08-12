@@ -35,6 +35,7 @@ def test_upgrade_from_empty_database_creates_initial_schema(tmp_path: Path) -> N
         engine.dispose()
 
     assert table_names == {
+        "connections",
         "conversations",
         "messages",
         "run_events",
@@ -71,6 +72,32 @@ def test_initial_schema_enforces_foreign_keys_and_invariants(tmp_path: Path) -> 
                 ),
                 {"time": timestamp},
             )
+
+            with pytest.raises(sa.exc.IntegrityError):
+                with connection.begin_nested():
+                    connection.execute(
+                        sa.text(
+                            "INSERT INTO connections "
+                            "(connection_id, user_id, service_id, account_label, "
+                            "granted_scopes_json, status, created_at, updated_at) "
+                            "VALUES ('connection-missing-user', 'missing-user', "
+                            "'gmail', 'Primary', '[]', 'active', :time, :time)"
+                        ),
+                        {"time": timestamp},
+                    )
+
+            with pytest.raises(sa.exc.IntegrityError):
+                with connection.begin_nested():
+                    connection.execute(
+                        sa.text(
+                            "INSERT INTO connections "
+                            "(connection_id, user_id, service_id, account_label, "
+                            "granted_scopes_json, status, created_at, updated_at) "
+                            "VALUES ('connection-invalid-status', 'local-user', "
+                            "'gmail', 'Primary', '[]', 'revoked', :time, :time)"
+                        ),
+                        {"time": timestamp},
+                    )
             connection.execute(
                 sa.text(
                     "INSERT INTO conversations "

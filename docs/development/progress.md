@@ -3124,3 +3124,33 @@
 
 - 设计 Gmail 的最小只读 MCP 接入：先定义 Desktop OAuth、系统 Secret Store、账户/Scope 资源范围和
   Email 专用工作区的授权边界；不把 Token 写入 `mcp.json`，不先实现发送或删除邮件。
+
+## 2026-08-12 通用外部连接与 macOS Keychain 基础工作记录
+
+### 完成
+
+- 新增 Core `Connection` / `ConnectionStatus`、`ConnectionRepository` 与 `CredentialStore`：SQLite
+  只保存连接 ID、用户、服务标识、账户显示名、scope、状态和时间；credential 是仅由
+  `connection_id` 引用的不透明字符串，不进入数据库或普通配置。
+- 新增 `connections` Schema 与 Alembic `20260812_03` 迁移；`SqliteConnectionRepository` 支持
+  查询、按用户列出、upsert 和删除非敏感连接元数据。
+- 新增 `MacOSKeychainCredentialStore`，通过 `keyring` 访问当前 macOS 用户的 Keychain。它按
+  Connection ID 隔离 credential，空 credential 与非 macOS 平台明确拒绝；尚未实现 Windows 和
+  Linux 的系统存储适配器。
+- 本次不实现 OAuth、token 刷新、MCP credential 注入、Connection API、设置页或 Gmail 专用 UI。
+
+### 验证
+
+- 定向单元与 SQLite 集成测试覆盖 Keychain 适配器的 save/get/delete、跨连接隔离、空值/非 macOS
+  拒绝、迁移、跨实例持久化、更新排序、UTC 标准化和删除语义。
+- `scripts/check.sh` 通过：316 passed；Ruff、strict mypy（154 个 source files）与锁文件检查均通过。
+
+### 决策变化
+
+- 新增 DEC-070：外部连接元数据与系统凭据存储分离。
+
+### 下一步
+
+- 设计并实现最小 MCP connection reference：非敏感配置只引用 `connection_id`，组合根只向目标
+  Server 提供所需 credential；不接入 Gmail OAuth、不向所有 MCP 子进程广播 Secret，也不开始
+  Windows/Linux 适配器。

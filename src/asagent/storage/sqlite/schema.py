@@ -89,6 +89,28 @@ run_events = Table(
     UniqueConstraint("run_id", "sequence", name="run_event_run_sequence"),
 )
 
+connections = Table(
+    "connections",
+    metadata,
+    Column("connection_id", String, primary_key=True),
+    Column(
+        "user_id",
+        String,
+        ForeignKey("users.user_id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("service_id", String, nullable=False),
+    Column("account_label", String, nullable=False),
+    Column("granted_scopes_json", Text, nullable=False),
+    Column("status", String, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "status IN ('active', 'reauthentication_required')",
+        name="connection_status_valid",
+    ),
+)
+
 tool_calls = Table(
     "tool_calls",
     metadata,

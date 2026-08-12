@@ -39,6 +39,7 @@ def test_upgrade_creates_database_in_app_data_directory_and_is_repeatable(
             "runs",
             "run_events",
             "tool_calls",
+            "connections",
             "schema_migrations",
         }.issubset(inspector.get_table_names())
 

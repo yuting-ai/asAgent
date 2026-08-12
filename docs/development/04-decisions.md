@@ -706,6 +706,16 @@
 - 影响：该策略需要未来持久化设置与撤销 UI，并与 Gmail OAuth、Secret Store、风险覆盖策略一起设计；不在当前 `PendingToolApprovalPolicy`、`mcp.json` 或会话授权任务中预建数据库表、设置页面或凭据注入。
 - 替代方案：OAuth 成功即全局自动允许、所有入口都只按 Conversation grant、或所有 Email 操作永久逐次弹窗；当前均不采用。
 
+### DEC-070：外部连接元数据与系统凭据存储分离
+
+- 日期：2026-08-12
+- 状态：已确认并完成最小 macOS 实现
+- 背景：Gmail、GitHub、Calendar 和其他 MCP Server 可能需要 OAuth refresh token、API Key 或其他 credential。把这些值放入 SQLite、`mcp.json`、`.env` 或 Sidecar 环境会使备份、日志、子进程继承和普通配置读取扩大 Secret 暴露面；但仅有 `SecretProvider.get_secret()` 又不足以表达连接的保存、替换、撤销和账户范围。
+- 决策：新增通用 `Connection`，在 SQLite 只持久化 `connection_id`、用户、服务标识、账户显示名、scope、状态和时间；新增 Core `CredentialStore`，只以 `connection_id` 保存、读取和删除不透明 credential。首个生产适配器是 macOS `MacOSKeychainCredentialStore`，使用系统 Keychain；Windows Credential Manager 和 Linux Secret Service 以后实现同一 Protocol。未支持的平台必须明确失败，不能退回到文件、SQLite 或环境变量。断开连接的未来组合操作必须同时删除 CredentialStore 条目和 Connection 元数据。
+- 原因：连接生命周期与凭据载体从具体 OAuth/MCP 服务中解耦；任一服务专属 Connector 只需负责登录、刷新及账户信息解析，随后复用同一安全存储和撤销路径。
+- 影响：本次没有 Gmail OAuth、刷新逻辑、Provider Keychain 接入、MCP 子进程 Secret 注入、Connection API 或桌面设置页。`mcp.json` 继续禁止 Secret，McpClient 继续只接收显式最小环境；下一项必须设计非敏感 connection reference 如何被组合根解析为仅对目标 Server 可用的凭据。
+- 替代方案：每个服务各自维护 token 文件、让所有 MCP 子进程继承完整 Sidecar 环境、把 token 写入 `mcp.json`，或将 macOS 实现伪装为跨平台支持；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：
