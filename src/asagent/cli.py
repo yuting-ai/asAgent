@@ -84,14 +84,18 @@ from asagent.tools.approval import PendingToolApprovalPolicy, ToolApprovalPolicy
 from asagent.tools.builtin.calculator import CalculatorTool
 from asagent.tools.builtin.current_time import CurrentTimeTool
 from asagent.tools.builtin.echo import EchoTool
+from asagent.tools.builtin.filesystem_list import FilesystemListTool
+from asagent.tools.builtin.filesystem_read_file import FilesystemReadFileTool
 from asagent.tools.executor import ToolExecutor
 from asagent.tools.mcp_config import load_mcp_server_configs
 from asagent.tools.mcp_manager import McpServerManager
 from asagent.tools.registry import ToolRegistry
 from asagent.tools.snapshot import ToolSnapshot
+from asagent.workspace.resolver import WorkspaceResolver
 from asagent.workspace.settings import ConversationWorkspaceSettings
 
 _BUILTIN_TOOL_PERMISSIONS = frozenset({"tool.execute"})
+_FILESYSTEM_READ_PERMISSIONS = frozenset({"filesystem.read"})
 _MCP_SUBPROCESS_ENVIRONMENT_NAMES = ("PATH",)
 
 
@@ -174,6 +178,26 @@ def _register_builtin_tools() -> ToolRegistry:
     registry.register(EchoTool())
     registry.register(CalculatorTool())
     registry.register(CurrentTimeTool())
+    return registry
+
+
+async def _registry_for_conversation(
+    *,
+    base_registry: ToolRegistry,
+    workspace_settings: ConversationWorkspaceSettings,
+    conversation_id: ConversationId,
+) -> ToolRegistry:
+    """Add this Conversation's read-only file tools to an isolated registry."""
+
+    status = await workspace_settings.get_status(conversation_id)
+    resolver = WorkspaceResolver(
+        workspace_root=status.workspace_root,
+        additional_roots=status.additional_roots,
+        additional_files=status.additional_files,
+    )
+    registry = base_registry.copy()
+    registry.register(FilesystemListTool(resolver))
+    registry.register(FilesystemReadFileTool(resolver))
     return registry
 
 
@@ -403,7 +427,46 @@ def build_persistent_agent_runtime(
     approval_policy: ToolApprovalPolicy | None = None,
     registry: ToolRegistry | None = None,
     granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
+    workspace_settings: ConversationWorkspaceSettings | None = None,
 ) -> PersistentAgentRuntime:
+    base_registry = registry if registry is not None else _register_builtin_tools()
+
+    if workspace_settings is not None:
+
+        async def loop_for_conversation(
+            conversation_id: ConversationId,
+        ) -> AgentLoop:
+            return build_agent_loop(
+                model=model,
+                event_publisher=RepositoryEventPublisher(runs),
+                tool_call_recorder=RepositoryToolCallRecorder(runs),
+                approval_policy=approval_policy,
+                registry=await _registry_for_conversation(
+                    base_registry=base_registry,
+                    workspace_settings=workspace_settings,
+                    conversation_id=conversation_id,
+                ),
+                granted_permissions=(
+                    granted_permissions | _FILESYSTEM_READ_PERMISSIONS
+                ),
+            )
+
+        return PersistentAgentRuntime(
+            conversations=conversations,
+            run_submission=RunSubmissionService(
+                conversations=conversations,
+                run_starter=starter,
+                now=now,
+                new_run_id=new_run_id,
+                new_message_id=new_message_id,
+            ),
+            run_finisher=finisher,
+            loop_for_conversation=loop_for_conversation,
+            system_prompt_for_conversation=workspace_settings.model_context,
+            now=now,
+            new_message_id=new_message_id,
+        )
+
     return PersistentAgentRuntime(
         conversations=conversations,
         run_submission=RunSubmissionService(
@@ -419,7 +482,7 @@ def build_persistent_agent_runtime(
             event_publisher=RepositoryEventPublisher(runs),
             tool_call_recorder=RepositoryToolCallRecorder(runs),
             approval_policy=approval_policy,
-            registry=registry,
+            registry=base_registry,
             granted_permissions=granted_permissions,
         ),
         now=now,
@@ -436,7 +499,46 @@ def build_persistent_development_runtime(
     approval_policy: ToolApprovalPolicy | None = None,
     registry: ToolRegistry | None = None,
     granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
+    workspace_settings: ConversationWorkspaceSettings | None = None,
 ) -> PersistentAgentRuntime:
+    base_registry = registry if registry is not None else _register_builtin_tools()
+
+    if workspace_settings is not None:
+
+        async def loop_for_conversation(
+            conversation_id: ConversationId,
+        ) -> AgentLoop:
+            scoped_registry = await _registry_for_conversation(
+                base_registry=base_registry,
+                workspace_settings=workspace_settings,
+                conversation_id=conversation_id,
+            )
+            return build_development_agent_loop(
+                event_publisher=RepositoryEventPublisher(runs),
+                tool_call_recorder=RepositoryToolCallRecorder(runs),
+                approval_policy=approval_policy,
+                registry=scoped_registry,
+                granted_permissions=(
+                    granted_permissions | _FILESYSTEM_READ_PERMISSIONS
+                ),
+            )
+
+        return PersistentAgentRuntime(
+            conversations=conversations,
+            run_submission=RunSubmissionService(
+                conversations=conversations,
+                run_starter=starter,
+                now=now,
+                new_run_id=new_run_id,
+                new_message_id=new_message_id,
+            ),
+            run_finisher=finisher,
+            loop_for_conversation=loop_for_conversation,
+            system_prompt_for_conversation=workspace_settings.model_context,
+            now=now,
+            new_message_id=new_message_id,
+        )
+
     return PersistentAgentRuntime(
         conversations=conversations,
         run_submission=RunSubmissionService(
@@ -451,7 +553,7 @@ def build_persistent_development_runtime(
             event_publisher=RepositoryEventPublisher(runs),
             tool_call_recorder=RepositoryToolCallRecorder(runs),
             approval_policy=approval_policy,
-            registry=registry,
+            registry=base_registry,
             granted_permissions=granted_permissions,
         ),
         now=now,
@@ -664,6 +766,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     approval_policy=tool_approvals,
                     registry=registry,
                     granted_permissions=granted_permissions,
+                    workspace_settings=workspace_settings,
                 )
                 model_name = "development-tools"
             else:
@@ -707,6 +810,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     approval_policy=tool_approvals,
                     registry=registry,
                     granted_permissions=granted_permissions,
+                    workspace_settings=workspace_settings,
                 )
                 model_name = profile.model
 
@@ -772,6 +876,7 @@ async def _run_main(args: argparse.Namespace) -> None:
 
     if args.persistent:
         paths = AppPaths.from_root(args.app_home)
+        paths.workspace_dir.mkdir(parents=True, exist_ok=True)
         database_path = paths.data_dir / "asagent.sqlite3"
         upgrade_sqlite_database(
             database_path=database_path,
@@ -779,9 +884,16 @@ async def _run_main(args: argparse.Namespace) -> None:
         )
 
         conversations = SqliteConversationRepository(database_path)
+        conversation_file_scopes = SqliteConversationFileScopeRepository(
+            database_path,
+        )
         runs = SqliteRunRepository(database_path)
         starter = SqliteRunStarter(database_path)
         finisher = SqliteRunFinisher(database_path)
+        workspace_settings = ConversationWorkspaceSettings(
+            scopes=conversation_file_scopes,
+            workspace_root=paths.workspace_dir,
+        )
 
         try:
             conversation = await get_or_create_persistent_conversation(
@@ -799,6 +911,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     runs=runs,
                     starter=starter,
                     finisher=finisher,
+                    workspace_settings=workspace_settings,
                 )
                 model_name = "development-tools"
                 await run_persistent_agent_chat(
@@ -837,6 +950,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                         runs=runs,
                         starter=starter,
                         finisher=finisher,
+                        workspace_settings=workspace_settings,
                     ),
                     conversation_id=conversation.conversation_id,
                     model_name=profile.model,
@@ -849,6 +963,7 @@ async def _run_main(args: argparse.Namespace) -> None:
             await starter.aclose()
             await runs.aclose()
             await conversations.aclose()
+            await conversation_file_scopes.aclose()
         return
 
     publisher = ConsoleEventPublisher(print)

@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -29,14 +29,25 @@ class PersistentAgentRuntime:
         conversations: ConversationRepository,
         run_submission: RunSubmissionService,
         run_finisher: RunFinisher,
-        loop: AgentLoop,
+        loop: AgentLoop | None = None,
+        loop_for_conversation: Callable[[ConversationId], Awaitable[AgentLoop]]
+        | None = None,
+        system_prompt_for_conversation: Callable[[ConversationId], Awaitable[str]]
+        | None = None,
         now: Callable[[], datetime],
         new_message_id: Callable[[], MessageId],
     ) -> None:
+        if (loop is None) == (loop_for_conversation is None):
+            raise ValueError(
+                "provide exactly one of loop or loop_for_conversation",
+            )
+
         self._conversations = conversations
         self._run_submission = run_submission
         self._run_finisher = run_finisher
         self._loop = loop
+        self._loop_for_conversation = loop_for_conversation
+        self._system_prompt_for_conversation = system_prompt_for_conversation
         self._now = now
         self._new_message_id = new_message_id
 
@@ -76,9 +87,11 @@ class PersistentAgentRuntime:
 
         try:
             history = await self._conversations.list_messages(conversation_id)
-            loop_result = await self._loop.run(
+            loop = await self._get_loop(conversation_id)
+            scoped_system_prompt = await self._system_prompt(conversation_id)
+            loop_result = await loop.run(
                 model_name=model_name,
-                system_prompt=system_prompt,
+                system_prompt=f"{system_prompt}{scoped_system_prompt}",
                 messages=tuple(self._to_model_message(message) for message in history),
                 cancellation_token=cancellation_token,
                 run_id=initial_run.run_id,
@@ -123,6 +136,20 @@ class PersistentAgentRuntime:
             error=loop_result.error,
             steps_used=loop_result.steps_used,
         )
+
+    async def _get_loop(self, conversation_id: ConversationId) -> AgentLoop:
+        if self._loop_for_conversation is not None:
+            return await self._loop_for_conversation(conversation_id)
+
+        assert self._loop is not None
+        return self._loop
+
+    async def _system_prompt(self, conversation_id: ConversationId) -> str:
+        if self._system_prompt_for_conversation is None:
+            return ""
+
+        context = await self._system_prompt_for_conversation(conversation_id)
+        return f"\n\n{context}" if context else ""
 
     def _assistant_message(
         self,

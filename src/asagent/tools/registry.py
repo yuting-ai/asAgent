@@ -21,3 +21,16 @@ class ToolRegistry:
 
     def definitions(self) -> tuple[ToolDefinition, ...]:
         return tuple(tool.definition for tool in self._tools.values())
+
+    def copy(self) -> "ToolRegistry":
+        """Return a new registry containing the same tool instances.
+
+        Tool definitions remain stable while a Run may add tools with
+        Conversation-specific dependencies without mutating the shared base
+        registry or another Run's Tool Snapshot.
+        """
+
+        registry = ToolRegistry()
+        for tool in self._tools.values():
+            registry.register(tool)
+        return registry

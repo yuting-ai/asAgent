@@ -3453,9 +3453,45 @@
 
 ### 下一步
 
-- 在独立任务中，读取已保存的额外根和单文件允许项构造实际 `WorkspaceResolver`，并把 `filesystem.list` 与
-  `filesystem.read_file` 作为受 `filesystem.read` 权限约束的只读工具接入实际 Runtime；不实现写入、删除、
-  全盘访问或递归扫描。
+- 在独立任务中设计并实现 DEC-060 的 `FileChange`、私有快照、哈希冲突检测和撤回基础；在此之前不实现覆盖、
+  追加、删除或编辑既有文件。
+
+## 2026-08-12 会话级只读文件工具 Runtime 接入
+
+### 完成
+
+- 持久化 Runtime 现在会在每个 Run 从其 `conversation_id` 读取 SQLite `conversation_file_scopes`，构造专属
+  `WorkspaceResolver`，并为该 Run 复制基础 ToolRegistry、注册 `filesystem.list` 与 `filesystem.read_file`。
+  这样共享的内置/MCP Tool 不会携带某一 Conversation 的文件范围，Run Tool Snapshot 也保持稳定。
+- 两个 Tool 获得 `filesystem.read` 能力，但只能在当前 Conversation 的默认 Workspace、明确授权文件夹或精确授权
+  单文件内执行。越界请求不会访问磁盘，而是返回配对的工具错误；文件选择本身仍不上传、扫描或读取内容。
+- 持久化开发 CLI、真实 Provider Runtime 与 Electron Sidecar 均使用该按 Run 构造的只读工具路径。非持久化 CLI
+  仍不提供外部文件范围。
+
+### 验证
+
+- 新增集成测试验证：Conversation A 能读取其明确授权的 Workspace 外文件；Conversation B 即使请求同一路径也会
+  获得工具错误，且两个 Run 的模型 Snapshot 均包含只读 File Tool。
+- 定向测试通过：14 passed；完整 `scripts/check.sh` 通过：363 passed；Ruff、strict mypy（168 个 source files）与锁文件检查均通过。
+
+### 下一步
+
+- 让模型在当前 Run 的系统上下文中获知当前 Conversation 已选择的文件/目录路径，避免用户必须复述绝对路径；之后再实现 DEC-060 的 `FileChange`、私有快照、哈希冲突检测和撤回基础。
+
+## 2026-08-12 会话级文件范围的模型可发现性
+
+### 完成
+
+- 每个持久化 Run 现在把当前 Conversation 明确选择的文件夹和单文件路径附加到短暂系统上下文。模型因此可将“附加的文件夹”或“共享的文件”等自然语言指代映射为正确的受控工具路径，而不要求用户输入绝对路径。
+- 该上下文只包含用户已经在 Composer/Preferences 中显式选择的路径，不读取、扫描或上传文件正文；不写入用户可见 Message、SQLite、RunEvent 或 ToolCall。文件正文仍必须通过 `filesystem.list` 或 `filesystem.read_file` 的 Resolver、权限、超时和审计链路取得。
+
+### 验证
+
+- 新增集成断言：当前 Conversation 的模型请求包含其已选文件夹与文件路径；另一 Conversation 的请求不包含这些路径，且越界读取继续只返回配对工具错误。
+
+### 下一步
+
+- 在独立任务中设计 `search_files`：仅搜索当前 Conversation 已授权文件夹，限制匹配数、单文件大小、总输出和超时；它不替代已完成的文件范围可发现性。
 
 ## 2026-08-12 Desktop Composer visual refinement
 

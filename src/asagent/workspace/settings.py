@@ -44,6 +44,25 @@ class ConversationWorkspaceSettings:
             additional_files=resolver.additional_files,
         )
 
+    async def model_context(self, conversation_id: ConversationId) -> str:
+        """Describe user-selected paths for this Run without reading them."""
+
+        status = await self.get_status(conversation_id)
+        if not status.additional_roots and not status.additional_files:
+            return ""
+
+        lines = [
+            "The user explicitly shared the following local paths for this "
+            "conversation:",
+            *(f"- Folder: {path}" for path in status.additional_roots),
+            *(f"- File: {path}" for path in status.additional_files),
+            "When the user refers to an attached or shared file or folder "
+            "without naming a path, use the matching path above. Use "
+            "filesystem.list for a folder and filesystem.read_file for a file. "
+            "Do not claim that a path is unavailable before using the relevant tool.",
+        ]
+        return "\n".join(lines)
+
     async def save(
         self,
         *,

@@ -53,3 +53,17 @@ def test_unknown_tool_id_is_rejected() -> None:
 
     with pytest.raises(KeyError, match="not registered"):
         registry.get("builtin.echo")
+
+
+def test_copy_keeps_tools_without_sharing_registry_mutations() -> None:
+    original: Tool = StubTool("builtin.echo")
+    copied_only: Tool = StubTool("builtin.calculator")
+    registry = ToolRegistry()
+    registry.register(original)
+
+    copied = registry.copy()
+    copied.register(copied_only)
+
+    assert copied.get("builtin.echo") is original
+    assert copied.get("builtin.calculator") is copied_only
+    assert registry.definitions() == (original.definition,)
