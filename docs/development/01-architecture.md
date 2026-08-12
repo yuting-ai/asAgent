@@ -479,6 +479,13 @@ fallback。
 并把 Session 标为已关闭；`aclose()` 幂等关闭子进程。它不是 Server Manager，也不读取
 `mcp.json` 或自动接入应用组合根。
 
+`tools.mcp_config` 是 MCP 非敏感配置的唯一加载边界。它读取可选的
+`config_dir/mcp.json`：缺失文件等价于空 Server 集合，且不会创建目录；存在文件必须为严格
+JSON，顶层只允许 `servers`。每个显式命名 Server 只声明非空的命令参数元组和绝对工作目录；
+名称是受限的小写标识符，未知字段、相对工作目录与空参数都会被拒绝。该加载器不验证路径是否
+存在、不启动进程、不读取环境变量或 Secret。Token、密码、API Key 和带凭据的环境变量都不能
+进入此文件，未来只能通过独立 Secret Store 引用注入。
+
 MCP Server 的权限独立于宿主工具权限：stdio Server 使用显式工作目录、最小环境变量和自身配置；远程 Server 仅使用为该 Server 配置的 Token 与能力。它们不继承 asAgent 的文件范围、浏览器 Profile 或其他账户 Token。
 
 MCP 工具内部 ID：
@@ -488,7 +495,7 @@ mcp:{server_name}:{tool_name}:{schema_hash}
 ```
 
 其中 `schema_hash` 是对 `input_schema` 做稳定 JSON 规范化后的 SHA-256 截断。不同 Server
-提供同名工具时不得覆盖。当前尚未实现 Server Manager、外部 `mcp.json` 配置或 Loop 自动导入。
+提供同名工具时不得覆盖。当前尚未实现 Server Manager 或从 `mcp.json` 自动启动/导入 Server。
 `tests/integration/test_mcp_agent_loop.py` 已验证最小完整链路：测试 MCP Server 经过
 `McpClient`、`McpTool`、`ToolRegistry` 和 `ToolSnapshot` 后，脚本化 Model Provider 能看见
 Provider 可见工具名并请求调用；`AgentLoop` 再经 `ToolExecutor` 的 `mcp.execute` 权限与批准

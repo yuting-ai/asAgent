@@ -2973,5 +2973,29 @@
 
 ### 下一步
 
-- 评估是否用 Session 替换现有测试里手写的 `client.start()` + `register_mcp_tools()` 组合；
-  仍不实现 Server Manager、外部配置、legacy fallback、分页或真实第三方 Server。
+- 从已校验的可选 `mcp.json` 创建并持有多个 `McpServerSession`，使组合根可按配置受控启动、
+  导入与关闭 Server；仍不实现 legacy fallback、分页或真实第三方 Server。
+
+## 2026-08-12 阶段 8 MCP 非敏感配置工作记录
+
+### 完成
+
+- 新增 `tools.mcp_config`，作为 `config_dir/mcp.json` 的唯一当前加载边界；文件缺失返回空的
+  `McpServerConfigs`，且不创建配置目录或启动子进程。
+- 每个配置项只包含小写稳定名称、非空 command 参数元组与绝对 working directory；严格拒绝
+  未知字段、相对目录、空参数与不合法名称。
+- 配置不接受 Token、API Key、密码或环境变量值；加载器也不检查目录存在性、不读取环境变量或
+  Secret。未来由组合根和 Secret Store 在独立边界决定实际启动和注入。
+
+### 验证
+
+- `tests/unit/test_mcp_config.py` 覆盖正常加载、缺失文件为空、无效名称/命令/目录/敏感字段拒绝及
+  无效 JSON 错误。
+- 完整 `scripts/check.sh` 为 296 passed；Ruff、strict mypy（144 个 source files）与锁文件检查
+  均通过。
+
+### 下一步
+
+- 实现最小多 Server 生命周期所有者：从已校验 `McpServerConfigs` 创建、启动和关闭多个
+  `McpServerSession`；不在该任务接入 CLI、Local API、Electron、legacy fallback、分页或真实
+  第三方 Server。

@@ -273,7 +273,10 @@ macOS 发布环境建议基于 Electron `app.getPath('userData')`：
 └── temp/
 ```
 
-MCP Token、密码和带凭据的环境变量进入系统 Keychain/Secret Store，不写入 `mcp.json`。SQLite 可以缓存 MCP Server 状态，但配置文件和数据库不能形成两个可独立修改的配置主来源。
+MCP Token、密码和带凭据的环境变量进入系统 Keychain/Secret Store，不写入 `mcp.json`。当前
+`tools.mcp_config` 将该文件作为可选、严格的非敏感配置加载：每个 Server 仅声明名称、命令参数和
+绝对工作目录；文件缺失代表没有 MCP Server，加载本身不启动子进程。SQLite 可以缓存 MCP Server
+状态，但配置文件和数据库不能形成两个可独立修改的配置主来源。
 
 开发环境使用仓库内 `.local-data/`，但仍通过完全相同的 AppPaths 参数传入。测试使用临时目录。
 
