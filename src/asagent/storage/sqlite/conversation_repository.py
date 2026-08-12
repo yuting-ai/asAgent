@@ -171,8 +171,7 @@ class SqliteConversationRepository:
             )
             await connection.execute(
                 delete(conversation_file_scopes).where(
-                    conversation_file_scopes.c.conversation_id
-                    == str(conversation_id),
+                    conversation_file_scopes.c.conversation_id == str(conversation_id),
                 ),
             )
             await connection.execute(

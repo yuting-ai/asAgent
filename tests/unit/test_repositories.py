@@ -82,6 +82,9 @@ class ExampleConversationRepository:
     ) -> None:
         del message
 
+    async def delete(self, conversation_id: ConversationId) -> bool:
+        return conversation_id == ConversationId("conv_123")
+
 
 class ExampleRunRepository:
     async def get(self, run_id: RunId) -> Run | None:
