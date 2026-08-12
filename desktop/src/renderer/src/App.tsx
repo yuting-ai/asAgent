@@ -100,6 +100,7 @@ type DesktopLayout = {
   railWidth: number
   threadWidth: number
   attentionWidth: number
+  attentionPanelOpen: boolean
 }
 
 const TAVILY_SETTINGS_LOAD_ERROR = 'Tavily settings could not be loaded.'
@@ -130,7 +131,8 @@ function defaultDesktopLayout(): DesktopLayout {
   return {
     railWidth: DEFAULT_RAIL_WIDTH,
     threadWidth: DEFAULT_THREAD_WIDTH,
-    attentionWidth: DEFAULT_ATTENTION_WIDTH
+    attentionWidth: DEFAULT_ATTENTION_WIDTH,
+    attentionPanelOpen: false
   }
 }
 
@@ -150,6 +152,7 @@ function storedDesktopLayout(): DesktopLayout {
     const railWidth = layout['railWidth']
     const threadWidth = layout['threadWidth']
     const attentionWidth = layout['attentionWidth']
+    const attentionPanelOpen = layout['attentionPanelOpen']
     if (
       !isLayoutWidth(railWidth, MIN_RAIL_WIDTH, MAX_RAIL_WIDTH) ||
       !isLayoutWidth(threadWidth, MIN_THREAD_WIDTH, MAX_THREAD_WIDTH) ||
@@ -158,7 +161,12 @@ function storedDesktopLayout(): DesktopLayout {
       return defaultDesktopLayout()
     }
 
-    return { railWidth, threadWidth, attentionWidth }
+    return {
+      railWidth,
+      threadWidth,
+      attentionWidth,
+      attentionPanelOpen: attentionPanelOpen === true
+    }
   } catch {
     return defaultDesktopLayout()
   }
@@ -324,6 +332,26 @@ function Icon({ path, className }: { path: string; className?: string }): React.
   )
 }
 
+function ContextPanelIcon({
+  direction
+}: {
+  direction: 'collapse' | 'expand'
+}): React.JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <rect height="14" rx="2" width="18" x="3" y="5" />
+      <path d="M15 5v14" />
+      <path d={direction === 'expand' ? 'm18 12-3-3 3-3' : 'm12 12 3 3 3-3'} />
+    </svg>
+  )
+}
+
 export default function App(): React.JSX.Element {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
   const [backendStatus, setBackendStatus] = useState<'checking' | 'ready' | 'unavailable'>(
@@ -428,7 +456,8 @@ export default function App(): React.JSX.Element {
         return
       }
 
-      const attentionIsVisible = window.innerWidth > 1100
+      const attentionIsVisible =
+        window.innerWidth > 1100 && desktopLayoutRef.current.attentionPanelOpen
       const railIsVisible = window.innerWidth > 820
       const layout = desktopLayoutRef.current
       const currentRailWidth = isRailCollapsed ? COLLAPSED_RAIL_WIDTH : layout.railWidth
@@ -1268,25 +1297,101 @@ export default function App(): React.JSX.Element {
     return `rail-item${activeView === view ? ' active' : ''}`
   }
 
+  function setAttentionPanelOpen(open: boolean): void {
+    const next = { ...desktopLayoutRef.current, attentionPanelOpen: open }
+    desktopLayoutRef.current = next
+    setDesktopLayout(next)
+    saveDesktopLayout(next)
+  }
+
+  function closeAttentionPanel(): void {
+    setAttentionPanelOpen(false)
+  }
+
+  function openAttentionPanel(): void {
+    setAttentionPanelOpen(true)
+  }
+
+  function ContextPanelExpandButton(): React.JSX.Element | null {
+    if (desktopLayout.attentionPanelOpen) {
+      return null
+    }
+
+    return (
+      <button
+        aria-label="Expand context panel"
+        className="panel-expand-btn"
+        onClick={openAttentionPanel}
+        title="Expand context panel"
+        type="button"
+      >
+        <ContextPanelIcon direction="expand" />
+      </button>
+    )
+  }
+
+  function CenterPageHeader({
+    children,
+    subtitle,
+    title
+  }: {
+    children?: React.ReactNode
+    subtitle: string
+    title: string
+  }): React.JSX.Element {
+    return (
+      <div className="center-header">
+        <div className="center-header-main">
+          <div className="center-title">{title}</div>
+          <div className="center-sub">{subtitle}</div>
+          {children}
+        </div>
+        <ContextPanelExpandButton />
+      </div>
+    )
+  }
+
+  function AttentionAside({
+    children,
+    header
+  }: {
+    children: React.ReactNode
+    header?: React.ReactNode
+  }): React.JSX.Element {
+    return (
+      <aside className="attn">
+        <div className="attn-top">
+          {header !== undefined ? <div className="attn-top-main">{header}</div> : null}
+          <button
+            aria-label="Collapse context panel"
+            className="attention-panel-close"
+            onClick={closeAttentionPanel}
+            title="Collapse context panel"
+            type="button"
+          >
+            <ContextPanelIcon direction="collapse" />
+          </button>
+        </div>
+        {children}
+      </aside>
+    )
+  }
+
   function renderPlaceholderView(title: string, subtitle: string): React.JSX.Element {
     return (
       <>
         <section className="center">
-          <div className="center-header">
-            <div className="center-title">{title}</div>
-            <div className="center-sub">{subtitle}</div>
-          </div>
+          <CenterPageHeader subtitle={subtitle} title={title} />
           <div className="placeholder-banner">
             This area is a visual placeholder. The feature is not implemented yet.
           </div>
         </section>
-        <aside className="attn">
-          <div className="attn-header">Coming soon</div>
+        <AttentionAside header={<div className="attn-header">Coming soon</div>}>
           <p className="chat-context-sub">
             Connected data, schedule details, and controls for {title.toLowerCase()} will appear
             here.
           </p>
-        </aside>
+        </AttentionAside>
       </>
     )
   }
@@ -1302,8 +1407,8 @@ export default function App(): React.JSX.Element {
 
       <div
         className={`app${isRailCollapsed ? ' rail-collapsed' : ''}${
-          resizingColumn === null ? '' : ' is-resizing'
-        }`}
+          desktopLayout.attentionPanelOpen ? ' attention-open' : ' attention-collapsed'
+        }${resizingColumn === null ? '' : ' is-resizing'}`}
         style={
           {
             '--rail-width': `${railWidth}px`,
@@ -1327,27 +1432,6 @@ export default function App(): React.JSX.Element {
 
         <nav aria-label="Primary" className="rail" id="primary-sidebar">
           <div aria-hidden="true" className="rail-window-controls" />
-          <div className="rail-control">
-            <button
-              aria-controls="primary-sidebar"
-              aria-expanded={!isRailCollapsed}
-              aria-label={isRailCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              className="rail-toggle"
-              onClick={() => setIsRailCollapsed((collapsed) => !collapsed)}
-              title={isRailCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              type="button"
-            >
-              <svg
-                aria-hidden="true"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-              >
-                <path d={isRailCollapsed ? 'm9 18 6-6-6-6' : 'm15 18-6-6 6-6'} />
-              </svg>
-            </button>
-          </div>
           <div className="rail-section">
             <button
               className={railItemClass('chat')}
@@ -1496,6 +1580,28 @@ export default function App(): React.JSX.Element {
               <Icon path="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
               <span className="rail-item-label">Agent preferences</span>
             </button>
+            <button
+              aria-controls="primary-sidebar"
+              aria-expanded={!isRailCollapsed}
+              aria-label={isRailCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="rail-toggle"
+              onClick={() => setIsRailCollapsed((collapsed) => !collapsed)}
+              title={isRailCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              type="button"
+            >
+              <svg
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <path d={isRailCollapsed ? 'm9 18 6-6-6-6' : 'm15 18-6-6 6-6'} />
+              </svg>
+              <span className="rail-item-label">
+                {isRailCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              </span>
+            </button>
           </div>
         </nav>
 
@@ -1643,6 +1749,7 @@ export default function App(): React.JSX.Element {
                       ? conversationLabel(selectedConversation.title)
                       : 'No conversation selected'}
                   </div>
+                  <ContextPanelExpandButton />
                 </div>
 
                 {errorMessage ? <p className="chat-error">{errorMessage}</p> : null}
@@ -1894,32 +2001,28 @@ export default function App(): React.JSX.Element {
             </div>
           </section>
 
-          <aside className="attn">
-            <div className="attn-header">Referenced in this chat</div>
+          <AttentionAside header={<div className="attn-header">Referenced in this chat</div>}>
             <p className="chat-context-sub">
-              Files and actions this conversation has touched will appear here.
+              Files, previews, and actions for this conversation will appear here.
             </p>
             <div className="ctx-file">
               <div className="ctx-file-icon">
                 <Icon path="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6" />
               </div>
               <div>
-                <div className="ctx-file-name">No attachments yet</div>
-                <div className="ctx-file-meta">Placeholder</div>
+                <div className="ctx-file-name">Nothing referenced yet</div>
+                <div className="ctx-file-meta">File preview coming soon</div>
               </div>
             </div>
-            <div className="ctx-action-btn">Turn this chat into an automation</div>
-          </aside>
+          </AttentionAside>
         </div>
 
         <div className={`view${activeView === 'activity' ? ' active' : ''}`}>
           <section className="center">
-            <div className="center-header">
-              <div className="center-title">Today</div>
-              <div className="center-sub">
-                Everything your agent has done, is doing, or is about to do.
-              </div>
-            </div>
+            <CenterPageHeader
+              subtitle="Everything your agent has done, is doing, or is about to do."
+              title="Today"
+            />
             <div className="placeholder-banner">
               Activity feed is a visual preview. Live entries will come from Run events later.
             </div>
@@ -1971,23 +2074,26 @@ export default function App(): React.JSX.Element {
             </div>
           </section>
 
-          <aside className="attn">
-            <div className="attn-tabs">
-              <button
-                className={`attn-tab${activityTab === 'approvals' ? ' active' : ''}`}
-                onClick={() => setActivityTab('approvals')}
-                type="button"
-              >
-                Approvals <span className="mini-badge">0</span>
-              </button>
-              <button
-                className={`attn-tab${activityTab === 'schedule' ? ' active' : ''}`}
-                onClick={() => setActivityTab('schedule')}
-                type="button"
-              >
-                Schedule
-              </button>
-            </div>
+          <AttentionAside
+            header={
+              <div className="attn-tabs">
+                <button
+                  className={`attn-tab${activityTab === 'approvals' ? ' active' : ''}`}
+                  onClick={() => setActivityTab('approvals')}
+                  type="button"
+                >
+                  Approvals <span className="mini-badge">0</span>
+                </button>
+                <button
+                  className={`attn-tab${activityTab === 'schedule' ? ' active' : ''}`}
+                  onClick={() => setActivityTab('schedule')}
+                  type="button"
+                >
+                  Schedule
+                </button>
+              </div>
+            }
+          >
             <div className={`tab-panel${activityTab === 'approvals' ? ' active' : ''}`}>
               <div className="attn-sub-row">Your agent stops here until you decide.</div>
               <div className="attn-list">
@@ -2015,15 +2121,15 @@ export default function App(): React.JSX.Element {
                 </div>
               </div>
             </div>
-          </aside>
+          </AttentionAside>
         </div>
 
         <div className={`view${activeView === 'privacy' ? ' active' : ''}`}>
           <section className="center">
-            <div className="center-header">
-              <div className="center-title">Privacy & Permissions</div>
-              <div className="center-sub">Everything asAgent can see, and who has touched it.</div>
-            </div>
+            <CenterPageHeader
+              subtitle="Everything asAgent can see, and who has touched it."
+              title="Privacy & Permissions"
+            />
             <div className="privacy-banner">
               <Icon path="M12 2 3 6v6c0 5 4 8.5 9 10 5-1.5 9-5 9-10V6l-9-4Z" />
               {usesExternalModel
@@ -2071,8 +2177,7 @@ export default function App(): React.JSX.Element {
               </div>
             </div>
           </section>
-          <aside className="attn">
-            <div className="attn-header">At a glance</div>
+          <AttentionAside header={<div className="attn-header">At a glance</div>}>
             <div className="stat-card">
               <div className="stat-row">
                 <span className="stat-label">Apps connected</span>
@@ -2097,7 +2202,7 @@ export default function App(): React.JSX.Element {
               asAgent keeps tokens in Electron Main and never puts secrets in the renderer, URL, or
               logs. Permission management UI will plug into that policy later.
             </div>
-          </aside>
+          </AttentionAside>
         </div>
 
         <div className={`view${activeView === 'scheduled' ? ' active' : ''}`}>
@@ -2129,14 +2234,17 @@ export default function App(): React.JSX.Element {
                 <div className="center-title">Agent preferences</div>
                 <div className="center-sub">Manage model access, tools, and local file scope.</div>
               </div>
-              <div className={`settings-mode-card${usesExternalModel ? ' external' : ''}`}>
-                <span>Processing</span>
-                <strong>{usesExternalModel ? 'External model' : 'Local mode'}</strong>
-                <small>
-                  {usesExternalModel
-                    ? 'Conversation content may leave this device.'
-                    : 'No model data is sent externally.'}
-                </small>
+              <div className="center-header-actions">
+                <div className={`settings-mode-card${usesExternalModel ? ' external' : ''}`}>
+                  <span>Processing</span>
+                  <strong>{usesExternalModel ? 'External model' : 'Local mode'}</strong>
+                  <small>
+                    {usesExternalModel
+                      ? 'Conversation content may leave this device.'
+                      : 'No model data is sent externally.'}
+                  </small>
+                </div>
+                <ContextPanelExpandButton />
               </div>
             </div>
 
@@ -2359,8 +2467,7 @@ export default function App(): React.JSX.Element {
             </div>
           </section>
 
-          <aside className="attn">
-            <div className="attn-header">Settings guide</div>
+          <AttentionAside header={<div className="attn-header">Settings guide</div>}>
             <div className="settings-guide">
               <section className="settings-guide-item">
                 <div className="settings-guide-title">Your credentials</div>
@@ -2375,7 +2482,7 @@ export default function App(): React.JSX.Element {
                 <p>Model and Tavily changes take effect after restarting asAgent.</p>
               </section>
             </div>
-          </aside>
+          </AttentionAside>
         </div>
       </div>
       {restartRequested ? (
