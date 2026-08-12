@@ -2879,6 +2879,29 @@
 
 ### 下一步
 
-- 实现最小现代 stdio `McpClient`：启动该测试 Server、写入有界 JSON-RPC 请求、读取并按
-  request id 配对 Response、执行 `server/discover` 与 `tools/list`；先不接入 ToolRegistry、
-  AgentLoop、legacy fallback 或真实第三方 Server。
+- 将远程 MCP Tool 描述与调用结果包装为现有 `ToolDefinition` / `Tool` 契约，并以明确的
+  MCP 命名空间接入 `ToolRegistry`；仍不实现 Server Manager、外部配置、legacy fallback、
+  分页或真实第三方 Server。
+
+## 2026-08-12 阶段 8 最小现代 stdio MCP Client 工作记录
+
+### 完成
+
+- 新增 `src/asagent/tools/mcp.py` 的最小 `McpClient`，以命令元组启动受控 stdio 子进程，
+  使用现代 `_meta` 请求 `server/discover`、`tools/list` 与 `tools/call`。
+- 每条请求使用递增 JSON-RPC id，并以单一在途请求和有界等待保证 Response 配对；超时、
+  EOF、无效 JSON 或 id 不匹配会关闭子进程并报告协议/传输错误。
+- Client 将 JSON-RPC error 映射为 `McpRemoteError`，但保留 `tools/call` 的
+  `result.isError` 为结构化工具结果，区分协议失败与模型可依据结果修正的工具失败。
+- 集成测试使用现有测试 Server 覆盖发现、工具列举、正常 `add` 调用和远端未知工具错误；
+  当前未接入 `ToolRegistry`、Agent Loop、legacy fallback、分页、通知或外部 Server 配置。
+
+### 验证
+
+- `tests/integration/test_mcp_client.py` 通过；完整 `scripts/check.sh` 为 285 passed。
+- Ruff、strict mypy（139 个 source files）与锁文件检查均通过。
+
+### 下一步
+
+- 将发现到的 MCP Tool 包装为现有 `ToolDefinition` / `Tool`，并以明确命名空间接入
+  `ToolRegistry`；保持本次 Client 的现代协议和错误边界不变。
