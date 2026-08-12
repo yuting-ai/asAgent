@@ -3457,3 +3457,16 @@
 - 在独立任务中，读取已保存的额外根构造实际 `WorkspaceResolver`，并把 `filesystem.list` 与
   `filesystem.read_file` 作为受 `filesystem.read` 权限约束的只读工具接入实际 Runtime；不实现写入、删除、
   全盘访问或递归扫描。
+
+## 2026-08-12 Desktop Composer visual refinement
+
+### Complete
+
+- Chat Composer now uses a larger rounded input surface with a separate lower control row, a disabled attachment
+  affordance, and a circular upward-arrow send action. The existing submit and cooperative Stop behavior are unchanged.
+- Attachments remain explicitly unavailable: the new control does not select, upload, read, or expose local files.
+  Actual attachment support must be implemented later through the saved Workspace scope and existing permission path.
+
+### Verification
+
+- Desktop `npm run format`, `npm run typecheck`, `npm run lint`, `npm test` (25 passed), and `npm run build` all pass.

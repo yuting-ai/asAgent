@@ -1884,22 +1884,34 @@
 }
 
 .chat-composer {
-  padding: 14px 24px 18px;
-  border-top: 1px solid var(--line-soft);
+  padding: 16px 24px 20px;
+  background: var(--bg-raised);
 }
 
 .chat-composer-box {
   display: flex;
-  gap: 6px;
-  align-items: flex-end;
-  padding: 8px 9px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--bg-inset);
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #d9e1ec;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgb(23 34 58 / 6%);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .chat-composer-box:focus-within {
   border-color: var(--brass-dim);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brass-dim) 12%, transparent);
+}
+
+.chat-composer-footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
 }
 
 .chat-attach-btn {
@@ -1907,39 +1919,75 @@
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  color: var(--text-faint);
-  cursor: default;
+  width: 34px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: #4f5f76;
+}
+
+.chat-attach-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .chat-attach-btn svg {
-  width: 15px;
-  height: 15px;
+  width: 21px;
+  height: 21px;
+}
+
+.chat-composer-status {
+  min-width: 0;
+  flex: 1;
+  color: #8794a8;
+  font-size: 12px;
 }
 
 .chat-composer-box textarea {
   flex: 1;
-  min-height: 28px;
-  max-height: 120px;
-  padding: 4px 2px;
+  width: 100%;
+  min-height: 74px;
+  max-height: 168px;
+  padding: 0;
   border: none;
   outline: none;
   resize: none;
   background: none;
-  color: var(--text);
+  color: #202b3d;
   font-family: var(--sans);
-  font-size: 13.5px;
-  line-height: 1.45;
+  font-size: 15px;
+  line-height: 1.55;
 }
 
 .chat-composer-box textarea::placeholder {
-  color: var(--text-faint);
+  color: #98a4b5;
 }
 
 .chat-composer-box textarea:disabled {
-  color: var(--text-faint);
+  color: #98a4b5;
+}
+
+.chat-composer .composer-send {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--brass);
+  box-shadow: none;
+}
+
+.chat-composer .composer-send:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--brass) 88%, #000);
+}
+
+.chat-composer .composer-send svg {
+  width: 18px;
+  height: 18px;
+}
+
+.chat-composer .composer-stop {
+  height: 36px;
+  border-radius: 18px;
 }
 
 .chat-error {

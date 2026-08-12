@@ -1445,9 +1445,6 @@ export default function App(): React.JSX.Element {
 
                 <form className="chat-composer" onSubmit={(event) => void submitMessage(event)}>
                   <div className="chat-composer-box">
-                    <div className="chat-attach-btn" title="Attachments are not available yet">
-                      <Icon path="m21.4 11.5-9 9a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8" />
-                    </div>
                     <textarea
                       disabled={selectedConversationId === null || isBusy}
                       onChange={(event) => setDraft(event.target.value)}
@@ -1459,25 +1456,40 @@ export default function App(): React.JSX.Element {
                       rows={1}
                       value={draft}
                     />
-                    {activeRun === null ? (
+                    <div className="chat-composer-footer">
                       <button
-                        className="composer-send"
-                        disabled={selectedConversationId === null || !draft.trim() || isBusy}
-                        title={isSubmittingMessage ? 'Sending…' : 'Send'}
-                        type="submit"
-                      >
-                        <Icon path="M5 12h14M13 6l6 6-6 6" />
-                      </button>
-                    ) : (
-                      <button
-                        className="composer-stop"
-                        disabled={isCancellingRun}
-                        onClick={() => void cancelActiveRun()}
+                        aria-label="Attachments are not available yet"
+                        className="chat-attach-btn"
+                        disabled
+                        title="Attachments are not available yet"
                         type="button"
                       >
-                        {isCancellingRun ? 'Stopping…' : 'Stop'}
+                        <Icon path="M12 5v14m-7-7h14" />
                       </button>
-                    )}
+                      <span className="chat-composer-status">
+                        {activeRun === null ? 'Ask asAgent anything' : 'asAgent is working'}
+                      </span>
+                      {activeRun === null ? (
+                        <button
+                          aria-label={isSubmittingMessage ? 'Sending' : 'Send message'}
+                          className="composer-send"
+                          disabled={selectedConversationId === null || !draft.trim() || isBusy}
+                          title={isSubmittingMessage ? 'Sending…' : 'Send message'}
+                          type="submit"
+                        >
+                          <Icon path="M12 19V5m-6 6 6-6 6 6" />
+                        </button>
+                      ) : (
+                        <button
+                          className="composer-stop"
+                          disabled={isCancellingRun}
+                          onClick={() => void cancelActiveRun()}
+                          type="button"
+                        >
+                          {isCancellingRun ? 'Stopping…' : 'Stop'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </form>
               </div>
