@@ -2954,3 +2954,24 @@
 
 - 设计最小 MCP Server 生命周期所有者，明确 Client 的启动、持有、关闭与受控导入位置；不在
   该任务接入外部配置、legacy fallback、分页、真实第三方 Server 或桌面设置页。
+
+## 2026-08-12 阶段 8 最小 MCP Server Session 工作记录
+
+### 完成
+
+- 在 `src/asagent/tools/mcp.py` 的 `McpClient` 之后增加 `McpServerSession`：持有一个 Client、
+  目标 Registry 和宿主 `server_name`，`start()` 完成 discover 与一次性 `register_mcp_tools`。
+- Session 禁止重复启动；启动失败会关闭 Client 并将自身标为已关闭；`aclose()` 幂等关闭子进程。
+- 当前仍不是 Server Manager：不读外部配置、不管理多个 Server、不自动接入应用组合根。
+
+### 验证
+
+- `tests/integration/test_mcp_server_session.py` 通过：正常路径导入 `mcp:test-server:add:`
+  后关闭 Client；启动失败（对端立即退出）同样关闭 Client 并拒绝再次 `start()`。
+- 完整 `scripts/check.sh` 为 289 passed；Ruff、strict mypy（142 个 source files）与锁文件检查
+  均通过。
+
+### 下一步
+
+- 评估是否用 Session 替换现有测试里手写的 `client.start()` + `register_mcp_tools()` 组合；
+  仍不实现 Server Manager、外部配置、legacy fallback、分页或真实第三方 Server。

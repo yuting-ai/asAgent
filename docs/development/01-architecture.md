@@ -474,6 +474,11 @@ fallback。
 `register_mcp_tools(registry, client, server_name=...)` 负责列举并注册；`server_name` 来自
 宿主导入时的显式命名空间，不强制等于远端 `serverInfo.name`。
 
+`McpServerSession` 是当前最小生命周期所有者：它持有一个 `McpClient`、目标 `ToolRegistry`
+和宿主 `server_name`，`start()` 只允许一次（discover + 一次性导入），启动失败会关闭 Client
+并把 Session 标为已关闭；`aclose()` 幂等关闭子进程。它不是 Server Manager，也不读取
+`mcp.json` 或自动接入应用组合根。
+
 MCP Server 的权限独立于宿主工具权限：stdio Server 使用显式工作目录、最小环境变量和自身配置；远程 Server 仅使用为该 Server 配置的 Token 与能力。它们不继承 asAgent 的文件范围、浏览器 Profile 或其他账户 Token。
 
 MCP 工具内部 ID：

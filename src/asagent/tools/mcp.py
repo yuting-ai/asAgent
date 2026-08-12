@@ -306,6 +306,54 @@ class McpClient:
         return self._server_info
 
 
+class McpServerSession:
+    """Owns one MCP client process and its one-time tool import."""
+
+    def __init__(
+        self,
+        *,
+        client: McpClient,
+        registry: ToolRegistry,
+        server_name: str,
+    ) -> None:
+        if not server_name:
+            raise ValueError("server_name must not be empty")
+
+        self._client = client
+        self._registry = registry
+        self._server_name = server_name
+        self._started = False
+        self._closed = False
+
+    async def start(self) -> McpServerInfo:
+        if self._closed:
+            raise RuntimeError("MCP server session is closed")
+        if self._started:
+            raise RuntimeError("MCP server session is already started")
+
+        try:
+            server_info = await self._client.start()
+            await register_mcp_tools(
+                self._registry,
+                self._client,
+                server_name=self._server_name,
+            )
+        except BaseException:
+            await self._client.aclose()
+            self._closed = True
+            raise
+
+        self._started = True
+        return server_info
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+
+        self._closed = True
+        await self._client.aclose()
+
+
 def _parse_response(line: bytes, request_id: int) -> Mapping[str, object]:
     try:
         payload: object = json.loads(line)
