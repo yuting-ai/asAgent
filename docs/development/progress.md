@@ -3193,3 +3193,32 @@
 
 - 在用户确认后，选择一个真实但受限的 MCP 连接体验路径：优先设计 Gmail 的 OAuth 登录、Connection
   元数据创建/状态和最小只读账户范围；不开始发信、删除、刷新自动化或通用设置页。
+
+## 2026-08-12 Gmail 本地 OAuth 设计决策
+
+### 完成
+
+- 确认第一个真实外部账户体验为 Gmail 的本地开发 OAuth 连接，而不是先为 Gmail 编写 MCP Tool。
+- 确认授权链路为：Electron Main 请求 Sidecar 开始授权并用系统浏览器打开 URL；Sidecar 在内存生成
+  PKCE verifier、state 与随机 loopback 端口，接收一次 callback、验证 state、交换授权码，然后保存
+  Connection 元数据与 Keychain credential。Renderer 不获得授权 URL 以外的 OAuth 参数、Token 或回调正文。
+- 首版仅使用 Google OAuth Desktop client、External Testing 的显式 Test user 和
+  `gmail.readonly`；它是 restricted scope，Testing 授权会过期，因此当前只作为个人本地开发验收。
+
+### 决策变化
+
+- 新增 DEC-072：Gmail 使用系统浏览器、Authorization Code + PKCE 和一次性 `127.0.0.1` loopback
+  callback；不采用嵌入式浏览器、复制授权码或文件化 token。
+
+### 风险或问题
+
+- 真实授权前仍需用户在 Google Cloud 创建独立测试项目、启用 Gmail API、配置 consent screen、创建
+  Desktop OAuth client，并把自己的账号加入 Test users；这些均未在仓库或代码中保存。
+- `gmail.readonly` 为 restricted scope；Testing 的短期授权适合本地体验，但公开发布、长期运行与
+  Google 验证/合规要求必须在后续产品发布阶段单独处理。
+
+### 下一步
+
+- 实现离线可测的 Gmail OAuth Foundation：严格验证非敏感 Desktop client 配置，生成 PKCE/state/
+  authorization URL，并定义一次性 loopback callback 与脱敏失败结果；不在该任务执行真实浏览器授权、
+  token 交换、Connection 写入、Keychain 写入或 Gmail MCP Tool。

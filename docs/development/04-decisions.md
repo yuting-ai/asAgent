@@ -726,6 +726,16 @@
 - 影响：当前唯一交付机制是 stdio 子进程环境变量，且系统 Store 只有 macOS Keychain；没有 OAuth、token 刷新、Connection 元数据归属/状态校验、Gmail 专用逻辑、设置/API/UI、热刷新或 Windows/Linux 适配器。测试使用固定假 credential，仅验证目标 Server 获得它、另一个 Server 不获得它，以及缺失值拒绝启动。
 - 替代方案：把凭据作为全局 Manager 环境、让每个 Server 读取宿主 `.env`、在 `mcp.json` 保存 token、为 Gmail 预建专属注入器，或在 Core 增加新的通用进程服务；当前均不采用。
 
+### DEC-072：Gmail 以本地 Desktop OAuth、PKCE 与 loopback callback 连接
+
+- 日期：2026-08-12
+- 状态：已确认，尚未实现
+- 背景：asAgent 已有通用 Connection 和 macOS Keychain，但需要一条真实、可在本机开发体验且不让 Renderer 接触 OAuth credential 的账户连接路径。Gmail 邮箱读取需要 Google 用户授权；把浏览器登录嵌进 Electron、使用已废弃的复制授权码流程，或把 token 放到 `.env` 都会破坏安全或体验边界。
+- 决策：首个 Gmail 连接使用 Google OAuth `Desktop app` client、系统默认浏览器、Authorization Code + PKCE，以及仅绑定 `127.0.0.1` 随机端口的一次性 loopback callback。Python Sidecar 生成并在内存保留 state、PKCE verifier 和 callback 生命周期，验证回调 state 后交换 code；Electron Main 只请求开始流程并打开获得的 URL，Renderer 只看到已脱敏的连接进度/结果。成功时 SQLite 保存 `service_id="gmail"`、账户显示名、已授予 scope 和 ACTIVE Connection，refresh token 写入 macOS Keychain；授权码、access token、refresh token、state、verifier、client secret 和 callback query 不写入 SQLite、`mcp.json`、日志或 Renderer。
+- 原因：Google 当前仍建议 macOS、Windows、Linux desktop 应用使用 loopback IP callback；PKCE 与一次性 state 使本地随机端口回调仍能绑定到发起授权的 Sidecar。系统浏览器保留用户对 Google 登录页来源的判断，Connection/Keychain 边界可供未来 Gmail MCP、GitHub 和 Calendar 复用。
+- 影响：本地开发只使用 External Testing 项目中明确加入的 Test user；首版仅请求 `https://www.googleapis.com/auth/gmail.readonly`。这是 restricted scope，Testing 授权会过期并要求重新连接；本项目不会在该状态下宣称已通过 Google 验证或适合公开用户。第一实现不做邮件读取工具、发送/删除/修改、token 自动刷新、公开 OAuth 发布、Electron 设置页、Windows/Linux Store 或常驻 callback Server。
+- 替代方案：Electron 内嵌浏览器、手动复制授权码、固定端口、custom URI scheme、Web client、把 refresh token 放入 `.env`/SQLite，或先为 Gmail 编写 MCP Tool 再补连接流程；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

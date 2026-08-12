@@ -360,8 +360,16 @@ credential；首个边缘适配器 `MacOSKeychainCredentialStore` 通过当前 m
 Windows Credential Manager 与 Linux Secret Service 以后实现同一 Protocol，未实现的平台必须明确报错，
 不得静默降级到 `.env`、SQLite 或文件。当前 `mcp.json` 可为某一 Server 成对声明非敏感的
 `connection_id` 和 `credential_environment_variable`；Sidecar 仅在存在该引用时构造 CredentialStore，
-由 Manager 读取对应 credential 并只把它放入该 Server 子进程的指定环境变量。Connection 目前还没有
-OAuth、自动刷新、Connection API 或设置 UI；这些由后续独立任务在不改变该存储边界的前提下接入。
+由 Manager 读取对应 credential 并只把它放入该 Server 子进程的指定环境变量。
+
+第一个真实 Connection 流程将是 Gmail 的本地开发 OAuth：Electron Main 只负责通过系统默认浏览器
+打开授权 URL，Python Sidecar 在内存生成 PKCE verifier、不可预测的 state 和 `127.0.0.1` 随机端口，
+并独占一次性 loopback callback、state 验证与授权码交换。callback 成功后，Sidecar 保存不含 token 的
+Connection 元数据，并把 refresh token 写入 Keychain；access token、授权码、state 和 verifier 都不写
+入 SQLite、普通配置、日志或 Renderer。测试期仅允许 Google OAuth `Desktop app` client、External Testing
+中的显式 Test user，以及 `gmail.readonly` 这一个只读 scope。该 scope 仍属于 restricted scope，Testing
+授权会过期；它只用于当前本地开发体验，不能被表述为公开发布或长期生产授权。当前尚没有 OAuth 代码、
+自动刷新、Connection API、设置 UI 或 Gmail MCP Tool；这些由后续独立任务在不改变该存储边界的前提下接入。
 
 开发入口可使用 `bootstrap.EnvironmentSecretProvider` 作为临时后备：入口显式传入环境 Mapping，并为每个 `secret_id` 提供允许的环境变量名称绑定。该适配器只读取绑定过且非空的值；它不导入 `os`、不扫描任意环境变量，也不被 Provider、ChatService 或 Core 直接构造。系统 Keychain/Secret Store 仍是后续正式实现。
 
