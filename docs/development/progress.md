@@ -3222,3 +3222,24 @@
 - 实现离线可测的 Gmail OAuth Foundation：严格验证非敏感 Desktop client 配置，生成 PKCE/state/
   authorization URL，并定义一次性 loopback callback 与脱敏失败结果；不在该任务执行真实浏览器授权、
   token 交换、Connection 写入、Keychain 写入或 Gmail MCP Tool。
+
+## 2026-08-12 Gmail 首版入口范围决策
+
+### 完成
+
+- 确认 Gmail 首版继续沿用阶段 8 的 MCP 主线：OAuth 连接完成后，credential 仅定向提供给受控 Gmail
+  MCP Server，其工具进入既有 ToolRegistry、权限、会话审批和审计链路。
+- 原生 Email workspace、直接 Gmail API Gateway、邮件专用 Local API 与 Playwright 网页自动化均不在
+  当前范围。现有 Connection、CredentialStore 和定向环境注入已足以为未来原生界面预留账户与凭据边界，
+  无需提前增加空接口。
+
+### 决策变化
+
+- 新增 DEC-073：先验证 Gmail MCP 的真实使用价值；未来原生邮箱页若实现，复用同一 OAuth/Connection/
+  Keychain 生命周期，不建立第二套 token 或账户主数据。
+
+### 下一步
+
+- 实现离线可测的 Gmail OAuth Foundation：严格验证非敏感 Desktop client 配置，生成 PKCE/state/
+  authorization URL，并定义一次性 loopback callback 与脱敏失败结果；不在该任务执行真实浏览器授权、
+  token 交换、Connection 写入、Keychain 写入或 Gmail MCP Tool。

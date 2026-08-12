@@ -736,6 +736,16 @@
 - 影响：本地开发只使用 External Testing 项目中明确加入的 Test user；首版仅请求 `https://www.googleapis.com/auth/gmail.readonly`。这是 restricted scope，Testing 授权会过期并要求重新连接；本项目不会在该状态下宣称已通过 Google 验证或适合公开用户。第一实现不做邮件读取工具、发送/删除/修改、token 自动刷新、公开 OAuth 发布、Electron 设置页、Windows/Linux Store 或常驻 callback Server。
 - 替代方案：Electron 内嵌浏览器、手动复制授权码、固定端口、custom URI scheme、Web client、把 refresh token 放入 `.env`/SQLite，或先为 Gmail 编写 MCP Tool 再补连接流程；当前均不采用。
 
+### DEC-073：Gmail 首版经受控 MCP 使用，原生邮箱页后置
+
+- 日期：2026-08-12
+- 状态：已确认
+- 背景：Gmail API 可以支持完整的原生邮箱页面，浏览器自动化又看似可快速复用 Gmail 网页；但当前阶段的目标是尽快验证外部工具如何进入统一 ToolRegistry，而不是同时建设邮件客户端、专用 API 和 Agent 工具的两套业务入口。
+- 决策：首版完成 Desktop OAuth 后，将 credential 只定向提供给一个受控 Gmail MCP Server，由其工具进入现有 MCP/审批/审计路径。当前不实现 Playwright 控制 Gmail 网页，也不实现 asAgent 原生 Email workspace、直接 Gmail API Gateway 或专用邮件 Local API。未来若产品需要原生邮箱页，必须复用已有 Connection、OAuth、Keychain 和账户范围；它可直接调用正式 Gmail API，但不得维护第二份 credential、独立账户表或与 MCP 不一致的权限语义。
+- 原因：MCP 是当前阶段已经验证的统一 Agent 工具边界；延后邮箱 UI 可避免在真实邮件读取能力尚未体验前同时维护界面、同步、草稿、工具和审批等多个不确定面。Playwright 会依赖易变网页 DOM 与敏感浏览器会话状态，不适合作为高隐私邮箱的主路径。
+- 影响：下一项 OAuth Foundation 仍然有效；其后接入受控 Gmail MCP，再根据实际使用决定是否投入原生 Email workspace。未来原生 UI 不是 MCP 的自动副产物，需作为独立产品任务规划。
+- 替代方案：立即建设第一方 Gmail API + 原生 UI、以 Playwright 自动登录和操作 Gmail 网页、或永久只提供 MCP 而不考虑 UI；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

@@ -368,8 +368,11 @@ Windows Credential Manager 与 Linux Secret Service 以后实现同一 Protocol�
 Connection 元数据，并把 refresh token 写入 Keychain；access token、授权码、state 和 verifier 都不写
 入 SQLite、普通配置、日志或 Renderer。测试期仅允许 Google OAuth `Desktop app` client、External Testing
 中的显式 Test user，以及 `gmail.readonly` 这一个只读 scope。该 scope 仍属于 restricted scope，Testing
-授权会过期；它只用于当前本地开发体验，不能被表述为公开发布或长期生产授权。当前尚没有 OAuth 代码、
-自动刷新、Connection API、设置 UI 或 Gmail MCP Tool；这些由后续独立任务在不改变该存储边界的前提下接入。
+授权会过期；它只用于当前本地开发体验，不能被表述为公开发布或长期生产授权。当前近期消费方是受控的
+Gmail MCP Server，而不是 asAgent 内置 Gmail API Gateway；它将通过既有 `connection_id` 定向 credential
+注入进入统一 ToolRegistry。原生 Email workspace、其专用 Local API 和直接 Gmail API Gateway 留待以后
+真实产品需求出现时再设计；届时必须复用同一 Connection、OAuth 和 Keychain 生命周期，不能另建第二套
+token 或账户主数据。当前尚没有 OAuth 代码、自动刷新、Connection API、设置 UI 或 Gmail MCP Tool。
 
 开发入口可使用 `bootstrap.EnvironmentSecretProvider` 作为临时后备：入口显式传入环境 Mapping，并为每个 `secret_id` 提供允许的环境变量名称绑定。该适配器只读取绑定过且非空的值；它不导入 `os`、不扫描任意环境变量，也不被 Provider、ChatService 或 Core 直接构造。系统 Keychain/Secret Store 仍是后续正式实现。
 
