@@ -3704,3 +3704,19 @@
 ### 决策变化
 
 - 新增 DEC-077。
+
+## 2026-08-15 Conversation rename ordering
+
+### 完成
+
+- 重命名 Conversation 只保存标题，不再更新其活跃时间；Renderer 也原位更新该列表项，因此重命名后不会移到列表首位。
+
+## 2026-08-15 Assistant Markdown table rendering
+
+### 完成
+
+- AssistantMessage 的安全 Markdown 渲染启用 GFM 表格语法；表格使用紧凑边框样式，超出消息宽度时在消息内横向滚动。
+
+### 验证
+
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（26 passed）和 `npm run build` 全部通过。

@@ -136,7 +136,7 @@ uv run asagent serve ...
 
 Electron Main 还会向 Renderer 暴露一个无敏感信息的处理模式：`local` 或 `external`。它只反映本次 Sidecar 的启动配置或已保存的桌面模型 Profile 是否可用，不包含 Provider 名、端口、Token 或 API Key；Privacy 与 Preferences 页面据此准确说明是否可能将请求内容发送到外部模型服务。默认离线模式明确不外发对话内容，真实 Provider 模式明确请求所需的对话内容和工具结果可能发送至选定服务商。
 
-桌面 Chat 仅对 AssistantMessage 使用安全 Markdown 渲染，以显示标题、列表、引用、代码块和普通外部链接；UserMessage 保持原始文本。Renderer 使用不启用原始 HTML 的解析配置，因此模型文本不会直接成为 DOM HTML。点击链接会经过窄 Main IPC：只允许无凭据的 `http`/`https` URL，并由系统默认浏览器打开；Renderer 不获得 Electron shell、任意 IPC 或页面内导航能力。消息数据库仍保存原始 Markdown 文本，显示规则不改变 API 或持久化契约。
+桌面 Chat 仅对 AssistantMessage 使用安全 Markdown 渲染，以显示标题、列表、引用、代码块、GFM 表格和普通外部链接；UserMessage 保持原始文本。Renderer 使用不启用原始 HTML 的解析配置，因此模型文本不会直接成为 DOM HTML。宽表格限制在消息区域内横向滚动。点击链接会经过窄 Main IPC：只允许无凭据的 `http`/`https` URL，并由系统默认浏览器打开；Renderer 不获得 Electron shell、任意 IPC 或页面内导航能力。消息数据库仍保存原始 Markdown 文本，显示规则不改变 API 或持久化契约。
 
 文件修改审批继续复用对话底部的 Approval 横幅，并保留 `Deny`、`Allow once` 与 `Allow for this conversation`。对 CREATE、REPLACE、DELETE，Backend 只把目标路径和影响摘要返回给 Main/Renderer，待写入正文不会进入审批 IPC。成功修改后 Renderer 通过固定的 FileChange 查询显示持久卡片；用户点击 `Undo` 时，Preload 只把 `change_id` 和卡片中的精确路径交给 Main，Main 再以私有 Bearer Token 调用固定 Undo API。Renderer 不取得快照、文件正文、Token 或通用文件系统能力；刷新后卡片从 SQLite-backed API 恢复，冲突只显示安全提示而不强制覆盖文件。
 

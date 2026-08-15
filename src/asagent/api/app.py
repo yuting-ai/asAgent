@@ -527,7 +527,6 @@ def create_app(
         updated = replace(
             conversation,
             title=request.title,
-            updated_at=current_time(),
         )
         await conversations.save(updated)
         return ConversationResponse.from_conversation(updated)

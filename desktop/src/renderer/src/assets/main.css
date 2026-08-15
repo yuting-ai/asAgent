@@ -1989,6 +1989,44 @@ body.is-resizing-columns {
   font-size: 14px;
 }
 
+.markdown-content table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 0 10px;
+  overflow-x: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  border-spacing: 0;
+  border-collapse: separate;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.markdown-content th,
+.markdown-content td {
+  padding: 6px 9px;
+  border-right: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-content th {
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-weight: 650;
+}
+
+.markdown-content tr:last-child td {
+  border-bottom: 0;
+}
+
+.markdown-content th:last-child,
+.markdown-content td:last-child {
+  border-right: 0;
+}
+
 .markdown-content code {
   padding: 1px 5px;
   border-radius: 4px;

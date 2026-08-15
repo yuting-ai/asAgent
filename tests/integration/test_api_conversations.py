@@ -477,7 +477,6 @@ async def test_update_conversation_title_persists_for_local_user(
         updated_at=created_at,
         title="Original title",
     )
-    updated_at = datetime(2026, 8, 11, 13, 0, tzinfo=UTC)
     repository = SqliteConversationRepository(database_path)
     app = create_app(
         access_token=LocalApiToken("test-token"),
@@ -486,7 +485,7 @@ async def test_update_conversation_title_persists_for_local_user(
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
         cancel_run=_cancel_nothing,
-        clock=lambda: updated_at,
+        clock=lambda: datetime(2026, 8, 11, 13, 0, tzinfo=UTC),
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -511,12 +510,12 @@ async def test_update_conversation_title_persists_for_local_user(
     assert response.json() == {
         "conversation_id": "conv-local",
         "created_at": "2026-08-11T08:00:00Z",
-        "updated_at": "2026-08-11T13:00:00Z",
+        "updated_at": "2026-08-11T08:00:00Z",
         "title": "Renamed conversation",
     }
     assert stored is not None
     assert stored.title == "Renamed conversation"
-    assert stored.updated_at == updated_at
+    assert stored.updated_at == created_at
 
 
 @pytest.mark.asyncio

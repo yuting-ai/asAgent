@@ -9,6 +9,7 @@ import {
   useState
 } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 import { TOOL_APPROVAL_BANNER_ACTIONS, type ToolApprovalDecision } from './tool_approval'
 
@@ -974,10 +975,8 @@ export default function App(): React.JSX.Element {
     try {
       const updated = await window.desktop.updateConversationTitle(conversationId, trimmed)
       setConversations((items) =>
-        orderConversations(
-          items.map((conversation) =>
-            conversation.conversation_id === conversationId ? updated : conversation
-          )
+        items.map((conversation) =>
+          conversation.conversation_id === conversationId ? updated : conversation
         )
       )
       cancelRename()
@@ -2038,6 +2037,7 @@ export default function App(): React.JSX.Element {
                                       {message.role === 'assistant' ? (
                                         <div className="markdown-content">
                                           <ReactMarkdown
+                                            remarkPlugins={[remarkGfm]}
                                             components={{
                                               a: ({ children, href }) => (
                                                 <a
