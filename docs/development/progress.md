@@ -3528,3 +3528,179 @@
 ### Verification
 
 - Desktop `npm run format`, `npm run typecheck`, `npm run lint`, `npm test` (25 passed), and `npm run build` all pass.
+
+## 2026-08-15 DEC-060 FileChange Core contract
+
+### 完成
+
+- 新增 `FileChangeId`、`FileChangeOperation`（CREATE、REPLACE、DELETE）和 `FileChangeStatus`（PREPARED、APPLIED、REVERTED、CONFLICTED）。
+- 新增不可变 Core `FileChange`，记录来源 Run、规范化根路径和相对路径、前后哈希、可选快照引用及创建/更新时间；按操作种类拒绝不完整或矛盾的哈希和快照元数据。
+- 新增异步 `FileChangeRepository` Protocol，提供按稳定身份读取、按 Run 列出和保存，为后续 SQLite 持久化及撤回流程保留 Core 边界。
+- 未新增 SQLite 表或迁移、快照正文、真实文件写入、审批 UI 或撤回执行。
+
+### 验证
+
+- 定向 `pytest`、Ruff、格式检查和 strict mypy 通过：13 passed。
+- `scripts/check.sh` 通过：388 passed；Ruff、格式检查、strict mypy（172 个 source files）与锁文件检查均通过。
+
+### 决策变化
+
+- 无；本次实施既有 DEC-060 的第一层 Core 合同，不改变其快照、冲突检测或撤回安全决策。
+
+### 下一步
+
+- 在独立任务中为 `FileChangeRepository` 添加 SQLite 表与迁移，并实现私有快照存储的容量、保留期和隐私边界；在其完成前，继续禁止覆盖、追加、删除和回滚执行。
+
+## 2026-08-15 DEC-060 FileChange SQLite persistence
+
+### 完成
+
+- 新增 `file_changes` SQLite 表和 Alembic 迁移，约束来源 Run、操作种类和生命周期状态。
+- 新增 `SqliteFileChangeRepository`，支持覆盖保存、按稳定身份读取和按 Run 的稳定排序查询。
+- 未实现快照正文、文件写入、哈希计算、冲突检测或回滚执行。
+
+### 验证
+
+- FileChange Repository 与 schema 定向集成测试：3 passed。
+- `scripts/check.sh`：389 passed；Ruff、格式检查、strict mypy（174 个 source files）与锁文件检查均通过。
+
+### 决策变化
+
+- 无；本次落实既有 DEC-060 的元数据持久化边界。
+
+### 下一步
+
+- 在独立任务中实现私有快照存储及其单项 5 MiB、总量 100 MiB、保留期和隐私边界；继续不执行文件覆盖、追加、删除或撤回。
+
+## 2026-08-15 DEC-060 单文件可撤回存储闭环
+
+### 完成
+
+- 新增私有 `FileChangeSnapshotStore`，快照正文只写入 `AppPaths.data_dir/file-changes`，执行相对引用校验、独占保存、单项 5 MiB 与总量 100 MiB 限制。
+- 新增单一 `ReversibleFileService`，在已授权范围内支持最大 64 KiB 的 UTF-8 普通文件 CREATE、REPLACE 与 DELETE，并为每次成功操作持久化独立 `APPLIED` FileChange。
+- 实现按 `change_id` 的安全撤回：CREATE 仅删除 after hash 未变化的文件，REPLACE 仅在当前内容未变化时原子恢复快照，DELETE 仅在目标仍不存在时独占恢复；不匹配会标记 `CONFLICTED` 且不覆盖用户数据。
+- 文件应用或撤回后的普通 Repository 保存失败会补偿恢复磁盘状态；已删除只有单一调用者的 `FileChangePreparationService`，没有为流程保留额外转发层。
+- 当前没有把修改或 Undo 注册为 Agent Tool，也没有接入 Local API、Electron UI、批量 `FileChangeSet`、文档提取或 OCR。
+
+### 验证
+
+- `tests/unit/test_reversible_files.py`：13 passed，覆盖三种操作及撤回、三种冲突、应用持久化失败补偿、撤回状态保存失败补偿、范围限制与非 UTF-8 拒绝。
+- `scripts/check.sh`：405 passed；Ruff、格式检查、strict mypy（178 个 source files）与锁文件检查均通过。
+- `git diff --check` 通过。
+
+### 决策变化
+
+- 补充 DEC-060：单文件闭环从 REPLACE 扩展为 CREATE、REPLACE 与 DELETE；批量修改未来通过 `FileChangeSet` 组合独立变更，文档提取/OCR 和范围扩大保持独立。
+- 快照首版不自动按 30 天删除；只有未来明确的用户清理操作才能移除仍可撤回的快照。
+
+### 下一步
+
+- 在独立任务中完成用户可见接入：首次修改复用现有 Approval 横幅并保留 `Allow for this conversation`；成功变更显示带手动 `Undo` 的对话卡片，经窄化的 Backend API 与 Main/Preload IPC 执行，不把 Undo 暴露给模型。
+
+## 2026-08-15 DEC-060 Agent Tool、Local API 与桌面 Undo 闭环
+
+### 完成
+
+- 新增真实 `filesystem.create_file`、`filesystem.replace_file`、`filesystem.delete_file` Agent Tool；每个 Run 获得独立工具实例并把成功变更关联到该 Run。
+- 三种写操作要求 `filesystem.write`、高风险审批和 ToolCall 审计；`Allow for this conversation` 继续按各自内部 `tool_id` 隔离。
+- 审批 API 隐藏待写入 `content`，只向桌面返回文件路径与英文影响摘要。
+- 新增按 Conversation 查询 FileChange 的认证 API，以及携带 `change_id` 和精确路径的手动 Undo API；服务端验证本地用户归属、来源 Run 与记录路径，冲突返回 409 且不覆盖后续文件内容。
+- Electron Main/Preload 新增固定查询和 Undo IPC，Renderer 不获得 Token、文件系统或通用 HTTP 能力。
+- 对话界面会从持久化 API 加载 CREATE、REPLACE、DELETE 修改卡片；`APPLIED` 卡片显示 `Undo`，成功后显示 `Undone`，冲突显示 `Changed later`，刷新软件后卡片仍存在。
+- Undo 只由用户点击触发，没有注册为模型 Tool。
+
+### 验证
+
+- Python 定向工具、Runtime、审批与 API 测试：6 passed。
+- `scripts/check.sh`：409 passed；Ruff、格式检查、strict mypy（181 个 source files）与锁文件检查均通过。
+- Desktop：`npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（26 passed）和 `npm run build` 全部通过。
+- `git diff --check` 通过。
+
+### 决策变化
+
+- 补充 DEC-060：真实 Runtime 注册三种单文件修改 Tool；审批响应不向 Renderer 发送正文；Undo 只经本地用户归属校验和精确路径复核的固定 API/IPC 由用户触发。
+
+### 下一步
+
+- 由用户在真实桌面软件中人工验证 CREATE、REPLACE、DELETE 的首次审批、Conversation 级授权、刷新后的卡片、正常 Undo 与外部修改后的冲突提示。
+- 多文件原子体验继续作为独立 `FileChangeSet` 任务，不在本次单文件闭环中隐式扩展。
+
+## 2026-08-15 Desktop FileChange timeline refinement
+
+### 完成
+
+- FileChange 卡片不再统一堆在消息列表底部；Renderer 按持久化变更时间将其插入到对应 Conversation 的消息时间线中，通常位于触发操作的用户消息之后、最终 AssistantMessage 之前。
+- Undo 失败不再写入对话顶部的通用错误区。卡片会在其 Undo 操作附近显示安全的局部失败提示；后端已标记冲突时，卡片显示 `Changed later`。
+
+### 验证
+
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（26 passed）和 `npm run build` 全部通过。
+
+## 2026-08-15 FileChange conflict explanation refinement
+
+### 完成
+
+- `CONFLICTED` FileChange 不再只显示 `Changed later`；对应卡片显示 `Undo unavailable` 和“当前文件版本与 asAgent 修改时的版本不同”的明确原因，提示保留在该操作附近。
+
+### 验证
+
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（26 passed）和 `npm run build` 全部通过。
+
+## 2026-08-15 FileChange approval and banner refinement
+
+### 完成
+
+- `Always allow file changes` 现以当前 Conversation 的 `filesystem.write` 家族授权复用 CREATE、REPLACE、DELETE 三种单文件操作；不会影响批量变更、范围扩大或其他 Tool。
+- 审批横幅改为自适应两行：操作摘要和路径独占上行，操作按钮在下行换行，避免窄窗口中按钮覆盖文字。
+
+### 验证
+
+- Approval 单元测试覆盖从 CREATE 授权后直接执行 REPLACE 和 DELETE；定向 Python 测试 12 passed。
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（26 passed）和 `npm run build` 全部通过。
+
+## 2026-08-15 FileChange post-response placement refinement
+
+### 完成
+
+- FileChange 卡片优先跟随变更后第一条 AssistantMessage，显示在 Agent 的最终回复之后；没有可匹配回复的历史记录才回退到最近前序消息。
+- 卡片改为紧凑的最大 720px 轻量记录，缩小间距、字体和 Undo 按钮；过长路径在视觉上省略但保留完整悬停提示。
+
+### 验证
+
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（26 passed）和 `npm run build` 全部通过。
+
+## 2026-08-15 FileChange conflict card visual refinement
+
+### 完成
+
+- 冲突信息改为文件路径下方的紧凑状态行：红色 `Undo unavailable` 标签和简短版本差异原因，不再占据卡片右侧的大块空间。
+
+### 验证
+
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（26 passed）和 `npm run build` 全部通过。
+
+## 2026-08-15 FileChange post-response separator refinement
+
+### 完成
+
+- FileChange 改为 Agent 回复后的附注区域，以浅色上边线分隔；可用的 `Undo` 与操作标题顶部对齐，路径和冲突原因位于其下，避免右侧说明造成视觉割裂。
+
+### 验证
+
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（26 passed）和 `npm run build` 全部通过。
+
+## 2026-08-15 Desktop message actions
+
+### 完成
+
+- 用户和 AssistantMessage 都显示创建时间；用户消息另有 Edit 操作。两者使用重叠圆角方框的复制图标，复制成功时短暂显示勾选确认。
+- 复制文本通过受来源校验的 Main/Preload 固定 IPC 写入系统剪贴板，成功时图标短暂显示确认。
+- Edit 只将原正文带回 Composer，并提示发送会创建新的 Message 和 Run；既有消息、回复、工具调用和 FileChange 审计不会被改写。
+
+### 验证
+
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（26 passed）和 `npm run build` 全部通过。
+
+### 决策变化
+
+- 新增 DEC-077。

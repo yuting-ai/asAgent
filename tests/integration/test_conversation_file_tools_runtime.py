@@ -11,6 +11,7 @@ from asagent.core.run_status import RunStatus
 from asagent.models.contracts import ModelMessageRole, ModelResponse, ModelToolCall
 from asagent.models.fake_provider import FakeModelProvider
 from asagent.paths import AppPaths
+from asagent.storage.file_change_snapshots import FileChangeSnapshotStore
 from asagent.storage.sqlite.conversation_file_scope_repository import (
     SqliteConversationFileScopeRepository,
 )
@@ -18,10 +19,23 @@ from asagent.storage.sqlite.conversation_repository import (
     SqliteConversationRepository,
 )
 from asagent.storage.sqlite.database import upgrade_sqlite_database
+from asagent.storage.sqlite.file_change_repository import SqliteFileChangeRepository
 from asagent.storage.sqlite.run_finisher import SqliteRunFinisher
 from asagent.storage.sqlite.run_repository import SqliteRunRepository
 from asagent.storage.sqlite.run_starter import SqliteRunStarter
+from asagent.tools.approval import ToolApprovalRequest, ToolApprovalRequestedCallback
 from asagent.workspace.settings import ConversationWorkspaceSettings
+
+
+class AllowAllApprovals:
+    async def approve(
+        self,
+        request: ToolApprovalRequest,
+        on_requested: ToolApprovalRequestedCallback | None = None,
+    ) -> bool:
+        if on_requested is not None:
+            await on_requested(request)
+        return True
 
 
 @pytest.mark.asyncio
@@ -141,6 +155,86 @@ async def test_runtime_uses_only_the_current_conversations_file_scope(
             provider.requests[3].messages[-1].content == "Error: tool execution failed."
         )
     finally:
+        await finisher.aclose()
+        await starter.aclose()
+        await runs.aclose()
+        await scopes.aclose()
+        await conversations.aclose()
+
+
+@pytest.mark.asyncio
+async def test_runtime_registers_and_executes_reversible_file_write_tools(
+    tmp_path: Path,
+) -> None:
+    paths = AppPaths.from_root(tmp_path / "app-home")
+    paths.workspace_dir.mkdir(parents=True)
+    database_path = paths.data_dir / "asagent.sqlite3"
+    upgrade_sqlite_database(
+        database_path=database_path,
+        alembic_config_path=_alembic_config_path(),
+    )
+    conversations = SqliteConversationRepository(database_path)
+    scopes = SqliteConversationFileScopeRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    starter = SqliteRunStarter(database_path)
+    finisher = SqliteRunFinisher(database_path)
+    changes = SqliteFileChangeRepository(database_path)
+    conversation_id = ConversationId("conversation-write")
+    target = paths.workspace_dir / "created.txt"
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="create-file",
+                        name="filesystem_create_file",
+                        arguments={"path": str(target), "content": "created by agent"},
+                    ),
+                ),
+            ),
+            ModelResponse(text="Created the file.", tool_calls=()),
+        ),
+    )
+    now = datetime(2026, 8, 15, 18, 0, tzinfo=UTC)
+    try:
+        await conversations.save(
+            Conversation(conversation_id, UserId("local-user"), now, now)
+        )
+        runtime = build_persistent_agent_runtime(
+            model=provider,
+            conversations=conversations,
+            runs=runs,
+            starter=starter,
+            finisher=finisher,
+            approval_policy=AllowAllApprovals(),
+            workspace_settings=ConversationWorkspaceSettings(
+                scopes=scopes,
+                workspace_root=paths.workspace_dir,
+            ),
+            file_changes=changes,
+            file_change_snapshots=FileChangeSnapshotStore(paths.data_dir),
+        )
+
+        result = await runtime.run(
+            conversation_id=conversation_id,
+            content="Create created.txt.",
+            model_name="fake-model",
+            system_prompt="Use tools.",
+        )
+
+        assert result.run.status is RunStatus.COMPLETED
+        assert target.read_text(encoding="utf-8") == "created by agent"
+        recorded = await changes.list_for_run(result.run.run_id)
+        assert len(recorded) == 1
+        assert str(recorded[0].file_change_id).startswith("change_")
+        assert {tool.name for tool in provider.requests[0].tools} >= {
+            "filesystem_create_file",
+            "filesystem_replace_file",
+            "filesystem_delete_file",
+        }
+    finally:
+        await changes.aclose()
         await finisher.aclose()
         await starter.aclose()
         await runs.aclose()

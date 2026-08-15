@@ -146,3 +146,29 @@ tool_calls = Table(
         name="tool_call_result_or_error",
     ),
 )
+
+file_changes = Table(
+    "file_changes",
+    metadata,
+    Column("file_change_id", String, primary_key=True),
+    Column(
+        "run_id", String, ForeignKey("runs.run_id", ondelete="RESTRICT"), nullable=False
+    ),
+    Column("operation", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("root_path", Text, nullable=False),
+    Column("relative_path", Text, nullable=False),
+    Column("before_hash", String),
+    Column("after_hash", String),
+    Column("snapshot_ref", Text),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "operation IN ('create', 'replace', 'delete')",
+        name="file_change_operation_valid",
+    ),
+    CheckConstraint(
+        "status IN ('prepared', 'applied', 'reverted', 'conflicted')",
+        name="file_change_status_valid",
+    ),
+)

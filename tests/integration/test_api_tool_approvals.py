@@ -122,6 +122,8 @@ async def test_local_api_reads_and_decides_a_pending_tool_approval(
             "display_name": "Add numbers",
             "description": "Add two numbers.",
             "arguments": {"left": 2, "right": 3},
+            "resource_path": None,
+            "impact_summary": None,
         }
         assert decided.status_code == 200
         assert decided.json() == {
@@ -130,6 +132,89 @@ async def test_local_api_reads_and_decides_a_pending_tool_approval(
         }
         assert await waiting is True
     finally:
+        await approvals.aclose()
+        await starter.aclose()
+        await runs.aclose()
+        await conversations.aclose()
+
+
+@pytest.mark.asyncio
+async def test_file_write_approval_hides_content_and_exposes_exact_path(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+    now = datetime(2026, 8, 15, 13, 0, tzinfo=UTC)
+    conversation_id = ConversationId("conversation-1")
+    run_id = RunId("run-1")
+    request = ToolApprovalRequest(
+        approval_id=ApprovalId("approval-file"),
+        run_id=run_id,
+        conversation_id=conversation_id,
+        tool_call_id="call-file",
+        definition=ToolDefinition(
+            tool_id="filesystem.replace_file",
+            display_name="Replace file",
+            description="Replace a file.",
+            input_schema={"type": "object"},
+            risk_level="high",
+            required_permissions=frozenset({"filesystem.write"}),
+            requires_approval=True,
+            timeout_seconds=10.0,
+        ),
+        arguments={"path": "/workspace/notes.txt", "content": "private body"},
+    )
+    conversations = SqliteConversationRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    starter = SqliteRunStarter(database_path)
+    approvals = PendingToolApprovalPolicy()
+    submission = RunSubmissionService(
+        conversations=conversations,
+        run_starter=starter,
+        now=lambda: now,
+        new_run_id=lambda: RunId("unused-run"),
+        new_message_id=lambda: MessageId("unused-message"),
+    )
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=conversations,
+        runs=runs,
+        run_submission=submission,
+        dispatch_submitted_run=lambda _: None,
+        cancel_run=lambda _: False,
+        tool_approvals=approvals,
+    )
+    waiting = asyncio.create_task(approvals.approve(request))
+    try:
+        await conversations.save(
+            Conversation(
+                conversation_id,
+                UserId("local-user"),
+                now,
+                now,
+            )
+        )
+        await runs.save(
+            Run(run_id, conversation_id, RunStatus.EXECUTING_TOOLS, now, now)
+        )
+        await asyncio.sleep(0)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            response = await client.get(
+                "/api/v1/tool-approvals/approval-file",
+                headers={"Authorization": "Bearer test-token"},
+            )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["arguments"] == {"path": "/workspace/notes.txt"}
+        assert payload["resource_path"] == "/workspace/notes.txt"
+        assert payload["impact_summary"].startswith("Replace this UTF-8")
+        assert "private body" not in response.text
+    finally:
+        approvals.deny_run(run_id)
+        await waiting
         await approvals.aclose()
         await starter.aclose()
         await runs.aclose()

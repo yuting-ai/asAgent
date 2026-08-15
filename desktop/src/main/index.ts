@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell, type WebContents } from 'electron'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -357,6 +357,20 @@ app.whenReady().then(async () => {
     return shell.openExternal(parseExternalWebUrl(url))
   })
 
+  ipcMain.handle('desktop:copy-text', (event, content: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    if (typeof content !== 'string') {
+      throw new Error('Copy content is invalid.')
+    }
+
+    clipboard.writeText(content)
+  })
+
   ipcMain.handle('desktop:get-backend-status', (event) => {
     const frame = event.senderFrame
     if (frame === null) {
@@ -401,6 +415,33 @@ app.whenReady().then(async () => {
     return getReadyBackendLauncher().listConversationMessages(conversationId)
   })
 
+  ipcMain.handle('desktop:list-conversation-file-changes', (event, conversationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+    assertTrustedRenderer(frame.url)
+    if (typeof conversationId !== 'string' || !conversationId.trim()) {
+      throw new Error('Conversation ID is invalid.')
+    }
+    return getReadyBackendLauncher().listConversationFileChanges(conversationId.trim())
+  })
+
+  ipcMain.handle('desktop:undo-file-change', (event, changeId: unknown, path: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+    assertTrustedRenderer(frame.url)
+    if (typeof changeId !== 'string' || !changeId.trim()) {
+      throw new Error('File change ID is invalid.')
+    }
+    if (typeof path !== 'string' || !path.trim()) {
+      throw new Error('File change path is invalid.')
+    }
+    return getReadyBackendLauncher().undoFileChange(changeId.trim(), path)
+  })
+
   ipcMain.handle('desktop:create-conversation', (event) => {
     const frame = event.senderFrame
     if (frame === null) {
@@ -429,10 +470,7 @@ app.whenReady().then(async () => {
         throw new Error('Conversation title is invalid.')
       }
 
-      return getReadyBackendLauncher().updateConversationTitle(
-        conversationId.trim(),
-        title
-      )
+      return getReadyBackendLauncher().updateConversationTitle(conversationId.trim(), title)
     }
   )
 

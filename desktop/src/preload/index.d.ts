@@ -53,6 +53,18 @@ interface ToolApproval {
   display_name: string
   description: string
   arguments: Record<string, unknown>
+  resource_path: string | null
+  impact_summary: string | null
+}
+
+interface FileChange {
+  change_id: string
+  run_id: string
+  operation: 'create' | 'replace' | 'delete'
+  status: 'prepared' | 'applied' | 'reverted' | 'conflicted'
+  path: string
+  created_at: string
+  updated_at: string
 }
 
 interface TavilySettingsStatus {
@@ -87,15 +99,15 @@ interface WorkspaceSettingsInput {
 interface DesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>
   openExternalLink(url: string): Promise<void>
+  copyText(content: string): Promise<void>
   getBackendStatus(): Promise<{ status: 'ready' | 'unavailable' }>
   restartApp(): Promise<void>
   listConversations(): Promise<ConversationSummary[]>
   listConversationMessages(conversationId: string): Promise<ConversationMessage[]>
+  listConversationFileChanges(conversationId: string): Promise<FileChange[]>
+  undoFileChange(changeId: string, path: string): Promise<FileChange>
   createConversation(): Promise<ConversationSummary>
-  updateConversationTitle(
-    conversationId: string,
-    title: string
-  ): Promise<ConversationSummary>
+  updateConversationTitle(conversationId: string, title: string): Promise<ConversationSummary>
   deleteConversation(conversationId: string): Promise<void>
   submitMessage(conversationId: string, content: string): Promise<SubmittedMessage>
   cancelRun(runId: string): Promise<void>

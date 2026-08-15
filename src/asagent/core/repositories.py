@@ -3,7 +3,8 @@ from typing import Protocol, runtime_checkable
 from asagent.core.connection import Connection
 from asagent.core.conversation import Conversation
 from asagent.core.conversation_file_scope import ConversationFileScope
-from asagent.core.ids import ConnectionId, ConversationId, RunId, UserId
+from asagent.core.file_change import FileChange
+from asagent.core.ids import ConnectionId, ConversationId, FileChangeId, RunId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.run import Run
 from asagent.core.run_event import RunEvent
@@ -78,3 +79,12 @@ class ConversationFileScopeRepository(Protocol):
     async def get(self, conversation_id: ConversationId) -> ConversationFileScope: ...
 
     async def save(self, scope: ConversationFileScope) -> None: ...
+
+
+@runtime_checkable
+class FileChangeRepository(Protocol):
+    async def get(self, file_change_id: FileChangeId) -> FileChange | None: ...
+
+    async def list_for_run(self, run_id: RunId) -> tuple[FileChange, ...]: ...
+
+    async def save(self, file_change: FileChange) -> None: ...

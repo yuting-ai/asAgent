@@ -5,7 +5,7 @@ from datetime import datetime
 from asagent.agent.cancellation import RunCancellationToken
 from asagent.agent.loop import AgentLoop
 from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
-from asagent.core.ids import ConversationId, MessageId
+from asagent.core.ids import ConversationId, MessageId, RunId
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.repositories import ConversationRepository
 from asagent.core.run import Run
@@ -30,7 +30,7 @@ class PersistentAgentRuntime:
         run_submission: RunSubmissionService,
         run_finisher: RunFinisher,
         loop: AgentLoop | None = None,
-        loop_for_conversation: Callable[[ConversationId], Awaitable[AgentLoop]]
+        loop_for_conversation: Callable[[RunId, ConversationId], Awaitable[AgentLoop]]
         | None = None,
         system_prompt_for_conversation: Callable[[ConversationId], Awaitable[str]]
         | None = None,
@@ -87,7 +87,7 @@ class PersistentAgentRuntime:
 
         try:
             history = await self._conversations.list_messages(conversation_id)
-            loop = await self._get_loop(conversation_id)
+            loop = await self._get_loop(initial_run.run_id, conversation_id)
             scoped_system_prompt = await self._system_prompt(conversation_id)
             loop_result = await loop.run(
                 model_name=model_name,
@@ -137,9 +137,13 @@ class PersistentAgentRuntime:
             steps_used=loop_result.steps_used,
         )
 
-    async def _get_loop(self, conversation_id: ConversationId) -> AgentLoop:
+    async def _get_loop(
+        self,
+        run_id: RunId,
+        conversation_id: ConversationId,
+    ) -> AgentLoop:
         if self._loop_for_conversation is not None:
-            return await self._loop_for_conversation(conversation_id)
+            return await self._loop_for_conversation(run_id, conversation_id)
 
         assert self._loop is not None
         return self._loop

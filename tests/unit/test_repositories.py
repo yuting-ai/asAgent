@@ -3,16 +3,22 @@ from datetime import UTC, datetime
 import pytest
 
 from asagent.core.conversation import Conversation
+from asagent.core.file_change import FileChange, FileChangeOperation, FileChangeStatus
 from asagent.core.ids import (
     ConversationId,
     EventId,
+    FileChangeId,
     MessageId,
     RunId,
     ToolCallId,
     UserId,
 )
 from asagent.core.messages import AssistantMessage, UserMessage
-from asagent.core.repositories import ConversationRepository, RunRepository
+from asagent.core.repositories import (
+    ConversationRepository,
+    FileChangeRepository,
+    RunRepository,
+)
 from asagent.core.run import Run
 from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
@@ -154,6 +160,40 @@ class ExampleRunRepository:
         )
 
 
+def make_file_change() -> FileChange:
+    created_at = datetime(2026, 8, 15, 10, 0, tzinfo=UTC)
+    return FileChange(
+        file_change_id=FileChangeId("change_123"),
+        run_id=RunId("run_123"),
+        operation=FileChangeOperation.CREATE,
+        status=FileChangeStatus.PREPARED,
+        root_path="/workspace",
+        relative_path="notes.txt",
+        before_hash=None,
+        after_hash="after-sha256",
+        snapshot_ref=None,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+
+class ExampleFileChangeRepository:
+    async def get(self, file_change_id: FileChangeId) -> FileChange | None:
+        file_change = make_file_change()
+        if file_change.file_change_id == file_change_id:
+            return file_change
+        return None
+
+    async def list_for_run(self, run_id: RunId) -> tuple[FileChange, ...]:
+        file_change = make_file_change()
+        if file_change.run_id == run_id:
+            return (file_change,)
+        return ()
+
+    async def save(self, file_change: FileChange) -> None:
+        del file_change
+
+
 @pytest.mark.asyncio
 async def test_example_conversation_repository_satisfies_protocol() -> None:
     repository: ConversationRepository = ExampleConversationRepository()
@@ -185,3 +225,12 @@ async def test_example_run_repository_satisfies_protocol() -> None:
 
     tool_calls = await repository.list_tool_calls(RunId("run_123"))
     assert [tool_call.tool_id for tool_call in tool_calls] == ["builtin.echo"]
+
+
+@pytest.mark.asyncio
+async def test_example_file_change_repository_satisfies_protocol() -> None:
+    repository: FileChangeRepository = ExampleFileChangeRepository()
+
+    assert isinstance(repository, FileChangeRepository)
+    assert await repository.get(FileChangeId("change_123")) == make_file_change()
+    assert await repository.list_for_run(RunId("run_123")) == (make_file_change(),)

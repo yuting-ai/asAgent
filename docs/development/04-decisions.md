@@ -539,6 +539,51 @@
 - 影响：初版单快照最多 5 MiB、总快照预算 100 MiB、默认保留 30 天。超过预算时拒绝需要新快照的变更，不静默删除仍可撤回的备份；清理只处理过期且已完成或已撤回记录。撤回本身仍需 `filesystem.write` 与逐次批准。create-only 可在该机制完成后纳入 FileChange，支持删除仍未被后续修改的 Agent 新建文件；当前 create-only Tool 不因此获得覆盖、追加、删除或撤回能力。快照加密与系统 Keychain 的结合留待正式设置/桌面存储设计。
 - 替代方案：直接覆盖后依赖用户手动备份、将完整正文存入 SQLite/RunEvent、无条件恢复旧文件、按路径搜索移动后的 Workspace、或静默删除旧快照腾出空间；当前均不采用。
 
+### DEC-060 实施补充：首个闭环合并为单一可撤回文件服务
+
+- 日期：2026-08-15
+- 状态：已确认
+- 决策：首个可用闭环只支持已授权范围内、最大 64 KiB 的既有 UTF-8 普通文件 REPLACE 与按 `change_id` 撤回。路径校验、旧内容快照、前后 SHA-256、同目录临时文件原子替换、FileChange 持久化、冲突检测和原子恢复由单一 `ReversibleFileService` 协调；不再保留独立的 Preparation Service 或为每一步增加转发层。快照继续受单项 5 MiB 和总量 100 MiB 限制，但首版不按 30 天自动删除；只有未来明确的用户清理操作才能移除仍可撤回的快照。
+- 原因：用户目标是尽快获得“修改后可安全撤回”的完整体验。持久记录、私有快照和哈希校验不可省略，但将准备、应用和撤回拆成多个只有单一调用者的服务没有增加安全性，反而延迟可验证闭环。首版限制为小型 UTF-8 REPLACE 可复用现有文件工具限制，并把 CREATE、DELETE、追加、批量修改和崩溃恢复策略留给真实需求。
+- 影响：保留现有 `FileChange`、SQLite 表/Repository 和私有快照目录；移除 `FileChangePreparationService`。REPLACE 成功后记录 `APPLIED`；撤回只在当前文件仍等于 `after_hash` 时原子恢复快照并标记 `REVERTED`，否则标记 `CONFLICTED` 且不改磁盘。当前不接入模型 Tool、审批 UI 或 Electron；它们作为后续独立入口复用同一服务。
+- 替代方案：继续分别建设 Preparation、Filesystem Adapter、Apply、Revert 和 Cleanup Service，或第一步同时支持 CREATE/DELETE/批量操作；当前均不采用。
+
+### DEC-060 实施补充：文件替换允许 Conversation 级授权，撤回保持用户手动触发
+
+- 日期：2026-08-15
+- 状态：已确认
+- 决策：首次 `filesystem.replace_file` 请求复用现有 Tool Approval 横幅，展示精确路径和影响摘要，并保留 `Deny`、`Allow once` 与 `Allow for this conversation`。Conversation 级授权只按既有 `(conversation_id, tool_id)` 键复用于后续 `filesystem.replace_file`，不等同于通用 `filesystem.write`，也不继承给 CREATE、DELETE、批量修改、授权范围扩大或其他工具。每次成功替换仍创建独立 `FileChange` 和可见变更卡片。撤回不注册为模型 Tool，由用户在该卡片上手动点击 `Undo`，经固定 Main/Preload IPC 与 Backend API 执行。
+- 原因：同一 Conversation 中连续编辑多个文件时逐次点击会明显打断体验；REPLACE 已受已授权路径、私有快照、大小限制和哈希冲突检测保护，因此允许用户明确选择该工具的 Conversation 级授权。Undo 降低了误改成本，但不能保证外部修改后的无条件恢复，所以授权边界仍限定在单文件 REPLACE。
+- 影响：现有 `PendingToolApprovalPolicy` 的 Conversation grant 语义可以复用；文件审批 UI 需显示精确路径与“后续同类替换将自动执行”的清晰说明。Settings 或当前 Conversation UI 后续应提供撤销该授权的入口。在快照保存、配额检查或持久化失败时，替换必须在写磁盘前拒绝或补偿恢复，不能因已有授权跳过安全检查。
+- 替代方案：所有替换只能 `Allow once`，或一次批准后授予所有文件写入/删除能力；当前均不采用。
+
+### DEC-060 实施补充：单文件闭环扩展为 CREATE、REPLACE 与 DELETE，批量变更另建 Change Set
+
+- 日期：2026-08-15
+- 状态：已确认
+- 决策：根据已确认的真实需求，`ReversibleFileService` 的首个存储闭环从仅 REPLACE 扩展为已授权范围内、最大 64 KiB 的 UTF-8 普通文件 CREATE、REPLACE 与 DELETE。三种操作都创建独立 `FileChange`，并按各自的 after 状态进行冲突检测和安全撤回；这项补充取代上一个实施补充中的“首版仅 REPLACE”限制，但不改变单文件、哈希保护和私有快照边界。未来一次用户意图涉及多个文件时，以独立 `FileChange` 组成 `FileChangeSet`，先展示完整文件清单和操作摘要再整体批准，并提供按该批次撤回的用户入口；当前不提前实现 Change Set。
+- 原因：创建输出文件、替换已有内容和删除文件都是批量资料处理的合理落盘原语，且已经可以复用同一套路径校验、持久记录、哈希冲突检测与补偿规则。批量读取发票或提取文档内容属于输入/转换能力，不应与落盘事务、授权范围或撤回生命周期混在一起。
+- 影响：Conversation 级授权继续按明确 `tool_id` 隔离；一种操作的授权不会自动授予另一种操作、批量操作或范围扩大。文档提取与 OCR 保持独立工具，范围扩大仍由用户显式选择。Undo 仍由用户在 UI 中手动触发，不暴露为模型 Tool。单文件存储服务完成后，API、Main/Preload 和 Renderer 接入作为下一独立任务。
+- 替代方案：把文档解析、批量调度、文件写入与撤回合并成一个万能工具，或把 Conversation 授权解释成所有文件操作的通用授权；当前均不采用。
+
+### DEC-060 实施补充：修改工具进入真实 Runtime，Undo 只走用户窄接口
+
+- 日期：2026-08-15
+- 状态：已实施
+- 决策：真实持久化 Runtime 为每个 Run 注册 `filesystem.create_file`、`filesystem.replace_file` 与 `filesystem.delete_file`，三者共享该 Run 的 `ReversibleFileService`，要求 `filesystem.write`、高风险审批和 ToolCall 审计。审批响应对桌面端隐藏 `content`，只提供目标路径和影响摘要。变更查询使用本地用户归属校验的 Conversation API；Undo 使用 `change_id` 与精确路径的固定 API，并在服务端验证 FileChange 来源 Run 的本地归属和记录路径一致性。Electron Main 保管 Token，Preload/Renderer 只获得查询与 Undo 两项窄能力。Renderer 从 SQLite-backed API 重载卡片，因此刷新后仍可撤回；Undo 不注册为模型 Tool，也不复用 Conversation Tool grant。
+- 原因：模型需要能执行用户明确批准的修改，但不应获得撤回历史的控制权；文件正文也不应为了审批 UI 穿过 Main/Renderer。把 Run ID 注入每个 Run 的工具实例可以可靠关联审计记录，固定 API 与精确路径复核则防止 UI 或调用方用错误路径误导用户。
+- 影响：CREATE、REPLACE、DELETE 的 `Allow for this conversation` 仍按各自内部 `tool_id` 隔离。文件在修改后被外部改变时，Undo 返回冲突并把记录显示为 `CONFLICTED`，不覆盖用户数据。当前卡片按 Conversation 列出单文件变更；多文件 `FileChangeSet`、授权撤销 UI 和快照清理仍是后续独立任务。
+- 替代方案：把 Undo 暴露为 Agent Tool、把写入正文包含在审批响应、让 Renderer 持有 Bearer Token 或通用 HTTP 能力、仅在内存中显示临时卡片；当前均不采用。
+
+### DEC-060 实施补充：单文件写授权按 `filesystem.write` 家族复用
+
+- 日期：2026-08-15
+- 状态：已实施
+- 决策：同一 Conversation 中，用户对 `filesystem.create_file`、`filesystem.replace_file` 或 `filesystem.delete_file` 任一审批选择 `Always allow file changes` 后，授权以 `(conversation_id, "filesystem.write")` 保存，并复用于这三种单文件写操作。其它工具仍按其内部 `tool_id` 独立授权；该授权不覆盖批量 `FileChangeSet`、路径范围扩大、命令执行或 Undo。
+- 原因：用户的意图是减少连续文件整理任务中的重复点击；三种单文件操作已共同受 Workspace 范围、64 KiB UTF-8 限制、FileChange 快照和哈希冲突保护约束。让授权跨这一个明确的写操作家族复用符合界面文案，也不会把能力扩展到无关副作用。
+- 影响：审批横幅对文件操作显示 `Always allow file changes`，而一般 Tool 继续显示 `Allow for this conversation`。Sidecar 重启、切换 Conversation 后仍需重新批准。未来批量变更必须单独展示完整影响并获得批准。
+- 替代方案：保持三个 Tool 完全独立导致重复审批，或把授权扩展为任意 `filesystem.write`/所有高风险工具；当前均不采用。
+
 ### DEC-061：阶段 6 使用 FastAPI App Factory 建立最小 Local API
 
 - 日期：2026-08-11
@@ -804,6 +849,16 @@
 - 原因：文件夹适合递归范围，而单文件适合精确、最小化的授权；两者分开建模可防止“选择一个文件”悄然变成“授权其父目录”。权限还必须受 Conversation 约束：用户在一个任务中附加的私有文件，不能因开始另一段对话而自动暴露。将路径规范化和持久化放在 Python 边界，能保证未来 `WorkspaceResolver` 按 Run 所属 Conversation 复用同一可信范围，而不把文件系统能力交给 Renderer。先不启用 Tool 可避免一个设置页面变成未明确批准的读取能力。
 - 影响：`asagent serve` 确保默认 Workspace 目录存在，并注入会话级 File Access API。Preferences 和 Composer 可显示或添加/移除当前 Conversation 的额外路径；这些变更立即持久化，无需 Sidecar 重启。持久化 Runtime 已在每个 Run 从其 Conversation 加载该设置，创建独立 Registry/Tool Snapshot 并注册 `filesystem.list`、`filesystem.read_file` 与 `filesystem.search_files`；它们受 `filesystem.read`、Resolver、超时和 ToolCall 审计边界约束。Search 只递归遍历这些已授权目录，以 1,000 个文件、每文件 64 KiB 和 20 个返回匹配为上限，不建索引或后台扫描。已选路径本身会送达当前模型 Provider，但文件正文只会在模型明确调用受控读取工具后才送达；路径不写入 Conversation Message、RunEvent 或 ToolCall。旧的全局本地范围配置不会被静默迁移到 Conversation。写入、覆盖、删除和编辑仍必须等待 DEC-060 的 FileChange 前置条件完成。
 - 替代方案：把范围作为全局偏好、直接保存在 Electron Renderer/本地存储、让 Main 直接读写配置、默认授予用户主目录、立即启用所有文件工具；当前均不采用。
+
+### DEC-077：消息编辑采用重发，而不改写历史
+
+- 日期：2026-08-15
+- 状态：已确认并完成最小桌面实现
+- 背景：聊天界面需要为用户消息提供编辑入口，并允许复制用户和助手消息。直接覆盖既有 UserMessage 会使其关联的 Run、ToolCall、审批和 FileChange 审计失去可解释性；让 Renderer 直接访问 Electron clipboard 则会扩大其能力。
+- 决策：Edit 只把选中 UserMessage 的正文带回 Composer，并显示“发送将创建新消息”的提示；用户确认发送后沿用既有提交路径创建新的 UserMessage 和新的 Run，原消息保持不变。复制经受来源校验的固定 Preload/Main IPC 调用 Electron clipboard 写入纯文本，Renderer 不获得通用 clipboard 或 Electron 能力。
+- 原因：重发保留完整、按时间排序的对话和工具审计，同时让用户保有自然的修改工作流；固定 IPC 与已有 Token、文件和外链边界一致，且不向 Renderer 暴露不必要的桌面能力。
+- 影响：用户消息显示时间、复制和 Edit 操作；AssistantMessage 显示复制操作。复制成功只在本地短暂显示确认，不写入 Conversation、RunEvent 或数据库。
+- 替代方案：原地更新 Message 并重新绑定/删除旧 Run，隐式删除后续对话，或让 Renderer 直接调用 `navigator.clipboard`/Electron API；当前均不采用。
 
 ## 2. 技术选型
 

@@ -38,6 +38,7 @@ def test_upgrade_from_empty_database_creates_initial_schema(tmp_path: Path) -> N
         "connections",
         "conversation_file_scopes",
         "conversations",
+        "file_changes",
         "messages",
         "run_events",
         "runs",

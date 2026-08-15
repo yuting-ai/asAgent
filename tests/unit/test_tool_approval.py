@@ -166,6 +166,39 @@ async def test_conversation_grant_does_not_apply_to_another_tool() -> None:
 
 
 @pytest.mark.asyncio
+async def test_file_change_grant_applies_to_every_single_file_write_tool() -> None:
+    policy = PendingToolApprovalPolicy()
+    create = _request(
+        approval_id="approval-create",
+        tool_id="filesystem.create_file",
+    )
+    replace = _request(
+        approval_id="approval-replace",
+        tool_id="filesystem.replace_file",
+    )
+    delete = _request(
+        approval_id="approval-delete",
+        tool_id="filesystem.delete_file",
+    )
+    observed: list[str] = []
+
+    async def on_requested(item: ToolApprovalRequest) -> None:
+        observed.append(str(item.approval_id))
+
+    waiting = asyncio.create_task(policy.approve(create, on_requested))
+    await asyncio.sleep(0)
+    assert (
+        policy.decide(create.approval_id, ToolApprovalDecision.ALLOW_CONVERSATION)
+        is True
+    )
+    assert await waiting is True
+
+    assert await policy.approve(replace, on_requested) is True
+    assert await policy.approve(delete, on_requested) is True
+    assert observed == ["approval-create"]
+
+
+@pytest.mark.asyncio
 async def test_deny_does_not_create_a_conversation_grant() -> None:
     policy = PendingToolApprovalPolicy()
     first = _request(approval_id="approval-1")

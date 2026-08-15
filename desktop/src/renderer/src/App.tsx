@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/static-components -- layout helpers intentionally share App state. */
 import {
   type CSSProperties,
   type FormEvent,
@@ -60,6 +61,18 @@ type ToolApproval = {
   display_name: string
   description: string
   arguments: Record<string, unknown>
+  resource_path: string | null
+  impact_summary: string | null
+}
+
+type FileChange = {
+  change_id: string
+  run_id: string
+  operation: 'create' | 'replace' | 'delete'
+  status: 'prepared' | 'applied' | 'reverted' | 'conflicted'
+  path: string
+  created_at: string
+  updated_at: string
 }
 
 type AppView =
@@ -111,8 +124,7 @@ const MODEL_SETTINGS_LOAD_ERROR = 'Model settings could not be loaded.'
 const MODEL_SETTINGS_UPDATE_ERROR = 'Model settings could not be updated.'
 const MODEL_SETTINGS_REQUIRED = 'Enter a model, base URL, and API key before saving.'
 const MODEL_DELETE_CONFIRM = 'Remove the saved model configuration and API key?'
-const CONVERSATION_DELETE_CONFIRM =
-  'Delete this conversation? This cannot be undone.'
+const CONVERSATION_DELETE_CONFIRM = 'Delete this conversation? This cannot be undone.'
 const DEFAULT_RAIL_WIDTH = 226
 const COLLAPSED_RAIL_WIDTH = 96
 const DEFAULT_THREAD_WIDTH = 210
@@ -249,6 +261,15 @@ function formatThreadTime(iso: string): string {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
+function formatMessageTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
+
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
 function terminalActivityEntry(outcome: RunActivityOutcome): string {
   switch (outcome) {
     case 'completed':
@@ -332,19 +353,22 @@ function Icon({ path, className }: { path: string; className?: string }): React.
   )
 }
 
-function ContextPanelIcon({
-  direction
-}: {
-  direction: 'collapse' | 'expand'
-}): React.JSX.Element {
+function CopyIcon({ copied }: { copied: boolean }): React.JSX.Element {
+  if (copied) {
+    return <Icon path="m5 12 4 4L19 6" />
+  }
+
   return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
+    <svg aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+      <rect height="11" rx="2" width="11" x="9" y="4" />
+      <rect fill="var(--bg-raised)" height="11" rx="2" width="11" x="4" y="9" />
+    </svg>
+  )
+}
+
+function ContextPanelIcon({ direction }: { direction: 'collapse' | 'expand' }): React.JSX.Element {
+  return (
+    <svg aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
       <rect height="14" rx="2" width="18" x="3" y="5" />
       <path d="M15 5v14" />
       <path d={direction === 'expand' ? 'm18 12-3-3 3-3' : 'm12 12 3 3 3-3'} />
@@ -360,8 +384,13 @@ export default function App(): React.JSX.Element {
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
+  const [fileChanges, setFileChanges] = useState<FileChange[]>([])
+  const [undoingChangeId, setUndoingChangeId] = useState<string | null>(null)
+  const [undoErrorChangeId, setUndoErrorChangeId] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [isCreatingConversation, setIsCreatingConversation] = useState(false)
   const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
@@ -401,7 +430,9 @@ export default function App(): React.JSX.Element {
   const [resizingColumn, setResizingColumn] = useState<ResizableColumn | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null)
   const scrollbarHideTimerRef = useRef<number | null>(null)
+  const copyFeedbackTimerRef = useRef<number | null>(null)
   const desktopLayoutRef = useRef(desktopLayout)
   const resizingColumnRef = useRef<ResizableColumn | null>(null)
   const railWidth = isRailCollapsed ? COLLAPSED_RAIL_WIDTH : desktopLayout.railWidth
@@ -423,6 +454,9 @@ export default function App(): React.JSX.Element {
     return () => {
       if (scrollbarHideTimerRef.current !== null) {
         window.clearTimeout(scrollbarHideTimerRef.current)
+      }
+      if (copyFeedbackTimerRef.current !== null) {
+        window.clearTimeout(copyFeedbackTimerRef.current)
       }
     }
   }, [])
@@ -664,6 +698,8 @@ export default function App(): React.JSX.Element {
     if (selectedConversationId === null) {
       queueMicrotask(() => {
         setMessages([])
+        setFileChanges([])
+        setUndoErrorChangeId(null)
       })
       return
     }
@@ -671,12 +707,16 @@ export default function App(): React.JSX.Element {
     const conversationId = selectedConversationId
     let cancelled = false
 
-    async function loadMessages(): Promise<void> {
+    async function loadConversation(): Promise<void> {
       try {
-        const items = await window.desktop.listConversationMessages(conversationId)
+        const [items, changes] = await Promise.all([
+          window.desktop.listConversationMessages(conversationId),
+          window.desktop.listConversationFileChanges(conversationId)
+        ])
 
         if (!cancelled) {
           setMessages(items)
+          setFileChanges(changes)
           setErrorMessage(null)
         }
       } catch {
@@ -686,7 +726,7 @@ export default function App(): React.JSX.Element {
       }
     }
 
-    void loadMessages()
+    void loadConversation()
 
     return () => {
       cancelled = true
@@ -707,9 +747,14 @@ export default function App(): React.JSX.Element {
       setIsCancellingRun(false)
 
       if (update.conversationId === selectedConversationId) {
-        void window.desktop
-          .listConversationMessages(update.conversationId)
-          .then(setMessages)
+        void Promise.all([
+          window.desktop.listConversationMessages(update.conversationId),
+          window.desktop.listConversationFileChanges(update.conversationId)
+        ])
+          .then(([nextMessages, changes]) => {
+            setMessages(nextMessages)
+            setFileChanges(changes)
+          })
           .catch(() => setErrorMessage('Messages could not be refreshed.'))
       }
     })
@@ -771,7 +816,8 @@ export default function App(): React.JSX.Element {
     pendingApproval?.conversation_id === selectedConversationId ? pendingApproval : null
   const visibleApprovalServer =
     visibleApproval === null ? null : mcpServerNameFromToolId(visibleApproval.tool_id)
-  const isBusy = isCreatingConversation || isSubmittingMessage || activeRun !== null
+  const isBusy =
+    backendStatus !== 'ready' || isCreatingConversation || isSubmittingMessage || activeRun !== null
 
   const usesExternalModel = appInfo?.dataProcessingMode === 'external'
 
@@ -942,7 +988,7 @@ export default function App(): React.JSX.Element {
   }
 
   async function deleteConversation(conversationId: string): Promise<void> {
-    if (isBusy) {
+    if (isCreatingConversation || isSubmittingMessage) {
       return
     }
 
@@ -969,9 +1015,7 @@ export default function App(): React.JSX.Element {
       await window.desktop.deleteConversation(conversationId)
 
       setConversations((items) => {
-        const next = items.filter(
-          (conversation) => conversation.conversation_id !== conversationId
-        )
+        const next = items.filter((conversation) => conversation.conversation_id !== conversationId)
 
         if (selectedConversationId === conversationId) {
           setSelectedConversationId(next[0]?.conversation_id ?? null)
@@ -1015,6 +1059,7 @@ export default function App(): React.JSX.Element {
         )
       )
       setDraft('')
+      setEditingMessageId(null)
       setActiveRun({
         runId: submitted.run.run_id,
         conversationId,
@@ -1036,6 +1081,38 @@ export default function App(): React.JSX.Element {
       setErrorMessage('Message submission failed.')
     } finally {
       setIsSubmittingMessage(false)
+    }
+  }
+
+  function beginMessageEdit(message: ConversationMessage): void {
+    if (isBusy) {
+      return
+    }
+
+    setDraft(message.content)
+    setEditingMessageId(message.message_id)
+    setErrorMessage(null)
+    window.requestAnimationFrame(() => composerInputRef.current?.focus())
+  }
+
+  function cancelMessageEdit(): void {
+    setEditingMessageId(null)
+    setDraft('')
+  }
+
+  async function copyMessage(message: ConversationMessage): Promise<void> {
+    try {
+      await window.desktop.copyText(message.content)
+      setCopiedMessageId(message.message_id)
+      if (copyFeedbackTimerRef.current !== null) {
+        window.clearTimeout(copyFeedbackTimerRef.current)
+      }
+      copyFeedbackTimerRef.current = window.setTimeout(() => {
+        setCopiedMessageId((current) => (current === message.message_id ? null : current))
+        copyFeedbackTimerRef.current = null
+      }, 1_500)
+    } catch {
+      setErrorMessage('The message could not be copied.')
     }
   }
 
@@ -1068,13 +1145,41 @@ export default function App(): React.JSX.Element {
       await window.desktop.decideToolApproval(approval.approval_id, decision)
       setRunActivityStatus(
         approval.run_id,
-        decision === 'deny' ? 'Tool denied. Continuing…' : `Using ${approval.display_name}…`
+        decision === 'deny'
+          ? 'Tool denied. Continuing…'
+          : decision === 'allow_conversation' && approval.tool_id.startsWith('filesystem.')
+            ? 'File changes are allowed for this conversation. Continuing…'
+            : `Using ${approval.display_name}…`
       )
       setPendingApproval(null)
     } catch {
       setErrorMessage('Tool approval decision could not be sent.')
     } finally {
       setIsDecidingApproval(false)
+    }
+  }
+
+  async function undoFileChange(change: FileChange): Promise<void> {
+    if (change.status !== 'applied' || undoingChangeId !== null) {
+      return
+    }
+    setUndoingChangeId(change.change_id)
+    setUndoErrorChangeId(null)
+    try {
+      const reverted = await window.desktop.undoFileChange(change.change_id, change.path)
+      setFileChanges((current) =>
+        current.map((item) => (item.change_id === reverted.change_id ? reverted : item))
+      )
+    } catch {
+      setUndoErrorChangeId(change.change_id)
+      if (selectedConversationId !== null) {
+        void window.desktop
+          .listConversationFileChanges(selectedConversationId)
+          .then(setFileChanges)
+          .catch(() => undefined)
+      }
+    } finally {
+      setUndoingChangeId(null)
     }
   }
 
@@ -1639,9 +1744,7 @@ export default function App(): React.JSX.Element {
                     renamingConversationId === conversation.conversation_id ? (
                       <div
                         className={`chat-thread-item chat-thread-item-renaming${
-                          conversation.conversation_id === selectedConversationId
-                            ? ' active'
-                            : ''
+                          conversation.conversation_id === selectedConversationId ? ' active' : ''
                         }`}
                         key={conversation.conversation_id}
                       >
@@ -1668,18 +1771,14 @@ export default function App(): React.JSX.Element {
                     ) : (
                       <div
                         className={`chat-thread-item${
-                          conversation.conversation_id === selectedConversationId
-                            ? ' active'
-                            : ''
+                          conversation.conversation_id === selectedConversationId ? ' active' : ''
                         }`}
                         key={conversation.conversation_id}
                       >
                         <button
                           className="chat-thread-body"
                           disabled={isBusy}
-                          onClick={() =>
-                            setSelectedConversationId(conversation.conversation_id)
-                          }
+                          onClick={() => setSelectedConversationId(conversation.conversation_id)}
                           type="button"
                         >
                           <div className="chat-thread-name">
@@ -1763,6 +1862,7 @@ export default function App(): React.JSX.Element {
                       Create or select a conversation to view its history and send messages.
                     </p>
                   ) : visibleMessages.length === 0 &&
+                    fileChanges.length === 0 &&
                     runActivity?.conversationId !== selectedConversationId ? (
                     <p className="chat-empty">
                       No messages yet. Say hello below to start this conversation.
@@ -1782,6 +1882,83 @@ export default function App(): React.JSX.Element {
                                   message.role === 'user' ? index : lastIndex,
                                 -1
                               )
+                        const fileChangesAfterMessage = new Map<number, FileChange[]>()
+                        const unanchoredFileChanges: FileChange[] = []
+
+                        for (const change of fileChanges) {
+                          const changeTime = new Date(change.created_at).getTime()
+                          let anchorIndex = visibleMessages.findIndex(
+                            (message) =>
+                              message.role === 'assistant' &&
+                              new Date(message.created_at).getTime() >= changeTime
+                          )
+                          let precedingIndex = -1
+                          for (let index = 0; index < visibleMessages.length; index += 1) {
+                            if (
+                              new Date(visibleMessages[index].created_at).getTime() <= changeTime
+                            ) {
+                              precedingIndex = index
+                            } else {
+                              break
+                            }
+                          }
+                          if (anchorIndex === -1) {
+                            anchorIndex = precedingIndex
+                          }
+                          if (anchorIndex === -1) {
+                            unanchoredFileChanges.push(change)
+                          } else {
+                            const anchored = fileChangesAfterMessage.get(anchorIndex) ?? []
+                            anchored.push(change)
+                            fileChangesAfterMessage.set(anchorIndex, anchored)
+                          }
+                        }
+
+                        function renderFileChange(change: FileChange): React.JSX.Element {
+                          const hasUndoError = undoErrorChangeId === change.change_id
+                          return (
+                            <div className="file-change-card" key={change.change_id}>
+                              <div className="file-change-card-copy">
+                                <span className="file-change-operation">
+                                  {change.operation === 'create'
+                                    ? 'Created file'
+                                    : change.operation === 'replace'
+                                      ? 'Updated file'
+                                      : 'Deleted file'}
+                                </span>
+                                <span className="file-change-path" title={change.path}>
+                                  {change.path}
+                                </span>
+                                {change.status === 'conflicted' ? (
+                                  <span className="file-change-conflict" role="status">
+                                    <strong>Undo unavailable</strong>
+                                    <span>File version changed after this update.</span>
+                                  </span>
+                                ) : null}
+                              </div>
+                              {change.status === 'applied' ? (
+                                <div className="file-change-action">
+                                  <button
+                                    disabled={undoingChangeId !== null}
+                                    onClick={() => void undoFileChange(change)}
+                                    type="button"
+                                  >
+                                    {undoingChangeId === change.change_id ? 'Undoing…' : 'Undo'}
+                                  </button>
+                                  {hasUndoError ? (
+                                    <span className="file-change-undo-error" role="status">
+                                      Undo could not be completed. The file may have changed.
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ) : change.status === 'conflicted' ? null : (
+                                <span className={`file-change-status is-${change.status}`}>
+                                  {change.status === 'reverted' ? 'Undone' : 'Unavailable'}
+                                </span>
+                              )}
+                            </div>
+                          )
+                        }
 
                         function renderRunActivity(activity: RunActivity): React.JSX.Element {
                           return (
@@ -1853,44 +2030,85 @@ export default function App(): React.JSX.Element {
                           <>
                             {visibleMessages.map((message, index) => (
                               <div className="chat-turn" key={message.message_id}>
-                                <div
-                                  className={`msg ${message.role === 'assistant' ? 'agent' : 'user'}`}
-                                >
-                                  <div className="msg-bubble">
-                                    {message.role === 'assistant' ? (
-                                      <div className="markdown-content">
-                                        <ReactMarkdown
-                                          components={{
-                                            a: ({ children, href }) => (
-                                              <a
-                                                href={href}
-                                                onClick={(event) => {
-                                                  event.preventDefault()
-                                                  openAssistantLink(href)
-                                                }}
-                                                title="Open in your default browser"
-                                              >
-                                                {children}
-                                              </a>
-                                            )
-                                          }}
-                                        >
-                                          {message.content}
-                                        </ReactMarkdown>
-                                      </div>
-                                    ) : (
-                                      message.content
-                                    )}
+                                <div className={`message-entry ${message.role}`}>
+                                  <div
+                                    className={`msg ${message.role === 'assistant' ? 'agent' : 'user'}`}
+                                  >
+                                    <div className="msg-bubble">
+                                      {message.role === 'assistant' ? (
+                                        <div className="markdown-content">
+                                          <ReactMarkdown
+                                            components={{
+                                              a: ({ children, href }) => (
+                                                <a
+                                                  href={href}
+                                                  onClick={(event) => {
+                                                    event.preventDefault()
+                                                    openAssistantLink(href)
+                                                  }}
+                                                  title="Open in your default browser"
+                                                >
+                                                  {children}
+                                                </a>
+                                              )
+                                            }}
+                                          >
+                                            {message.content}
+                                          </ReactMarkdown>
+                                        </div>
+                                      ) : (
+                                        message.content
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="message-meta">
+                                    <time
+                                      dateTime={message.created_at}
+                                      title={new Date(message.created_at).toLocaleString()}
+                                    >
+                                      {formatMessageTime(message.created_at)}
+                                    </time>
+                                    <button
+                                      aria-label={
+                                        copiedMessageId === message.message_id
+                                          ? 'Copied'
+                                          : 'Copy message'
+                                      }
+                                      className="message-action"
+                                      onClick={() => void copyMessage(message)}
+                                      title={
+                                        copiedMessageId === message.message_id
+                                          ? 'Copied'
+                                          : 'Copy message'
+                                      }
+                                      type="button"
+                                    >
+                                      <CopyIcon copied={copiedMessageId === message.message_id} />
+                                    </button>
+                                    {message.role === 'user' ? (
+                                      <button
+                                        aria-label="Edit and resend message"
+                                        className="message-action"
+                                        disabled={isBusy}
+                                        onClick={() => beginMessageEdit(message)}
+                                        title="Edit and resend message"
+                                        type="button"
+                                      >
+                                        <Icon path="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                                      </button>
+                                    ) : null}
                                   </div>
                                 </div>
                                 {visibleActivity !== null && index === activityAnchorIndex
                                   ? renderRunActivity(visibleActivity)
                                   : null}
+                                {(fileChangesAfterMessage.get(index) ?? []).map(renderFileChange)}
                               </div>
                             ))}
                             {visibleActivity !== null && activityAnchorIndex === -1
                               ? renderRunActivity(visibleActivity)
                               : null}
+                            {unanchoredFileChanges.map(renderFileChange)}
                           </>
                         )
                       })()}
@@ -1908,7 +2126,16 @@ export default function App(): React.JSX.Element {
                       <span className="tool-approval-banner-title">
                         Allow {visibleApproval.display_name}?
                       </span>
-                      {visibleApprovalServer !== null ? (
+                      {visibleApproval.resource_path !== null ? (
+                        <>
+                          <span className="tool-approval-banner-source">
+                            {visibleApproval.impact_summary}
+                          </span>
+                          <span className="tool-approval-banner-source">
+                            {visibleApproval.resource_path}
+                          </span>
+                        </>
+                      ) : visibleApprovalServer !== null ? (
                         <span className="tool-approval-banner-source">{visibleApprovalServer}</span>
                       ) : null}
                     </p>
@@ -1921,7 +2148,10 @@ export default function App(): React.JSX.Element {
                           onClick={() => void decidePendingApproval(action.decision)}
                           type="button"
                         >
-                          {action.label}
+                          {action.decision === 'allow_conversation' &&
+                          visibleApproval.tool_id.startsWith('filesystem.')
+                            ? 'Always allow file changes'
+                            : action.label}
                         </button>
                       ))}
                     </div>
@@ -1930,7 +2160,16 @@ export default function App(): React.JSX.Element {
 
                 <form className="chat-composer" onSubmit={(event) => void submitMessage(event)}>
                   <div className="chat-composer-box">
+                    {editingMessageId !== null ? (
+                      <div className="composer-editing">
+                        <span>Editing a previous message. Sending creates a new message.</span>
+                        <button onClick={cancelMessageEdit} type="button">
+                          Cancel
+                        </button>
+                      </div>
+                    ) : null}
                     <textarea
+                      ref={composerInputRef}
                       disabled={selectedConversationId === null || isBusy}
                       onChange={(event) => setDraft(event.target.value)}
                       placeholder={

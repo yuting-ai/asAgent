@@ -202,7 +202,7 @@ asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不
 - 实现只读工具 `filesystem.read_file`、`filesystem.list`、`filesystem.search_files`。搜索只在当前 Conversation 的已授权目录中按需执行，必须限制扫描文件数、单文件读取量、返回匹配数、输出长度和超时；不建立后台索引或隐式全盘扫描。
 - 文档正文提取不作为当前阶段前置项：待阶段 6/7 形成真实 API/桌面交互后，按实际需求选择内置 `document.extract_text` 或隔离 MCP Tool，逐步支持 DOCX 和带文本层的 PDF；扫描型 PDF 与图片 OCR 保持为单独工具。无论入口为何，两类能力都必须声明文件格式、大小/页数和输出限制、超时、权限与审计边界，不得隐式扫描或上传用户文档。
 - 先实现 create-only 的受控写入工具；覆盖、追加、删除和自动创建目录作为独立能力推进。
-- 在引入覆盖、追加或删除前，实现 DEC-060 的可撤回文件变更：FileChange 的 `PREPARED`/`APPLIED` 生命周期、私有快照目录、前后哈希、来源 Run、容量/保留期与隐私边界；撤回仅适用于 asAgent 自己记录的变更，且当前哈希未被后续修改时才允许原子恢复。create-only 可在该机制就绪后纳入记录，以支持安全删除 Agent 新建且未被后续修改的文件。
+- DEC-060 的单文件可用闭环已经完成：不可变 Core `FileChange`、SQLite 表与 Repository、私有快照配额、`ReversibleFileService` 的 UTF-8 CREATE/REPLACE/DELETE、真实 Agent Tool 与审批、Local API、Main/Preload 窄桥接，以及刷新后仍存在的 Renderer 变更卡片和手动 Undo。首次操作允许用户选择 `Allow once` 或 `Always allow file changes`；后者只覆盖当前 Conversation 的三种单文件写操作，不扩大到批量操作、范围扩大或其他工具。Undo 不注册为模型 Tool。多文件操作后续以 `FileChangeSet` 整体展示、批准和撤回；文档提取/OCR 与文件范围扩大保持独立。
 - 建立 Tool Policy 和 Approval 接口；批准请求展示操作、规范化路径/根、权限、递归范围、影响摘要和有效期限。写入、删除、执行命令、敏感位置读取和 Agent 提议的范围扩大始终单独批准。
 - Policy 与 Approval 数据模型区分工具能力、文件范围和单次操作批准，为后续浏览器、OAuth 与 MCP 复用，但不让文件范围跨资源继承。
 - 将阶段 2 的取消/超时机制接入文件操作、审批等待和受控阻塞任务。

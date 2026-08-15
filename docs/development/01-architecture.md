@@ -85,6 +85,8 @@ Conversation 列表按 `updated_at` 倒序、再按 `conversation_id` 倒序返�
 
 阶段 7 的实时观察现已通过 Main 私有的认证 fetch-based SSE 接入：提交返回的 `run_id` 只用于固定的 Main 生命周期管理，Main 将已解析的安全 RunEvent 经窄 Preload 推送给 Renderer；Renderer 不读取 SSE URL、Token 或端口。当前 UI 将本次 Run 的事件保留为临时 Activity 卡片，并在终态后重新读取用户可见 Message 历史以显示 AssistantMessage；Activity 不是持久化 Message，刷新后由已持久化的 RunEvent/Message 历史替代。Stop 只请求既有协作取消，最终状态仍以 RunEvent 为准。聊天布局将 composer 固定在窗口底部，只有消息区滚动。
 
+桌面消息操作不改变 Message 的持久化契约。用户消息显示其创建时间，并可复制或将正文带回 Composer 修改；发送后仍通过既有 Message Submission API 创建一条新的 UserMessage 和新的 Run，旧消息及其审计历史不会被原地改写。AssistantMessage 同样可复制。系统剪贴板只经受来源校验的固定 `copyText` Preload/Main IPC 写入；Renderer 不获得 Electron clipboard、Node 或通用 IPC 能力。
+
 阶段 7 的发布前 Sidecar 边界已自动化验证：`scripts/build_backend.py` 用 PyInstaller onedir 将 CLI、Alembic 配置和迁移脚本打包到 `desktop/build/dist/asagent-backend/`，并显式收集 `aiosqlite` 动态依赖。冻结 CLI 从 bundle 的 `sys._MEIPASS` 读取 Alembic 配置，运行时 SQLite 仍只由 `--app-home` 的 AppPaths 创建。`scripts/smoke_backend_bundle.py` 从独立临时目录启动该可执行文件，通过临时 stdin Token 验证 Health、会话创建与离线 Calculator 回合；它不依赖源码工作目录、不使用真实 Provider，也不改变 Electron 开发 Launcher。
 
 ## 4. 核心身份模型
@@ -643,7 +645,7 @@ workspace/
 
 `tools.builtin.filesystem_write_file.FilesystemWriteFileTool` 是最小的受控副作用能力：它只在允许根内以独占创建方式写入一个新的 UTF-8 文件，要求 `filesystem.write`、标记为高风险且始终需要批准。它不创建父目录，64 KiB 以上的正文、目录目标和任何已存在文件都会被拒绝；因此它不能覆盖、追加或删除用户文件。当前通用 Approval Protocol 仅保证没有已授予权限或批准时不会进入工具协程；真正展示规范化路径、影响摘要和有效期限的批准请求仍待独立实现。
 
-`filesystem.write` 目前是“写类操作”的能力门槛，不会扩大已注册 Tool 的实际语义；当前唯一写入 Tool 仍只允许 create-only。按 DEC-060，未来在引入覆盖、追加或删除前，必须先实现持久化 `FileChange`：每次操作先在 `AppPaths.data_dir` 私有快照目录保存必要的变更前正文，再写入 SQLite 元数据 `PREPARED`，完成文件操作并校验 SHA-256 后才成为 `APPLIED`。记录包含来源 Run、规范化根路径与相对路径、CREATE/REPLACE/DELETE 种类、变更前后哈希及相对快照引用；SQLite、RunEvent、ToolCall、日志和模型上下文均不保存快照正文。撤回只处理 asAgent 自己记录且仍处于预期磁盘状态的 APPLIED 变更：CREATE 删除 after hash 未变化的文件，REPLACE 原子恢复快照，DELETE 以独占创建恢复快照；任何不匹配均拒绝并报告冲突。初版快照单项最多 5 MiB、总量 100 MiB、默认保留 30 天，超限时拒绝新变更而不静默清理可撤回快照。create-only 可在该机制完成后纳入记录，以便删除仍未被后续修改的 Agent 新建文件；在此之前它不获得覆盖、追加、删除或撤回能力。
+`filesystem.write` 是写类操作的能力门槛，不会扩大已注册 Tool 的实际语义。真实持久化 Runtime 已按当前 Run 和 Conversation 注册 `filesystem.create_file`、`filesystem.replace_file` 与 `filesystem.delete_file`；三者分别要求审批，但用户对其中任一项选择 `Always allow file changes` 后，该 Conversation 内三种单文件写操作共享受限的 `filesystem.write` 授权。该授权不授予批量变更、范围扩大、命令执行或其他工具。审批 API 对 Renderer 只返回目标路径和影响摘要，不返回待写入正文。DEC-060 的存储闭环包括不可变 `FileChange` Core 合同、SQLite `file_changes` 表与 Repository，以及位于 `AppPaths.data_dir` 的私有快照存储。`ReversibleFileService` 在已授权范围内协调最大 64 KiB 的 UTF-8 普通文件 CREATE、REPLACE、DELETE 与按 `change_id` 撤回：它校验规范化路径和操作前后 SHA-256，REPLACE 使用同目录临时文件原子替换，CREATE/DELETE 使用独占或缺失状态保护；当前状态与记录不一致时标记 `CONFLICTED`，不覆盖用户后续修改。普通持久化失败会补偿磁盘状态，SQLite、RunEvent、ToolCall、日志和模型上下文均不保存快照正文。快照单项最多 5 MiB、总量 100 MiB，超限时拒绝新快照；首版不自动按时间删除，未来只由明确的用户清理操作移除仍可撤回的内容。Local API 通过 `GET /api/v1/conversations/{conversation_id}/file-changes` 返回本地用户所属 Conversation 的变更，通过 `POST /api/v1/file-changes/{change_id}/undo` 接受精确路径并再次校验记录归属和路径一致性。Electron Main 持有 Bearer Token，Preload 只暴露对应的查询与 Undo 操作；Renderer 刷新后仍显示变更卡片，只有用户点击 `Undo` 才执行撤回，模型没有 Undo Tool。批量变更尚未实现，未来以多个独立 `FileChange` 组成 `FileChangeSet`，先整体展示和批准，再提供批次级手动 Undo。文档提取/OCR 与文件范围扩大仍是独立能力，不继承文件修改授权。
 
 多格式文档能力将独立于基础 File Tool 演进：未来的 `document.extract_text` 负责 DOCX、带文本层 PDF 等格式的确定性正文提取；扫描型 PDF 与图片仅在显式 OCR 工具中处理。两者都必须在 Workspace 范围、文件/页数/输出大小、超时、权限和审计边界内执行，不能以“读取文件”为名自动扫描或上传用户文档。
 

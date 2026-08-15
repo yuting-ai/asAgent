@@ -49,6 +49,18 @@ type ToolApproval = {
   display_name: string
   description: string
   arguments: Record<string, unknown>
+  resource_path: string | null
+  impact_summary: string | null
+}
+
+type FileChange = {
+  change_id: string
+  run_id: string
+  operation: 'create' | 'replace' | 'delete'
+  status: 'prepared' | 'applied' | 'reverted' | 'conflicted'
+  path: string
+  created_at: string
+  updated_at: string
 }
 
 type TavilySettingsStatus = {
@@ -88,6 +100,7 @@ const desktopBridge = {
   }> => ipcRenderer.invoke('desktop:get-app-info'),
   openExternalLink: (url: string): Promise<void> =>
     ipcRenderer.invoke('desktop:open-external-link', url),
+  copyText: (content: string): Promise<void> => ipcRenderer.invoke('desktop:copy-text', content),
   getBackendStatus: (): Promise<{ status: 'ready' | 'unavailable' }> =>
     ipcRenderer.invoke('desktop:get-backend-status'),
   restartApp: (): Promise<void> => ipcRenderer.invoke('desktop:restart-app'),
@@ -95,12 +108,13 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:list-conversations'),
   listConversationMessages: (conversationId: string): Promise<ConversationMessage[]> =>
     ipcRenderer.invoke('desktop:list-conversation-messages', conversationId),
+  listConversationFileChanges: (conversationId: string): Promise<FileChange[]> =>
+    ipcRenderer.invoke('desktop:list-conversation-file-changes', conversationId),
+  undoFileChange: (changeId: string, path: string): Promise<FileChange> =>
+    ipcRenderer.invoke('desktop:undo-file-change', changeId, path),
   createConversation: (): Promise<ConversationSummary> =>
     ipcRenderer.invoke('desktop:create-conversation'),
-  updateConversationTitle: (
-    conversationId: string,
-    title: string
-  ): Promise<ConversationSummary> =>
+  updateConversationTitle: (conversationId: string, title: string): Promise<ConversationSummary> =>
     ipcRenderer.invoke('desktop:update-conversation-title', conversationId, title),
   deleteConversation: (conversationId: string): Promise<void> =>
     ipcRenderer.invoke('desktop:delete-conversation', conversationId),

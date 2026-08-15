@@ -56,7 +56,7 @@ Docker 不是桌面客户端依赖。最终用户安装 Electron 应用后，不
 
 Main 不负责 Agent 业务。
 
-Preferences 中的本地文件范围由 Main 的原生 `showOpenDialog` 选择目录；Main 在校验 Renderer 来源后，将目录路径交给受 Bearer 保护的固定 Workspace Settings API。Renderer 仅能读取已授权目录列表、请求选择一个目录或替换该列表，不能取得 Node 文件系统、任意路径读取或通用 IPC。当前该选择只保存未来可访问范围，不会启动文件扫描或启用文件 Tool；受控 File Tool 接入属于后续独立任务。
+Preferences 中的本地文件范围由 Main 的原生 `showOpenDialog` 选择目录；Main 在校验 Renderer 来源后，将目录路径交给受 Bearer 保护的固定 Workspace Settings API。Renderer 仅能读取已授权目录列表、请求选择一个目录或替换该列表，不能取得 Node 文件系统、任意路径读取或通用 IPC。该范围会在后续 Run 中约束已接入的受控读写 File Tool；保存范围本身不会扫描或修改文件，写操作仍需其独立 Tool 审批。
 
 ### Preload
 
@@ -137,6 +137,10 @@ uv run asagent serve ...
 Electron Main 还会向 Renderer 暴露一个无敏感信息的处理模式：`local` 或 `external`。它只反映本次 Sidecar 的启动配置或已保存的桌面模型 Profile 是否可用，不包含 Provider 名、端口、Token 或 API Key；Privacy 与 Preferences 页面据此准确说明是否可能将请求内容发送到外部模型服务。默认离线模式明确不外发对话内容，真实 Provider 模式明确请求所需的对话内容和工具结果可能发送至选定服务商。
 
 桌面 Chat 仅对 AssistantMessage 使用安全 Markdown 渲染，以显示标题、列表、引用、代码块和普通外部链接；UserMessage 保持原始文本。Renderer 使用不启用原始 HTML 的解析配置，因此模型文本不会直接成为 DOM HTML。点击链接会经过窄 Main IPC：只允许无凭据的 `http`/`https` URL，并由系统默认浏览器打开；Renderer 不获得 Electron shell、任意 IPC 或页面内导航能力。消息数据库仍保存原始 Markdown 文本，显示规则不改变 API 或持久化契约。
+
+文件修改审批继续复用对话底部的 Approval 横幅，并保留 `Deny`、`Allow once` 与 `Allow for this conversation`。对 CREATE、REPLACE、DELETE，Backend 只把目标路径和影响摘要返回给 Main/Renderer，待写入正文不会进入审批 IPC。成功修改后 Renderer 通过固定的 FileChange 查询显示持久卡片；用户点击 `Undo` 时，Preload 只把 `change_id` 和卡片中的精确路径交给 Main，Main 再以私有 Bearer Token 调用固定 Undo API。Renderer 不取得快照、文件正文、Token 或通用文件系统能力；刷新后卡片从 SQLite-backed API 恢复，冲突只显示安全提示而不强制覆盖文件。
+
+消息的复制操作也遵循同一窄桥接原则：Renderer 只能请求具名 `copyText(content)`；Main 验证来源后使用 Electron 系统剪贴板写入纯文本。用户消息的 Edit 操作仅将现有正文填回 Composer，明确提示重新发送会创建新的消息和 Run；它不提供编辑 SQLite 中既有 Message 的 API 或 IPC。
 
 需要重新组合 Sidecar 的设置（当前为模型 Profile 与 Tavily）在成功保存后显示统一的 `Restart asAgent now to apply your changes?` 提示。用户选择 `Restart now` 时，Renderer 只能调用固定 IPC；发布版 Main 校验来源、登记 Electron relaunch 并走正常退出流程关闭自身 Backend，随后启动新实例。`electron-vite dev` 模式则保留 Electron 进程，只重启 Main 持有的 Sidecar 并刷新 Renderer，避免开发编排器随 Electron 子进程退出而停止 Vite 服务。选择 `Later` 不回滚已保存的配置，但当前 Runtime 不会热替换。
 

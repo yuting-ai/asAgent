@@ -791,4 +791,58 @@ describe('BackendLauncher', () => {
       })
     )
   })
+
+  it('lists conversation file changes and sends exact path for undo', async () => {
+    const child = createChild()
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+    const change = {
+      change_id: 'change-1',
+      run_id: 'run-1',
+      operation: 'replace',
+      status: 'applied',
+      path: '/workspace/notes.txt',
+      created_at: '2026-08-15T12:00:00Z',
+      updated_at: '2026-08-15T12:00:00Z'
+    }
+    const fetchBackend = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([change]), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ...change, status: 'reverted' }), { status: 200 })
+      )
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      spawnBackend,
+      fetchBackend
+    })
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+    await starting
+
+    await expect(launcher.listConversationFileChanges('conversation/1')).resolves.toEqual([change])
+    await expect(launcher.undoFileChange('change-1', change.path)).resolves.toMatchObject({
+      status: 'reverted'
+    })
+    expect(fetchBackend).toHaveBeenNthCalledWith(
+      2,
+      'http://127.0.0.1:43123/api/v1/conversations/conversation%2F1/file-changes',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({ Authorization: expect.stringMatching(/^Bearer /) })
+      })
+    )
+    expect(fetchBackend).toHaveBeenNthCalledWith(
+      3,
+      'http://127.0.0.1:43123/api/v1/file-changes/change-1/undo',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ path: '/workspace/notes.txt' }),
+        headers: expect.objectContaining({ Authorization: expect.stringMatching(/^Bearer /) })
+      })
+    )
+  })
 })

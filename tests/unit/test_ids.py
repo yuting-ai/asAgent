@@ -4,6 +4,7 @@ from asagent.core.ids import (
     ConnectionId,
     ConversationId,
     EventId,
+    FileChangeId,
     MessageId,
     RunId,
     ToolCallId,
@@ -19,6 +20,7 @@ def test_id_types_preserve_string_values() -> None:
     event_id = EventId("evt_123")
     message_id = MessageId("msg_123")
     connection_id = ConnectionId("connection_123")
+    file_change_id = FileChangeId("change_123")
 
     assert user_id == "local-user"
     assert conversation_id == "conv_123"
@@ -27,6 +29,7 @@ def test_id_types_preserve_string_values() -> None:
     assert event_id == "evt_123"
     assert message_id == "msg_123"
     assert connection_id == "connection_123"
+    assert file_change_id == "change_123"
 
     assert isinstance(user_id, str)
     assert isinstance(conversation_id, str)
@@ -35,6 +38,7 @@ def test_id_types_preserve_string_values() -> None:
     assert isinstance(event_id, str)
     assert isinstance(message_id, str)
     assert isinstance(connection_id, str)
+    assert isinstance(file_change_id, str)
 
     assert_type(user_id, UserId)
     assert_type(conversation_id, ConversationId)
@@ -43,3 +47,4 @@ def test_id_types_preserve_string_values() -> None:
     assert_type(event_id, EventId)
     assert_type(message_id, MessageId)
     assert_type(connection_id, ConnectionId)
+    assert_type(file_change_id, FileChangeId)

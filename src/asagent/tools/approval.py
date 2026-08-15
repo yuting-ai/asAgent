@@ -109,5 +109,16 @@ class PendingToolApprovalPolicy:
                 pending.decision.set_result(False)
 
 
+_FILE_CHANGE_TOOL_IDS = frozenset(
+    {
+        "filesystem.create_file",
+        "filesystem.replace_file",
+        "filesystem.delete_file",
+    }
+)
+
+
 def _grant_key(request: ToolApprovalRequest) -> tuple[ConversationId, str]:
+    if request.definition.tool_id in _FILE_CHANGE_TOOL_IDS:
+        return (request.conversation_id, "filesystem.write")
     return (request.conversation_id, request.definition.tool_id)

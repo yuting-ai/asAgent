@@ -37,10 +37,12 @@ from asagent.chat.service import ChatService
 from asagent.core.connection import CredentialStore
 from asagent.core.conversation import Conversation
 from asagent.core.event_publisher import EventPublisher
+from asagent.core.file_change import FileChange
 from asagent.core.ids import (
     ApprovalId,
     ConversationId,
     EventId,
+    FileChangeId,
     MessageId,
     RunId,
     ToolCallId,
@@ -66,6 +68,11 @@ from asagent.models.secrets import SecretProvider
 from asagent.models.tool_names import openai_compatible_tool_name
 from asagent.paths import AppPaths
 from asagent.storage.event_publisher import RepositoryEventPublisher
+from asagent.storage.file_change_snapshots import FileChangeSnapshotStore
+from asagent.storage.reversible_files import (
+    FileChangeNotFoundError,
+    ReversibleFileService,
+)
 from asagent.storage.sqlite.connection_repository import (
     SqliteConnectionRepository,
 )
@@ -76,6 +83,7 @@ from asagent.storage.sqlite.conversation_repository import (
     SqliteConversationRepository,
 )
 from asagent.storage.sqlite.database import upgrade_sqlite_database
+from asagent.storage.sqlite.file_change_repository import SqliteFileChangeRepository
 from asagent.storage.sqlite.run_finisher import SqliteRunFinisher
 from asagent.storage.sqlite.run_repository import SqliteRunRepository
 from asagent.storage.sqlite.run_starter import SqliteRunStarter
@@ -84,6 +92,11 @@ from asagent.tools.approval import PendingToolApprovalPolicy, ToolApprovalPolicy
 from asagent.tools.builtin.calculator import CalculatorTool
 from asagent.tools.builtin.current_time import CurrentTimeTool
 from asagent.tools.builtin.echo import EchoTool
+from asagent.tools.builtin.filesystem_changes import (
+    FilesystemCreateFileTool,
+    FilesystemDeleteFileTool,
+    FilesystemReplaceFileTool,
+)
 from asagent.tools.builtin.filesystem_list import FilesystemListTool
 from asagent.tools.builtin.filesystem_read_file import FilesystemReadFileTool
 from asagent.tools.builtin.filesystem_search_files import FilesystemSearchFilesTool
@@ -97,6 +110,7 @@ from asagent.workspace.settings import ConversationWorkspaceSettings
 
 _BUILTIN_TOOL_PERMISSIONS = frozenset({"tool.execute"})
 _FILESYSTEM_READ_PERMISSIONS = frozenset({"filesystem.read"})
+_FILESYSTEM_WRITE_PERMISSIONS = frozenset({"filesystem.write"})
 _MCP_SUBPROCESS_ENVIRONMENT_NAMES = ("PATH",)
 
 
@@ -186,9 +200,12 @@ async def _registry_for_conversation(
     *,
     base_registry: ToolRegistry,
     workspace_settings: ConversationWorkspaceSettings,
+    run_id: RunId,
     conversation_id: ConversationId,
+    file_changes: SqliteFileChangeRepository | None = None,
+    file_change_snapshots: FileChangeSnapshotStore | None = None,
 ) -> ToolRegistry:
-    """Add this Conversation's read-only file tools to an isolated registry."""
+    """Add this Run's Conversation-scoped file tools to an isolated registry."""
 
     status = await workspace_settings.get_status(conversation_id)
     resolver = WorkspaceResolver(
@@ -200,6 +217,17 @@ async def _registry_for_conversation(
     registry.register(FilesystemListTool(resolver))
     registry.register(FilesystemReadFileTool(resolver))
     registry.register(FilesystemSearchFilesTool(resolver))
+    if file_changes is not None and file_change_snapshots is not None:
+        service = ReversibleFileService(
+            resolver,
+            file_changes,
+            file_change_snapshots,
+            new_file_change_id,
+            now,
+        )
+        registry.register(FilesystemCreateFileTool(service, run_id))
+        registry.register(FilesystemReplaceFileTool(service, run_id))
+        registry.register(FilesystemDeleteFileTool(service, run_id))
     return registry
 
 
@@ -412,6 +440,10 @@ def new_approval_id() -> ApprovalId:
     return ApprovalId(f"approval_{uuid4().hex}")
 
 
+def new_file_change_id() -> FileChangeId:
+    return FileChangeId(f"change_{uuid4().hex}")
+
+
 def _alembic_config_path() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys._MEIPASS) / "alembic.ini"  # type: ignore[attr-defined]
@@ -430,12 +462,15 @@ def build_persistent_agent_runtime(
     registry: ToolRegistry | None = None,
     granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
     workspace_settings: ConversationWorkspaceSettings | None = None,
+    file_changes: SqliteFileChangeRepository | None = None,
+    file_change_snapshots: FileChangeSnapshotStore | None = None,
 ) -> PersistentAgentRuntime:
     base_registry = registry if registry is not None else _register_builtin_tools()
 
     if workspace_settings is not None:
 
         async def loop_for_conversation(
+            run_id: RunId,
             conversation_id: ConversationId,
         ) -> AgentLoop:
             return build_agent_loop(
@@ -446,10 +481,20 @@ def build_persistent_agent_runtime(
                 registry=await _registry_for_conversation(
                     base_registry=base_registry,
                     workspace_settings=workspace_settings,
+                    run_id=run_id,
                     conversation_id=conversation_id,
+                    file_changes=file_changes,
+                    file_change_snapshots=file_change_snapshots,
                 ),
                 granted_permissions=(
-                    granted_permissions | _FILESYSTEM_READ_PERMISSIONS
+                    granted_permissions
+                    | _FILESYSTEM_READ_PERMISSIONS
+                    | (
+                        _FILESYSTEM_WRITE_PERMISSIONS
+                        if file_changes is not None
+                        and file_change_snapshots is not None
+                        else frozenset()
+                    )
                 ),
             )
 
@@ -502,18 +547,24 @@ def build_persistent_development_runtime(
     registry: ToolRegistry | None = None,
     granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
     workspace_settings: ConversationWorkspaceSettings | None = None,
+    file_changes: SqliteFileChangeRepository | None = None,
+    file_change_snapshots: FileChangeSnapshotStore | None = None,
 ) -> PersistentAgentRuntime:
     base_registry = registry if registry is not None else _register_builtin_tools()
 
     if workspace_settings is not None:
 
         async def loop_for_conversation(
+            run_id: RunId,
             conversation_id: ConversationId,
         ) -> AgentLoop:
             scoped_registry = await _registry_for_conversation(
                 base_registry=base_registry,
                 workspace_settings=workspace_settings,
+                run_id=run_id,
                 conversation_id=conversation_id,
+                file_changes=file_changes,
+                file_change_snapshots=file_change_snapshots,
             )
             return build_development_agent_loop(
                 event_publisher=RepositoryEventPublisher(runs),
@@ -521,7 +572,14 @@ def build_persistent_development_runtime(
                 approval_policy=approval_policy,
                 registry=scoped_registry,
                 granted_permissions=(
-                    granted_permissions | _FILESYSTEM_READ_PERMISSIONS
+                    granted_permissions
+                    | _FILESYSTEM_READ_PERMISSIONS
+                    | (
+                        _FILESYSTEM_WRITE_PERMISSIONS
+                        if file_changes is not None
+                        and file_change_snapshots is not None
+                        else frozenset()
+                    )
                 ),
             )
 
@@ -706,6 +764,8 @@ async def _run_main(args: argparse.Namespace) -> None:
         conversations = SqliteConversationRepository(database_path)
         conversation_file_scopes = SqliteConversationFileScopeRepository(database_path)
         connections = SqliteConnectionRepository(database_path)
+        file_changes = SqliteFileChangeRepository(database_path)
+        file_change_snapshots = FileChangeSnapshotStore(paths.data_dir)
         runs = SqliteRunRepository(database_path)
         starter = SqliteRunStarter(database_path)
         finisher = SqliteRunFinisher(database_path)
@@ -769,6 +829,8 @@ async def _run_main(args: argparse.Namespace) -> None:
                     registry=registry,
                     granted_permissions=granted_permissions,
                     workspace_settings=workspace_settings,
+                    file_changes=file_changes,
+                    file_change_snapshots=file_change_snapshots,
                 )
                 model_name = "development-tools"
             else:
@@ -813,6 +875,8 @@ async def _run_main(args: argparse.Namespace) -> None:
                     registry=registry,
                     granted_permissions=granted_permissions,
                     workspace_settings=workspace_settings,
+                    file_changes=file_changes,
+                    file_change_snapshots=file_change_snapshots,
                 )
                 model_name = profile.model
 
@@ -830,6 +894,28 @@ async def _run_main(args: argparse.Namespace) -> None:
             dispatcher = InProcessRunDispatcher(
                 execute_submitted=execute_submitted,
             )
+
+            async def revert_file_change(
+                file_change_id: FileChangeId,
+                expected_path: Path,
+            ) -> FileChange:
+                change = await file_changes.get(file_change_id)
+                if change is None:
+                    raise FileChangeNotFoundError(
+                        f"file change not found: {file_change_id}"
+                    )
+                service = ReversibleFileService(
+                    WorkspaceResolver(workspace_root=Path(change.root_path)),
+                    file_changes,
+                    file_change_snapshots,
+                    new_file_change_id,
+                    now,
+                )
+                return await service.revert(
+                    file_change_id,
+                    expected_path=expected_path,
+                )
+
             server = LocalApiServer(
                 create_app(
                     access_token=access_token,
@@ -842,6 +928,8 @@ async def _run_main(args: argparse.Namespace) -> None:
                     tavily_settings=tavily_settings,
                     model_settings=model_settings,
                     workspace_settings=workspace_settings,
+                    file_changes=file_changes,
+                    revert_file_change=revert_file_change,
                 ),
                 host=args.host,
                 port=args.port,
@@ -860,6 +948,7 @@ async def _run_main(args: argparse.Namespace) -> None:
             if http_client is not None:
                 await http_client.aclose()
             await runs.aclose()
+            await file_changes.aclose()
             await conversations.aclose()
             await conversation_file_scopes.aclose()
             await connections.aclose()

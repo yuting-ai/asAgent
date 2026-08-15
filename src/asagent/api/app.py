@@ -1,6 +1,6 @@
 import asyncio
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,12 +29,21 @@ from asagent.bootstrap.tavily_settings import (
     TavilySettingsStatus,
 )
 from asagent.core.conversation import Conversation
-from asagent.core.ids import ApprovalId, ConversationId, RunId, UserId
+from asagent.core.file_change import FileChange
+from asagent.core.ids import ApprovalId, ConversationId, FileChangeId, RunId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
-from asagent.core.repositories import ConversationRepository, RunRepository
+from asagent.core.repositories import (
+    ConversationRepository,
+    FileChangeRepository,
+    RunRepository,
+)
 from asagent.core.run import Run
 from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
+from asagent.storage.reversible_files import (
+    FileChangeConflictError,
+    FileChangeNotFoundError,
+)
 from asagent.tools.approval import (
     PendingToolApprovalPolicy,
     ToolApprovalDecision,
@@ -163,9 +172,28 @@ class ToolApprovalResponse(BaseModel):
     display_name: str
     description: str
     arguments: dict[str, object]
+    resource_path: str | None = None
+    impact_summary: str | None = None
 
     @classmethod
     def from_request(cls, request: ToolApprovalRequest) -> "ToolApprovalResponse":
+        arguments = dict(request.arguments)
+        resource_path: str | None = None
+        impact_summary: str | None = None
+        summaries = {
+            "filesystem.create_file": "Create a new UTF-8 text file.",
+            "filesystem.replace_file": (
+                "Replace this UTF-8 text file and save a private undo snapshot."
+            ),
+            "filesystem.delete_file": (
+                "Delete this UTF-8 text file and save a private undo snapshot."
+            ),
+        }
+        if request.definition.tool_id in summaries:
+            path = arguments.get("path")
+            resource_path = path if isinstance(path, str) else None
+            arguments = {"path": resource_path} if resource_path is not None else {}
+            impact_summary = summaries[request.definition.tool_id]
         return cls(
             approval_id=str(request.approval_id),
             run_id=str(request.run_id),
@@ -174,8 +202,45 @@ class ToolApprovalResponse(BaseModel):
             tool_id=request.definition.tool_id,
             display_name=request.definition.display_name,
             description=request.definition.description,
-            arguments=dict(request.arguments),
+            arguments=arguments,
+            resource_path=resource_path,
+            impact_summary=impact_summary,
         )
+
+
+class FileChangeResponse(BaseModel):
+    change_id: str
+    run_id: str
+    operation: str
+    status: str
+    path: str
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_change(cls, change: FileChange) -> "FileChangeResponse":
+        return cls(
+            change_id=str(change.file_change_id),
+            run_id=str(change.run_id),
+            operation=change.operation.value,
+            status=change.status.value,
+            path=str(Path(change.root_path) / change.relative_path),
+            created_at=change.created_at,
+            updated_at=change.updated_at,
+        )
+
+
+class UndoFileChangeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+
+    @field_validator("path")
+    @classmethod
+    def path_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("path must not be blank")
+        return value
 
 
 class ToolApprovalDecisionRequest(BaseModel):
@@ -301,6 +366,10 @@ def create_app(
     tavily_settings: TavilySettings | None = None,
     model_settings: ModelSettings | None = None,
     workspace_settings: ConversationWorkspaceSettings | None = None,
+    file_changes: FileChangeRepository | None = None,
+    revert_file_change: (
+        Callable[[FileChangeId, Path], Awaitable[FileChange]] | None
+    ) = None,
     conversation_id_factory: Callable[[], ConversationId] | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
@@ -624,6 +693,69 @@ def create_app(
             stored_conversation.conversation_id,
         )
         return [MessageResponse.from_message(message) for message in stored_messages]
+
+    @app.get(
+        "/api/v1/conversations/{conversation_id}/file-changes",
+        response_model=list[FileChangeResponse],
+        dependencies=[Depends(authenticate)],
+    )
+    async def list_conversation_file_changes(
+        conversation_id: str,
+    ) -> list[FileChangeResponse]:
+        conversation = await get_local_conversation(ConversationId(conversation_id))
+        if file_changes is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="file changes are unavailable",
+            )
+        conversation_runs = await runs.list_for_conversation(
+            conversation.conversation_id
+        )
+        changes = [
+            change
+            for run in conversation_runs
+            for change in await file_changes.list_for_run(run.run_id)
+        ]
+        changes.sort(key=lambda change: (change.created_at, str(change.file_change_id)))
+        return [FileChangeResponse.from_change(change) for change in changes]
+
+    @app.post(
+        "/api/v1/file-changes/{change_id}/undo",
+        response_model=FileChangeResponse,
+        dependencies=[Depends(authenticate)],
+    )
+    async def undo_file_change(
+        change_id: str,
+        request: UndoFileChangeRequest,
+    ) -> FileChangeResponse:
+        if file_changes is None or revert_file_change is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="file changes are unavailable",
+            )
+        stored_change = await file_changes.get(FileChangeId(change_id))
+        if stored_change is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="file change not found",
+            )
+        await get_local_run(stored_change.run_id)
+        try:
+            reverted = await revert_file_change(
+                stored_change.file_change_id,
+                Path(request.path),
+            )
+        except FileChangeNotFoundError as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="file change not found",
+            ) from error
+        except (FileChangeConflictError, ValueError) as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(error),
+            ) from error
+        return FileChangeResponse.from_change(reverted)
 
     if tavily_settings is not None:
 

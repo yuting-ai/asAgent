@@ -68,6 +68,18 @@ export type ToolApproval = {
   display_name: string
   description: string
   arguments: Record<string, unknown>
+  resource_path: string | null
+  impact_summary: string | null
+}
+
+export type FileChange = {
+  change_id: string
+  run_id: string
+  operation: 'create' | 'replace' | 'delete'
+  status: 'prepared' | 'applied' | 'reverted' | 'conflicted'
+  path: string
+  created_at: string
+  updated_at: string
 }
 
 export type CreatedConversation = ConversationSummary
@@ -260,6 +272,19 @@ export class BackendLauncher {
     )
   }
 
+  async listConversationFileChanges(conversationId: string): Promise<FileChange[]> {
+    return this.requestJson(
+      `/api/v1/conversations/${encodeURIComponent(conversationId)}/file-changes`,
+      'GET'
+    )
+  }
+
+  async undoFileChange(changeId: string, path: string): Promise<FileChange> {
+    return this.requestJson(`/api/v1/file-changes/${encodeURIComponent(changeId)}/undo`, 'POST', {
+      path
+    })
+  }
+
   async createConversation(): Promise<CreatedConversation> {
     return this.requestJson('/api/v1/conversations', 'POST', {})
   }
@@ -280,10 +305,7 @@ export class BackendLauncher {
   }
 
   async deleteConversation(conversationId: string): Promise<void> {
-    await this.request(
-      `/api/v1/conversations/${encodeURIComponent(conversationId)}`,
-      'DELETE'
-    )
+    await this.request(`/api/v1/conversations/${encodeURIComponent(conversationId)}`, 'DELETE')
   }
 
   async submitMessage(conversationId: string, content: string): Promise<SubmittedMessage> {
