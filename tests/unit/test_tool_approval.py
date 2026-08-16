@@ -79,6 +79,39 @@ async def test_allow_once_still_prompts_for_the_same_tool() -> None:
 
 
 @pytest.mark.asyncio
+async def test_allow_conversation_rejected_when_definition_disallows_it() -> None:
+    policy = PendingToolApprovalPolicy()
+    request = ToolApprovalRequest(
+        approval_id=ApprovalId("approval-1"),
+        run_id=RunId("run-1"),
+        conversation_id=ConversationId("conversation-1"),
+        tool_call_id="call-1",
+        definition=ToolDefinition(
+            tool_id="browser.submit",
+            display_name="Submit form",
+            description="Submit once.",
+            input_schema={"type": "object"},
+            risk_level="high",
+            required_permissions=frozenset({"browser.submit"}),
+            requires_approval=True,
+            timeout_seconds=10.0,
+            allows_conversation_approval=False,
+        ),
+        arguments={"selector": "form#checkout"},
+    )
+
+    waiting = asyncio.create_task(policy.approve(request))
+    await asyncio.sleep(0)
+
+    assert (
+        policy.decide(request.approval_id, ToolApprovalDecision.ALLOW_CONVERSATION)
+        is False
+    )
+    assert policy.decide(request.approval_id, ToolApprovalDecision.ALLOW_ONCE) is True
+    assert await waiting is True
+
+
+@pytest.mark.asyncio
 async def test_allow_conversation_skips_later_prompts_for_the_same_tool() -> None:
     policy = PendingToolApprovalPolicy()
     first = _request(approval_id="approval-1")

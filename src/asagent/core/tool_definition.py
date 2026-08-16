@@ -13,6 +13,7 @@ class ToolDefinition:
     required_permissions: frozenset[str]
     requires_approval: bool
     timeout_seconds: float
+    allows_conversation_approval: bool = True
 
     def __post_init__(self) -> None:
         if self.timeout_seconds <= 0:

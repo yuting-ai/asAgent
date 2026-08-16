@@ -1,7 +1,7 @@
 from typing import Protocol, runtime_checkable
 
 from asagent.core.connection import Connection
-from asagent.core.conversation import Conversation
+from asagent.core.conversation import Conversation, ConversationKind
 from asagent.core.conversation_file_scope import ConversationFileScope
 from asagent.core.file_change import FileChange
 from asagent.core.ids import ConnectionId, ConversationId, FileChangeId, RunId, UserId
@@ -18,7 +18,12 @@ class ConversationRepository(Protocol):
         conversation_id: ConversationId,
     ) -> Conversation | None: ...
 
-    async def list_for_user(self, user_id: UserId) -> tuple[Conversation, ...]: ...
+    async def list_for_user(
+        self,
+        user_id: UserId,
+        *,
+        kind: ConversationKind | None = None,
+    ) -> tuple[Conversation, ...]: ...
 
     async def save(self, conversation: Conversation) -> None: ...
 

@@ -40,6 +40,18 @@ type RunStreamError = {
   message: string
 }
 
+type BrowserSessionTab = {
+  tabId: string
+  url: string
+  conversationId: string | null
+}
+
+type BrowserSessionSnapshot = {
+  version: 1
+  visibleTabId: string
+  tabs: BrowserSessionTab[]
+}
+
 type ToolApproval = {
   approval_id: string
   run_id: string
@@ -51,6 +63,7 @@ type ToolApproval = {
   arguments: Record<string, unknown>
   resource_path: string | null
   impact_summary: string | null
+  allows_conversation_approval: boolean
 }
 
 type FileChange = {
@@ -75,10 +88,18 @@ type ModelSettingsStatus = {
   base_url: string | null
 }
 
+type AgentSettingsStatus = {
+  max_steps: number
+}
+
 type ModelSettingsInput = {
   model: string
   baseUrl: string
   apiKey?: string
+}
+
+type AgentSettingsInput = {
+  maxSteps: number
 }
 
 type WorkspaceSettingsStatus = {
@@ -98,6 +119,21 @@ const desktopBridge = {
     version: string
     dataProcessingMode: 'local' | 'external'
   }> => ipcRenderer.invoke('desktop:get-app-info'),
+  showBrowser: (
+    tabId: string,
+    bounds: { x: number; y: number; width: number; height: number }
+  ): Promise<void> => ipcRenderer.invoke('desktop:show-browser', tabId, bounds),
+  hideBrowser: (): Promise<void> => ipcRenderer.invoke('desktop:hide-browser'),
+  navigateBrowser: (tabId: string, url: string): Promise<string> =>
+    ipcRenderer.invoke('desktop:navigate-browser', tabId, url),
+  closeBrowserTab: (tabId: string): Promise<void> =>
+    ipcRenderer.invoke('desktop:close-browser-tab', tabId),
+  controlBrowser: (tabId: string, action: 'back' | 'forward' | 'reload' | 'home'): Promise<void> =>
+    ipcRenderer.invoke('desktop:control-browser', tabId, action),
+  getBrowserSession: (): Promise<BrowserSessionSnapshot> =>
+    ipcRenderer.invoke('desktop:get-browser-session'),
+  setBrowserTabConversation: (tabId: string, conversationId: string | null): Promise<void> =>
+    ipcRenderer.invoke('desktop:set-browser-tab-conversation', tabId, conversationId),
   openExternalLink: (url: string): Promise<void> =>
     ipcRenderer.invoke('desktop:open-external-link', url),
   copyText: (content: string): Promise<void> => ipcRenderer.invoke('desktop:copy-text', content),
@@ -120,6 +156,20 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:delete-conversation', conversationId),
   submitMessage: (conversationId: string, content: string): Promise<SubmittedMessage> =>
     ipcRenderer.invoke('desktop:submit-message', conversationId, content),
+  listBrowserConversations: (): Promise<ConversationSummary[]> =>
+    ipcRenderer.invoke('desktop:list-browser-conversations'),
+  createBrowserConversation: (): Promise<ConversationSummary> =>
+    ipcRenderer.invoke('desktop:create-browser-conversation'),
+  deleteBrowserConversation: (conversationId: string): Promise<void> =>
+    ipcRenderer.invoke('desktop:delete-browser-conversation', conversationId),
+  listBrowserConversationMessages: (conversationId: string): Promise<ConversationMessage[]> =>
+    ipcRenderer.invoke('desktop:list-browser-conversation-messages', conversationId),
+  submitBrowserMessage: (
+    conversationId: string,
+    content: string,
+    tabId: string
+  ): Promise<SubmittedMessage> =>
+    ipcRenderer.invoke('desktop:submit-browser-message', conversationId, content, tabId),
   cancelRun: (runId: string): Promise<void> => ipcRenderer.invoke('desktop:cancel-run', runId),
   decideToolApproval: (
     approvalId: string,
@@ -137,6 +187,10 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:save-model-settings', input),
   deleteModelSettings: (): Promise<ModelSettingsStatus> =>
     ipcRenderer.invoke('desktop:delete-model-settings'),
+  getAgentSettings: (): Promise<AgentSettingsStatus> =>
+    ipcRenderer.invoke('desktop:get-agent-settings'),
+  saveAgentSettings: (input: AgentSettingsInput): Promise<AgentSettingsStatus> =>
+    ipcRenderer.invoke('desktop:save-agent-settings', input),
   getConversationFileAccess: (conversationId: string): Promise<WorkspaceSettingsStatus> =>
     ipcRenderer.invoke('desktop:get-conversation-file-access', conversationId),
   chooseWorkspacePath: (): Promise<{ path: string; kind: 'directory' | 'file' } | null> =>
@@ -177,6 +231,31 @@ const desktopBridge = {
 
     ipcRenderer.on('desktop:tool-approval-error', listener)
     return () => ipcRenderer.removeListener('desktop:tool-approval-error', listener)
+  },
+  onBrowserTabState: (
+    callback: (state: {
+      tabId: string
+      url: string
+      title: string
+      canGoBack: boolean
+      canGoForward: boolean
+    }) => void
+  ): (() => void) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      state: {
+        tabId: string
+        url: string
+        title: string
+        canGoBack: boolean
+        canGoForward: boolean
+      }
+    ): void => {
+      callback(state)
+    }
+
+    ipcRenderer.on('desktop:browser-tab-state', listener)
+    return () => ipcRenderer.removeListener('desktop:browser-tab-state', listener)
   }
 }
 

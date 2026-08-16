@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from asagent.core.conversation import Conversation
+from asagent.core.conversation import Conversation, ConversationKind
 from asagent.core.ids import ConversationId, MessageId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.storage.sqlite.connection import create_sqlite_async_engine
@@ -44,12 +44,19 @@ class SqliteConversationRepository:
 
         return _to_conversation(dict(row))
 
-    async def list_for_user(self, user_id: UserId) -> tuple[Conversation, ...]:
+    async def list_for_user(
+        self,
+        user_id: UserId,
+        *,
+        kind: ConversationKind | None = None,
+    ) -> tuple[Conversation, ...]:
+        query = select(conversations).where(conversations.c.user_id == str(user_id))
+        if kind is not None:
+            query = query.where(conversations.c.kind == kind)
+
         async with self._engine.connect() as connection:
             result = await connection.execute(
-                select(conversations)
-                .where(conversations.c.user_id == str(user_id))
-                .order_by(
+                query.order_by(
                     conversations.c.updated_at.desc(),
                     conversations.c.conversation_id.desc(),
                 ),
@@ -74,6 +81,7 @@ class SqliteConversationRepository:
                     conversation_id=str(conversation.conversation_id),
                     user_id=str(conversation.user_id),
                     title=conversation.title,
+                    kind=conversation.kind,
                     created_at=_to_utc(conversation.created_at),
                     updated_at=_to_utc(conversation.updated_at),
                 )
@@ -82,6 +90,7 @@ class SqliteConversationRepository:
                     set_={
                         "user_id": str(conversation.user_id),
                         "title": conversation.title,
+                        "kind": conversation.kind,
                         "created_at": _to_utc(conversation.created_at),
                         "updated_at": _to_utc(conversation.updated_at),
                     },
@@ -190,6 +199,7 @@ def _to_conversation(row: Mapping[str, object]) -> Conversation:
         created_at=_required_datetime(row, "created_at"),
         updated_at=_required_datetime(row, "updated_at"),
         title=_optional_str(row, "title"),
+        kind=_required_kind(row, "kind"),
     )
 
 
@@ -216,6 +226,15 @@ def _to_message(row: Mapping[str, object]) -> UserMessage | AssistantMessage:
         )
 
     raise RuntimeError(f"unknown persisted message role: {role}")
+
+
+def _required_kind(row: Mapping[str, object], field: str) -> ConversationKind:
+    value = _required_str(row, field)
+    if value == "chat":
+        return "chat"
+    if value == "browser":
+        return "browser"
+    raise RuntimeError(f"persisted {field} must be chat or browser")
 
 
 def _required_str(row: Mapping[str, object], field: str) -> str:

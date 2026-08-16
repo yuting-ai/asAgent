@@ -101,3 +101,24 @@ async def test_messages_are_scoped_ordered_and_require_a_saved_conversation() ->
                 created_at=datetime(2026, 8, 5, 9, 4, tzinfo=UTC),
             ),
         )
+
+
+@pytest.mark.asyncio
+async def test_list_for_user_can_filter_conversations_by_kind() -> None:
+    repository = InMemoryConversationRepository()
+    user_id = UserId("local-user")
+    chat = make_conversation(ConversationId("conv_chat"), user_id)
+    browser = Conversation(
+        conversation_id=ConversationId("conv_browser"),
+        user_id=user_id,
+        created_at=datetime(2026, 8, 5, 9, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 5, 9, 0, tzinfo=UTC),
+        kind="browser",
+    )
+
+    await repository.save(chat)
+    await repository.save(browser)
+
+    assert await repository.list_for_user(user_id) == (chat, browser)
+    assert await repository.list_for_user(user_id, kind="chat") == (chat,)
+    assert await repository.list_for_user(user_id, kind="browser") == (browser,)

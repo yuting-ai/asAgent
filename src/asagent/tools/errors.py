@@ -12,3 +12,23 @@ class ToolPermissionDeniedError(RuntimeError):
 
 class ToolTimeoutError(RuntimeError):
     pass
+
+
+SAFE_BROWSER_OPERATION_ERRORS = frozenset(
+    {
+        "target was not found",
+        "target is not visible",
+        "target is obscured",
+        "page changed; inspect interactive elements again",
+        "current browser tab is not visible",
+    }
+)
+
+
+class ToolOperationError(RuntimeError):
+    """Controlled, model-safe tool failure with an allowlisted message."""
+
+    def __init__(self, message: str) -> None:
+        if message not in SAFE_BROWSER_OPERATION_ERRORS:
+            raise ValueError("tool operation error message is not allowlisted")
+        super().__init__(message)

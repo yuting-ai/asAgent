@@ -53,6 +53,7 @@ CowAgent 源码位于 `/Users/yuting/Desktop/BityDev/CowAgent`。它不是默认
 - MCP stdio，再扩展 Streamable HTTP。
 - Skills。
 - Conversation Summary、User Memory 和 Knowledge。
+- 可见、受控的嵌入式浏览器会话。
 - Scheduler。
 - 正式 Electron 安装包和自动更新。
 - 可选 Docker Server 部署。

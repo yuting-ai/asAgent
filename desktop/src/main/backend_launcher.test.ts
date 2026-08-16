@@ -451,6 +451,199 @@ describe('BackendLauncher', () => {
     )
   })
 
+  it('lists, creates, and submits isolated browser conversations', async () => {
+    const child = createChild()
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+    const fetchBackend = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            {
+              conversation_id: 'browser-1',
+              created_at: '2026-08-16T00:00:00Z',
+              updated_at: '2026-08-16T00:00:00Z',
+              title: 'Page question'
+            }
+          ]),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            conversation_id: 'browser-2',
+            created_at: '2026-08-16T00:01:00Z',
+            updated_at: '2026-08-16T00:01:00Z',
+            title: null
+          }),
+          { status: 201 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            {
+              message_id: 'msg-browser',
+              role: 'user',
+              content: 'Summarize this.',
+              created_at: '2026-08-16T00:02:00Z'
+            }
+          ]),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            message: {
+              message_id: 'msg-browser-2',
+              role: 'user',
+              content: 'Summarize this.',
+              created_at: '2026-08-16T00:03:00Z'
+            },
+            run: {
+              run_id: 'run-browser',
+              status: 'created',
+              created_at: '2026-08-16T00:03:00Z',
+              updated_at: '2026-08-16T00:03:00Z'
+            },
+            conversation: {
+              conversation_id: 'browser-2',
+              created_at: '2026-08-16T00:01:00Z',
+              updated_at: '2026-08-16T00:03:00Z',
+              title: 'Summarize this.'
+            }
+          }),
+          { status: 201 }
+        )
+      )
+
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      spawnBackend,
+      fetchBackend
+    })
+
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+    await starting
+
+    await expect(launcher.listBrowserConversations()).resolves.toEqual([
+      {
+        conversation_id: 'browser-1',
+        created_at: '2026-08-16T00:00:00Z',
+        updated_at: '2026-08-16T00:00:00Z',
+        title: 'Page question'
+      }
+    ])
+    await expect(launcher.createBrowserConversation()).resolves.toMatchObject({
+      conversation_id: 'browser-2'
+    })
+    await expect(launcher.listBrowserConversationMessages('browser-2')).resolves.toEqual([
+      {
+        message_id: 'msg-browser',
+        role: 'user',
+        content: 'Summarize this.',
+        created_at: '2026-08-16T00:02:00Z'
+      }
+    ])
+    await expect(
+      launcher.submitBrowserMessage('browser-2', 'Summarize this.', 'tab-1')
+    ).resolves.toMatchObject({
+      message: {
+        message_id: 'msg-browser-2',
+        content: 'Summarize this.'
+      }
+    })
+
+    expect(fetchBackend).toHaveBeenNthCalledWith(
+      2,
+      'http://127.0.0.1:43123/api/v1/browser/conversations',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /)
+        })
+      })
+    )
+    expect(fetchBackend).toHaveBeenNthCalledWith(
+      3,
+      'http://127.0.0.1:43123/api/v1/browser/conversations',
+      expect.objectContaining({
+        method: 'POST',
+        body: '{}',
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /),
+          'Content-Type': 'application/json'
+        })
+      })
+    )
+    expect(fetchBackend).toHaveBeenNthCalledWith(
+      4,
+      'http://127.0.0.1:43123/api/v1/browser/conversations/browser-2/messages',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /)
+        })
+      })
+    )
+    expect(fetchBackend).toHaveBeenNthCalledWith(
+      5,
+      'http://127.0.0.1:43123/api/v1/browser/conversations/browser-2/messages',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ content: 'Summarize this.', tab_id: 'tab-1' }),
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /),
+          'Content-Type': 'application/json'
+        })
+      })
+    )
+  })
+
+  it('includes the private browser bridge in bootstrap without exposing it in ready output', async () => {
+    const child = createChild()
+    let bootstrap = ''
+    child.stdin.on('data', (chunk) => {
+      bootstrap += chunk.toString('utf8')
+    })
+
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+    const fetchBackend = vi.fn(async () => new Response(null, { status: 200 }))
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      spawnBackend,
+      fetchBackend,
+      browserBridge: {
+        baseUrl: 'http://127.0.0.1:43124',
+        token: 'bridge-token'
+      }
+    })
+
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+    await starting
+
+    const payload = JSON.parse(bootstrap.trim()) as {
+      token: string
+      browser_bridge: { base_url: string; token: string }
+    }
+    expect(payload.token).toMatch(/^[A-Za-z0-9_-]+$/)
+    expect(payload.browser_bridge).toEqual({
+      base_url: 'http://127.0.0.1:43124',
+      token: 'bridge-token'
+    })
+    expect(bootstrap).not.toContain('ASAGENT_READY')
+  })
+
   it('streams authenticated run events and requests cancellation', async () => {
     const child = createChild()
     const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
@@ -785,6 +978,32 @@ describe('BackendLauncher', () => {
           base_url: 'https://api.deepseek.com/v1',
           api_key: 'secret-model-key'
         }),
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /)
+        })
+      })
+    )
+
+    fetchBackend.mockResolvedValueOnce(
+      new Response(JSON.stringify({ max_steps: 20 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    )
+    fetchBackend.mockResolvedValueOnce(
+      new Response(JSON.stringify({ max_steps: 30 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    )
+
+    await expect(launcher.getAgentSettings()).resolves.toEqual({ max_steps: 20 })
+    await expect(launcher.saveAgentSettings({ maxSteps: 30 })).resolves.toEqual({ max_steps: 30 })
+    expect(fetchBackend).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:43123/api/v1/agent-settings',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ max_steps: 30 }),
         headers: expect.objectContaining({
           Authorization: expect.stringMatching(/^Bearer /)
         })

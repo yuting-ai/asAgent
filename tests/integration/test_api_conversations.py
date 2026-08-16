@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import httpx
 import pytest
@@ -21,6 +21,7 @@ from asagent.storage.sqlite.conversation_repository import (
 )
 from asagent.storage.sqlite.run_repository import SqliteRunRepository
 from asagent.storage.sqlite.run_starter import SqliteRunStarter
+from asagent.tools.browser_run_bindings import BrowserRunBindings
 
 _UNUSED_RUNS = cast(RunRepository, object())
 
@@ -69,12 +70,15 @@ def _conversation(
     user_id: UserId,
     created_at: datetime,
     updated_at: datetime,
+    *,
+    kind: Literal["chat", "browser"] = "chat",
 ) -> Conversation:
     return Conversation(
         conversation_id=conversation_id,
         user_id=user_id,
         created_at=created_at,
         updated_at=updated_at,
+        kind=kind,
     )
 
 
@@ -477,7 +481,6 @@ async def test_update_conversation_title_persists_for_local_user(
         updated_at=created_at,
         title="Original title",
     )
-    updated_at = datetime(2026, 8, 11, 13, 0, tzinfo=UTC)
     repository = SqliteConversationRepository(database_path)
     app = create_app(
         access_token=LocalApiToken("test-token"),
@@ -486,7 +489,7 @@ async def test_update_conversation_title_persists_for_local_user(
         run_submission=_unused_run_submission(repository),
         dispatch_submitted_run=_discard_submission,
         cancel_run=_cancel_nothing,
-        clock=lambda: updated_at,
+        clock=lambda: datetime(2026, 8, 11, 13, 0, tzinfo=UTC),
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -511,12 +514,12 @@ async def test_update_conversation_title_persists_for_local_user(
     assert response.json() == {
         "conversation_id": "conv-local",
         "created_at": "2026-08-11T08:00:00Z",
-        "updated_at": "2026-08-11T13:00:00Z",
+        "updated_at": "2026-08-11T08:00:00Z",
         "title": "Renamed conversation",
     }
     assert stored is not None
     assert stored.title == "Renamed conversation"
-    assert stored.updated_at == updated_at
+    assert stored.updated_at == created_at
 
 
 @pytest.mark.asyncio
@@ -870,3 +873,332 @@ async def test_submit_message_hides_unknown_or_other_user_conversations(
     assert response.json() == {"detail": "conversation not found"}
     assert messages == ()
     assert persisted_runs == ()
+
+
+@pytest.mark.asyncio
+async def test_chat_and_browser_conversation_routes_are_isolated(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    chat = _conversation(
+        ConversationId("conv-chat"),
+        UserId("local-user"),
+        datetime(2026, 8, 11, 8, 0, tzinfo=UTC),
+        datetime(2026, 8, 11, 8, 1, tzinfo=UTC),
+    )
+    browser = _conversation(
+        ConversationId("conv-browser"),
+        UserId("local-user"),
+        datetime(2026, 8, 11, 9, 0, tzinfo=UTC),
+        datetime(2026, 8, 11, 9, 1, tzinfo=UTC),
+        kind="browser",
+    )
+    repository = SqliteConversationRepository(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=repository,
+        runs=_UNUSED_RUNS,
+        run_submission=_unused_run_submission(repository),
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        await repository.save(chat)
+        await repository.save(browser)
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            headers = {"Authorization": "Bearer test-token"}
+            chat_list = await client.get("/api/v1/conversations", headers=headers)
+            browser_list = await client.get(
+                "/api/v1/browser/conversations",
+                headers=headers,
+            )
+            chat_reads_browser = await client.get(
+                "/api/v1/conversations/conv-browser/messages",
+                headers=headers,
+            )
+            browser_reads_chat = await client.get(
+                "/api/v1/browser/conversations/conv-chat/messages",
+                headers=headers,
+            )
+            chat_writes_browser = await client.post(
+                "/api/v1/conversations/conv-browser/messages",
+                headers=headers,
+                json={"content": "Hello from Chat."},
+            )
+            browser_writes_chat = await client.post(
+                "/api/v1/browser/conversations/conv-chat/messages",
+                headers=headers,
+                json={"content": "Hello from Browser.", "tab_id": "tab-1"},
+            )
+    finally:
+        await repository.aclose()
+
+    assert chat_list.status_code == 200
+    assert [item["conversation_id"] for item in chat_list.json()] == ["conv-chat"]
+    assert browser_list.status_code == 200
+    assert [item["conversation_id"] for item in browser_list.json()] == [
+        "conv-browser",
+    ]
+    assert chat_reads_browser.status_code == 404
+    assert browser_reads_chat.status_code == 404
+    assert chat_writes_browser.status_code == 404
+    assert browser_writes_chat.status_code == 404
+    assert chat_reads_browser.json() == {"detail": "conversation not found"}
+    assert browser_reads_chat.json() == {"detail": "conversation not found"}
+    assert chat_writes_browser.json() == {"detail": "conversation not found"}
+    assert browser_writes_chat.json() == {"detail": "conversation not found"}
+
+
+@pytest.mark.asyncio
+async def test_create_browser_conversation_persists_browser_kind(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    created_at = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    conversation_id = ConversationId("conv-browser-created")
+    repository = SqliteConversationRepository(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=repository,
+        runs=_UNUSED_RUNS,
+        run_submission=_unused_run_submission(repository),
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+        conversation_id_factory=lambda: conversation_id,
+        clock=lambda: created_at,
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            response = await client.post(
+                "/api/v1/browser/conversations",
+                headers={"Authorization": "Bearer test-token"},
+                json={},
+            )
+
+        stored = await repository.get(conversation_id)
+        chat_list = await repository.list_for_user(
+            UserId("local-user"),
+            kind="chat",
+        )
+        browser_list = await repository.list_for_user(
+            UserId("local-user"),
+            kind="browser",
+        )
+    finally:
+        await repository.aclose()
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "conversation_id": "conv-browser-created",
+        "created_at": "2026-08-11T12:00:00Z",
+        "updated_at": "2026-08-11T12:00:00Z",
+        "title": None,
+    }
+    assert stored == _conversation(
+        conversation_id,
+        UserId("local-user"),
+        created_at,
+        created_at,
+        kind="browser",
+    )
+    assert chat_list == ()
+    assert browser_list == (stored,)
+
+
+@pytest.mark.asyncio
+async def test_submit_browser_message_creates_visible_message_and_title(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    conversation = _conversation(
+        ConversationId("conv-browser"),
+        UserId("local-user"),
+        datetime(2026, 8, 11, 11, 0, tzinfo=UTC),
+        datetime(2026, 8, 11, 11, 0, tzinfo=UTC),
+        kind="browser",
+    )
+    created_at = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    conversations = SqliteConversationRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    starter = SqliteRunStarter(database_path)
+    bindings = BrowserRunBindings()
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=conversations,
+        runs=runs,
+        run_submission=RunSubmissionService(
+            conversations=conversations,
+            run_starter=starter,
+            now=lambda: created_at,
+            new_run_id=lambda: RunId("run-browser"),
+            new_message_id=lambda: MessageId("msg-browser"),
+        ),
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+        browser_run_bindings=bindings,
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        await conversations.save(conversation)
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            headers = {"Authorization": "Bearer test-token"}
+            response = await client.post(
+                "/api/v1/browser/conversations/conv-browser/messages",
+                headers=headers,
+                json={
+                    "content": "What is on this page?",
+                    "tab_id": "tab-visible",
+                },
+            )
+            missing_tab = await client.post(
+                "/api/v1/browser/conversations/conv-browser/messages",
+                headers=headers,
+                json={"content": "Missing tab."},
+            )
+            messages = await client.get(
+                "/api/v1/browser/conversations/conv-browser/messages",
+                headers=headers,
+            )
+            chat_messages = await client.get(
+                "/api/v1/conversations/conv-browser/messages",
+                headers=headers,
+            )
+
+        stored_conversation = await conversations.get(conversation.conversation_id)
+        persisted_runs = await runs.list_for_conversation(
+            conversation.conversation_id,
+        )
+    finally:
+        await starter.aclose()
+        await runs.aclose()
+        await conversations.aclose()
+
+    assert response.status_code == 201
+    assert response.json()["conversation"] == {
+        "conversation_id": "conv-browser",
+        "created_at": "2026-08-11T11:00:00Z",
+        "updated_at": "2026-08-11T12:00:00Z",
+        "title": "What is on this page?",
+    }
+    assert missing_tab.status_code == 422
+    assert bindings.take(RunId("run-browser")) == "tab-visible"
+    assert messages.status_code == 200
+    assert messages.json() == [
+        {
+            "message_id": "msg-browser",
+            "role": "user",
+            "content": "What is on this page?",
+            "created_at": "2026-08-11T12:00:00Z",
+        },
+    ]
+    assert chat_messages.status_code == 404
+    assert stored_conversation is not None
+    assert stored_conversation.kind == "browser"
+    assert stored_conversation.title == "What is on this page?"
+    assert len(persisted_runs) == 1
+    assert persisted_runs[0].run_id == RunId("run-browser")
+
+
+@pytest.mark.asyncio
+async def test_delete_browser_conversation_removes_only_browser_conversation(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    created_at = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    chat = Conversation(
+        conversation_id=ConversationId("conv-chat"),
+        user_id=UserId("local-user"),
+        created_at=created_at,
+        updated_at=created_at,
+        kind="chat",
+        title="Chat keep",
+    )
+    browser = Conversation(
+        conversation_id=ConversationId("conv-browser"),
+        user_id=UserId("local-user"),
+        created_at=created_at,
+        updated_at=created_at,
+        kind="browser",
+        title="Browser delete",
+    )
+    conversations = SqliteConversationRepository(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=conversations,
+        runs=_UNUSED_RUNS,
+        run_submission=_unused_run_submission(conversations),
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        await conversations.save(chat)
+        await conversations.save(browser)
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            headers = {"Authorization": "Bearer test-token"}
+            chat_delete_browser = await client.delete(
+                "/api/v1/conversations/conv-browser",
+                headers=headers,
+            )
+            browser_delete = await client.delete(
+                "/api/v1/browser/conversations/conv-browser",
+                headers=headers,
+            )
+            browser_delete_again = await client.delete(
+                "/api/v1/browser/conversations/conv-browser",
+                headers=headers,
+            )
+            browser_delete_chat = await client.delete(
+                "/api/v1/browser/conversations/conv-chat",
+                headers=headers,
+            )
+            remaining_chat = await client.get("/api/v1/conversations", headers=headers)
+            remaining_browser = await client.get(
+                "/api/v1/browser/conversations",
+                headers=headers,
+            )
+    finally:
+        await conversations.aclose()
+
+    assert chat_delete_browser.status_code == 404
+    assert browser_delete.status_code == 204
+    assert browser_delete_again.status_code == 404
+    assert browser_delete_chat.status_code == 404
+    assert remaining_chat.json() == [
+        {
+            "conversation_id": "conv-chat",
+            "created_at": "2026-08-16T12:00:00Z",
+            "updated_at": "2026-08-16T12:00:00Z",
+            "title": "Chat keep",
+        },
+    ]
+    assert remaining_browser.json() == []

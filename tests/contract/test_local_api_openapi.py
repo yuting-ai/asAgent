@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 
 from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
@@ -72,6 +73,9 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
         "/api/v1/conversations/{conversation_id}",
         "/api/v1/conversations/{conversation_id}/messages",
         "/api/v1/conversations/{conversation_id}/file-changes",
+        "/api/v1/browser/conversations",
+        "/api/v1/browser/conversations/{conversation_id}",
+        "/api/v1/browser/conversations/{conversation_id}/messages",
         "/api/v1/file-changes/{change_id}/undo",
         "/api/v1/runs/{run_id}",
         "/api/v1/runs/{run_id}/cancel",
@@ -80,6 +84,53 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
         "/api/v1/tool-approvals/{approval_id}/decision",
     }
 
+
+def test_openapi_declares_agent_settings_when_configured(tmp_path: Path) -> None:
+    from asagent.bootstrap.agent_settings import AgentSettingsStore
+
+    conversations = InMemoryConversationRepository()
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=conversations,
+        runs=_UNUSED_RUNS,
+        run_submission=RunSubmissionService(
+            conversations=conversations,
+            run_starter=UnusedRunStarter(),
+            now=lambda: datetime(2026, 8, 11, tzinfo=UTC),
+            new_run_id=lambda: RunId("unused-run"),
+            new_message_id=lambda: MessageId("unused-message"),
+        ),
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+        agent_settings=AgentSettingsStore(tmp_path / "config"),
+    )
+    paths = app.openapi()["paths"]
+    assert "/api/v1/agent-settings" in paths
+    assert paths["/api/v1/agent-settings"]["get"]["security"] == [{"HTTPBearer": []}]
+    assert paths["/api/v1/agent-settings"]["put"]["security"] == [{"HTTPBearer": []}]
+    assert "200" in paths["/api/v1/agent-settings"]["get"]["responses"]
+    assert "200" in paths["/api/v1/agent-settings"]["put"]["responses"]
+    assert "422" in paths["/api/v1/agent-settings"]["put"]["responses"]
+
+
+def test_openapi_declares_expected_operations() -> None:
+    conversations = InMemoryConversationRepository()
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=conversations,
+        runs=_UNUSED_RUNS,
+        run_submission=RunSubmissionService(
+            conversations=conversations,
+            run_starter=UnusedRunStarter(),
+            now=lambda: datetime(2026, 8, 11, tzinfo=UTC),
+            new_run_id=lambda: RunId("unused-run"),
+            new_message_id=lambda: MessageId("unused-message"),
+        ),
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+    )
+
+    paths = app.openapi()["paths"]
     expected_operations = (
         ("/api/v1/health", "get", "200"),
         ("/api/v1/conversations", "get", "200"),
@@ -89,6 +140,19 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
         ("/api/v1/conversations/{conversation_id}/messages", "get", "200"),
         (
             "/api/v1/conversations/{conversation_id}/messages",
+            "post",
+            "201",
+        ),
+        ("/api/v1/browser/conversations", "get", "200"),
+        ("/api/v1/browser/conversations", "post", "201"),
+        ("/api/v1/browser/conversations/{conversation_id}", "delete", "204"),
+        (
+            "/api/v1/browser/conversations/{conversation_id}/messages",
+            "get",
+            "200",
+        ),
+        (
+            "/api/v1/browser/conversations/{conversation_id}/messages",
             "post",
             "201",
         ),
@@ -110,6 +174,13 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
     assert (
         "422"
         in paths["/api/v1/conversations/{conversation_id}/messages"]["post"][
+            "responses"
+        ]
+    )
+    assert "422" in paths["/api/v1/browser/conversations"]["post"]["responses"]
+    assert (
+        "422"
+        in paths["/api/v1/browser/conversations/{conversation_id}/messages"]["post"][
             "responses"
         ]
     )

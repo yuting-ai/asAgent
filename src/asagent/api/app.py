@@ -18,6 +18,12 @@ from asagent.agent.run_submission import (
     UnknownConversationError,
 )
 from asagent.api.auth import BearerTokenAuthenticator, LocalApiToken
+from asagent.bootstrap.agent_settings import (
+    MAX_MAX_STEPS,
+    MIN_MAX_STEPS,
+    AgentSettings,
+    AgentSettingsStore,
+)
 from asagent.bootstrap.model_settings import (
     ModelApiKeyMissingError,
     ModelSettings,
@@ -28,7 +34,7 @@ from asagent.bootstrap.tavily_settings import (
     TavilySettings,
     TavilySettingsStatus,
 )
-from asagent.core.conversation import Conversation
+from asagent.core.conversation import Conversation, ConversationKind
 from asagent.core.file_change import FileChange
 from asagent.core.ids import ApprovalId, ConversationId, FileChangeId, RunId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
@@ -49,6 +55,7 @@ from asagent.tools.approval import (
     ToolApprovalDecision,
     ToolApprovalRequest,
 )
+from asagent.tools.browser_run_bindings import BrowserRunBindings
 from asagent.workspace.settings import (
     ConversationWorkspaceSettings,
     WorkspaceSettingsStatus,
@@ -136,6 +143,32 @@ class CreateMessageRequest(BaseModel):
         return value
 
 
+class CreateBrowserMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str
+    tab_id: str
+
+    @field_validator("content")
+    @classmethod
+    def content_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("content must not be blank")
+        return value
+
+    @field_validator("tab_id")
+    @classmethod
+    def tab_id_must_be_valid(cls, value: str) -> str:
+        tab_id = value.strip()
+        if not tab_id:
+            raise ValueError("tab_id must not be blank")
+        if len(tab_id) > 80 or any(
+            not character.isalnum() and character not in "-_" for character in tab_id
+        ):
+            raise ValueError("tab_id is invalid")
+        return tab_id
+
+
 class RunResponse(BaseModel):
     run_id: str
     status: RunStatus
@@ -174,6 +207,7 @@ class ToolApprovalResponse(BaseModel):
     arguments: dict[str, object]
     resource_path: str | None = None
     impact_summary: str | None = None
+    allows_conversation_approval: bool = True
 
     @classmethod
     def from_request(cls, request: ToolApprovalRequest) -> "ToolApprovalResponse":
@@ -205,6 +239,9 @@ class ToolApprovalResponse(BaseModel):
             arguments=arguments,
             resource_path=resource_path,
             impact_summary=impact_summary,
+            allows_conversation_approval=(
+                request.definition.allows_conversation_approval
+            ),
         )
 
 
@@ -304,6 +341,27 @@ class UpdateModelSettingsRequest(BaseModel):
         return value
 
 
+class AgentSettingsResponse(BaseModel):
+    max_steps: int
+
+    @classmethod
+    def from_settings(cls, settings: AgentSettings) -> "AgentSettingsResponse":
+        return cls(max_steps=settings.max_steps)
+
+
+class UpdateAgentSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_steps: int = Field(ge=MIN_MAX_STEPS, le=MAX_MAX_STEPS)
+
+    @field_validator("max_steps", mode="before")
+    @classmethod
+    def max_steps_must_be_strict_int(cls, value: object) -> object:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("max_steps must be an integer")
+        return value
+
+
 class UpdateTavilySettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -365,11 +423,13 @@ def create_app(
     tool_approvals: PendingToolApprovalPolicy | None = None,
     tavily_settings: TavilySettings | None = None,
     model_settings: ModelSettings | None = None,
+    agent_settings: AgentSettingsStore | None = None,
     workspace_settings: ConversationWorkspaceSettings | None = None,
     file_changes: FileChangeRepository | None = None,
     revert_file_change: (
         Callable[[FileChangeId, Path], Awaitable[FileChange]] | None
     ) = None,
+    browser_run_bindings: BrowserRunBindings | None = None,
     conversation_id_factory: Callable[[], ConversationId] | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
@@ -398,14 +458,94 @@ def create_app(
 
         return stored_run
 
-    async def get_local_conversation(conversation_id: ConversationId) -> Conversation:
+    async def get_local_conversation(
+        conversation_id: ConversationId,
+        *,
+        kind: ConversationKind,
+    ) -> Conversation:
         conversation = await conversations.get(conversation_id)
-        if conversation is None or conversation.user_id != _LOCAL_USER_ID:
+        if (
+            conversation is None
+            or conversation.user_id != _LOCAL_USER_ID
+            or conversation.kind != kind
+        ):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="conversation not found",
             )
         return conversation
+
+    async def list_conversations_of_kind(
+        kind: ConversationKind,
+    ) -> list[ConversationResponse]:
+        stored_conversations = await conversations.list_for_user(
+            _LOCAL_USER_ID,
+            kind=kind,
+        )
+        return [
+            ConversationResponse.from_conversation(conversation)
+            for conversation in stored_conversations
+        ]
+
+    async def create_conversation_of_kind(
+        kind: ConversationKind,
+    ) -> ConversationResponse:
+        created_at = current_time()
+        conversation = Conversation(
+            conversation_id=create_conversation_id(),
+            user_id=_LOCAL_USER_ID,
+            created_at=created_at,
+            updated_at=created_at,
+            kind=kind,
+        )
+        await conversations.save(conversation)
+        return ConversationResponse.from_conversation(conversation)
+
+    async def submit_message_of_kind(
+        conversation_id: str,
+        request: CreateMessageRequest,
+        *,
+        kind: ConversationKind,
+    ) -> SubmitMessageResponse:
+        await get_local_conversation(ConversationId(conversation_id), kind=kind)
+        try:
+            submission = await run_submission.submit(
+                conversation_id=ConversationId(conversation_id),
+                content=request.content,
+                user_id=_LOCAL_USER_ID,
+            )
+        except (
+            UnknownConversationError,
+            ConversationAccessDeniedError,
+        ) as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="conversation not found",
+            ) from error
+
+        dispatch_submitted_run(submission)
+
+        return SubmitMessageResponse(
+            message=MessageResponse.from_message(submission.user_message),
+            run=RunResponse.from_run(submission.run),
+            conversation=ConversationResponse.from_conversation(
+                submission.conversation,
+            ),
+        )
+
+    async def list_messages_of_kind(
+        conversation_id: str,
+        *,
+        kind: ConversationKind,
+    ) -> list[MessageResponse]:
+        stored_conversation = await get_local_conversation(
+            ConversationId(conversation_id),
+            kind=kind,
+        )
+        stored_messages = await conversations.list_messages(
+            stored_conversation.conversation_id,
+        )
+        return [MessageResponse.from_message(message) for message in stored_messages]
 
     async def get_pending_approval(approval_id: ApprovalId) -> ToolApprovalRequest:
         if tool_approvals is None:
@@ -486,11 +626,7 @@ def create_app(
         dependencies=[Depends(authenticate)],
     )
     async def list_conversations() -> list[ConversationResponse]:
-        stored_conversations = await conversations.list_for_user(_LOCAL_USER_ID)
-        return [
-            ConversationResponse.from_conversation(conversation)
-            for conversation in stored_conversations
-        ]
+        return await list_conversations_of_kind("chat")
 
     @app.post(
         "/api/v1/conversations",
@@ -502,17 +638,7 @@ def create_app(
         request: CreateConversationRequest,
     ) -> ConversationResponse:
         del request
-
-        created_at = current_time()
-        conversation = Conversation(
-            conversation_id=create_conversation_id(),
-            user_id=_LOCAL_USER_ID,
-            created_at=created_at,
-            updated_at=created_at,
-        )
-        await conversations.save(conversation)
-
-        return ConversationResponse.from_conversation(conversation)
+        return await create_conversation_of_kind("chat")
 
     @app.patch(
         "/api/v1/conversations/{conversation_id}",
@@ -523,11 +649,13 @@ def create_app(
         conversation_id: str,
         request: UpdateConversationRequest,
     ) -> ConversationResponse:
-        conversation = await get_local_conversation(ConversationId(conversation_id))
+        conversation = await get_local_conversation(
+            ConversationId(conversation_id),
+            kind="chat",
+        )
         updated = replace(
             conversation,
             title=request.title,
-            updated_at=current_time(),
         )
         await conversations.save(updated)
         return ConversationResponse.from_conversation(updated)
@@ -538,13 +666,7 @@ def create_app(
         dependencies=[Depends(authenticate)],
     )
     async def delete_conversation(conversation_id: str) -> Response:
-        conversation = await conversations.get(ConversationId(conversation_id))
-        if conversation is None or conversation.user_id != _LOCAL_USER_ID:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="conversation not found",
-            )
-
+        await get_local_conversation(ConversationId(conversation_id), kind="chat")
         deleted = await conversations.delete(ConversationId(conversation_id))
         if not deleted:
             raise HTTPException(
@@ -564,29 +686,10 @@ def create_app(
         conversation_id: str,
         request: CreateMessageRequest,
     ) -> SubmitMessageResponse:
-        try:
-            submission = await run_submission.submit(
-                conversation_id=ConversationId(conversation_id),
-                content=request.content,
-                user_id=_LOCAL_USER_ID,
-            )
-        except (
-            UnknownConversationError,
-            ConversationAccessDeniedError,
-        ) as error:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="conversation not found",
-            ) from error
-
-        dispatch_submitted_run(submission)
-
-        return SubmitMessageResponse(
-            message=MessageResponse.from_message(submission.user_message),
-            run=RunResponse.from_run(submission.run),
-            conversation=ConversationResponse.from_conversation(
-                submission.conversation,
-            ),
+        return await submit_message_of_kind(
+            conversation_id,
+            request,
+            kind="chat",
         )
 
     @app.get(
@@ -679,20 +782,92 @@ def create_app(
     async def list_conversation_messages(
         conversation_id: str,
     ) -> list[MessageResponse]:
-        stored_conversation = await conversations.get(
-            ConversationId(conversation_id),
-        )
+        return await list_messages_of_kind(conversation_id, kind="chat")
 
-        if stored_conversation is None or stored_conversation.user_id != _LOCAL_USER_ID:
+    @app.get(
+        "/api/v1/browser/conversations",
+        response_model=list[ConversationResponse],
+        dependencies=[Depends(authenticate)],
+    )
+    async def list_browser_conversations() -> list[ConversationResponse]:
+        return await list_conversations_of_kind("browser")
+
+    @app.post(
+        "/api/v1/browser/conversations",
+        response_model=ConversationResponse,
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(authenticate)],
+    )
+    async def create_browser_conversation(
+        request: CreateConversationRequest,
+    ) -> ConversationResponse:
+        del request
+        return await create_conversation_of_kind("browser")
+
+    @app.delete(
+        "/api/v1/browser/conversations/{conversation_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(authenticate)],
+    )
+    async def delete_browser_conversation(conversation_id: str) -> Response:
+        await get_local_conversation(ConversationId(conversation_id), kind="browser")
+        deleted = await conversations.delete(ConversationId(conversation_id))
+        if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="conversation not found",
             )
 
-        stored_messages = await conversations.list_messages(
-            stored_conversation.conversation_id,
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.get(
+        "/api/v1/browser/conversations/{conversation_id}/messages",
+        response_model=list[MessageResponse],
+        dependencies=[Depends(authenticate)],
+    )
+    async def list_browser_conversation_messages(
+        conversation_id: str,
+    ) -> list[MessageResponse]:
+        return await list_messages_of_kind(conversation_id, kind="browser")
+
+    @app.post(
+        "/api/v1/browser/conversations/{conversation_id}/messages",
+        response_model=SubmitMessageResponse,
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(authenticate)],
+    )
+    async def submit_browser_message(
+        conversation_id: str,
+        request: CreateBrowserMessageRequest,
+    ) -> SubmitMessageResponse:
+        await get_local_conversation(ConversationId(conversation_id), kind="browser")
+        try:
+            submission = await run_submission.submit(
+                conversation_id=ConversationId(conversation_id),
+                content=request.content,
+                user_id=_LOCAL_USER_ID,
+            )
+        except (
+            UnknownConversationError,
+            ConversationAccessDeniedError,
+        ) as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="conversation not found",
+            ) from error
+
+        if browser_run_bindings is not None:
+            browser_run_bindings.bind(submission.run.run_id, request.tab_id)
+
+        dispatch_submitted_run(submission)
+
+        return SubmitMessageResponse(
+            message=MessageResponse.from_message(submission.user_message),
+            run=RunResponse.from_run(submission.run),
+            conversation=ConversationResponse.from_conversation(
+                submission.conversation,
+            ),
         )
-        return [MessageResponse.from_message(message) for message in stored_messages]
 
     @app.get(
         "/api/v1/conversations/{conversation_id}/file-changes",
@@ -702,7 +877,9 @@ def create_app(
     async def list_conversation_file_changes(
         conversation_id: str,
     ) -> list[FileChangeResponse]:
-        conversation = await get_local_conversation(ConversationId(conversation_id))
+        conversation = await get_local_conversation(
+            ConversationId(conversation_id), kind="chat"
+        )
         if file_changes is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -844,6 +1021,40 @@ def create_app(
         async def delete_model_settings() -> ModelSettingsResponse:
             return ModelSettingsResponse.from_status(await model_settings.delete())
 
+    if agent_settings is not None:
+
+        @app.get(
+            "/api/v1/agent-settings",
+            response_model=AgentSettingsResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def get_agent_settings() -> AgentSettingsResponse:
+            try:
+                settings = agent_settings.get()
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="agent settings are invalid",
+                ) from error
+            return AgentSettingsResponse.from_settings(settings)
+
+        @app.put(
+            "/api/v1/agent-settings",
+            response_model=AgentSettingsResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def update_agent_settings(
+            request: UpdateAgentSettingsRequest,
+        ) -> AgentSettingsResponse:
+            try:
+                saved = agent_settings.save(AgentSettings(max_steps=request.max_steps))
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="agent settings are invalid",
+                ) from error
+            return AgentSettingsResponse.from_settings(saved)
+
     if workspace_settings is not None:
 
         @app.get(
@@ -854,7 +1065,9 @@ def create_app(
         async def get_workspace_settings(
             conversation_id: str,
         ) -> WorkspaceSettingsResponse:
-            conversation = await get_local_conversation(ConversationId(conversation_id))
+            conversation = await get_local_conversation(
+                ConversationId(conversation_id), kind="chat"
+            )
             return WorkspaceSettingsResponse.from_status(
                 await workspace_settings.get_status(conversation.conversation_id)
             )
@@ -868,7 +1081,9 @@ def create_app(
             conversation_id: str,
             request: UpdateWorkspaceSettingsRequest,
         ) -> WorkspaceSettingsResponse:
-            conversation = await get_local_conversation(ConversationId(conversation_id))
+            conversation = await get_local_conversation(
+                ConversationId(conversation_id), kind="chat"
+            )
             try:
                 saved_status = await workspace_settings.save(
                     conversation_id=conversation.conversation_id,

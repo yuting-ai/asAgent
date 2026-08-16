@@ -55,6 +55,7 @@ interface ToolApproval {
   arguments: Record<string, unknown>
   resource_path: string | null
   impact_summary: string | null
+  allows_conversation_approval: boolean
 }
 
 interface FileChange {
@@ -79,10 +80,18 @@ interface ModelSettingsStatus {
   base_url: string | null
 }
 
+interface AgentSettingsStatus {
+  max_steps: number
+}
+
 interface ModelSettingsInput {
   model: string
   baseUrl: string
   apiKey?: string
+}
+
+interface AgentSettingsInput {
+  maxSteps: number
 }
 
 interface WorkspaceSettingsStatus {
@@ -96,8 +105,30 @@ interface WorkspaceSettingsInput {
   additionalFiles: string[]
 }
 
+interface BrowserSessionTab {
+  tabId: string
+  url: string
+  conversationId: string | null
+}
+
+interface BrowserSessionSnapshot {
+  version: 1
+  visibleTabId: string
+  tabs: BrowserSessionTab[]
+}
+
 interface DesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>
+  showBrowser(
+    tabId: string,
+    bounds: { x: number; y: number; width: number; height: number }
+  ): Promise<void>
+  hideBrowser(): Promise<void>
+  navigateBrowser(tabId: string, url: string): Promise<string>
+  closeBrowserTab(tabId: string): Promise<void>
+  controlBrowser(tabId: string, action: 'back' | 'forward' | 'reload' | 'home'): Promise<void>
+  getBrowserSession(): Promise<BrowserSessionSnapshot>
+  setBrowserTabConversation(tabId: string, conversationId: string | null): Promise<void>
   openExternalLink(url: string): Promise<void>
   copyText(content: string): Promise<void>
   getBackendStatus(): Promise<{ status: 'ready' | 'unavailable' }>
@@ -110,6 +141,15 @@ interface DesktopBridge {
   updateConversationTitle(conversationId: string, title: string): Promise<ConversationSummary>
   deleteConversation(conversationId: string): Promise<void>
   submitMessage(conversationId: string, content: string): Promise<SubmittedMessage>
+  listBrowserConversations(): Promise<ConversationSummary[]>
+  createBrowserConversation(): Promise<ConversationSummary>
+  deleteBrowserConversation(conversationId: string): Promise<void>
+  listBrowserConversationMessages(conversationId: string): Promise<ConversationMessage[]>
+  submitBrowserMessage(
+    conversationId: string,
+    content: string,
+    tabId: string
+  ): Promise<SubmittedMessage>
   cancelRun(runId: string): Promise<void>
   decideToolApproval(
     approvalId: string,
@@ -122,6 +162,8 @@ interface DesktopBridge {
   getModelSettings(): Promise<ModelSettingsStatus>
   saveModelSettings(input: ModelSettingsInput): Promise<ModelSettingsStatus>
   deleteModelSettings(): Promise<ModelSettingsStatus>
+  getAgentSettings(): Promise<AgentSettingsStatus>
+  saveAgentSettings(input: AgentSettingsInput): Promise<AgentSettingsStatus>
   getConversationFileAccess(conversationId: string): Promise<WorkspaceSettingsStatus>
   chooseWorkspacePath(): Promise<{ path: string; kind: 'directory' | 'file' } | null>
   saveConversationFileAccess(
@@ -132,6 +174,15 @@ interface DesktopBridge {
   onRunStreamError(callback: (error: RunStreamError) => void): () => void
   onToolApprovalRequested(callback: (approval: ToolApproval) => void): () => void
   onToolApprovalError(callback: (error: RunStreamError) => void): () => void
+  onBrowserTabState(
+    callback: (state: {
+      tabId: string
+      url: string
+      title: string
+      canGoBack: boolean
+      canGoForward: boolean
+    }) => void
+  ): () => void
 }
 
 declare global {

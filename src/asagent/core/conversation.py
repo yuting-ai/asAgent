@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from asagent.core.ids import ConversationId, UserId
+
+ConversationKind = Literal["chat", "browser"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -11,3 +14,4 @@ class Conversation:
     created_at: datetime
     updated_at: datetime
     title: str | None = None
+    kind: ConversationKind = "chat"

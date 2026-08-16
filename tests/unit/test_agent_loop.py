@@ -110,6 +110,15 @@ class HangingEchoTool(CountingEchoTool):
         raise AssertionError("unreachable")
 
 
+class OperationErrorTool(CountingEchoTool):
+    async def execute(self, arguments: Mapping[str, object]) -> str:
+        from asagent.tools.errors import ToolOperationError
+
+        self.calls += 1
+        del arguments
+        raise ToolOperationError("target is obscured")
+
+
 class FixedApprovalPolicy:
     def __init__(self, approved: bool) -> None:
         self._approved = approved
@@ -511,9 +520,147 @@ async def test_loop_appends_paired_tool_error_when_execution_times_out() -> None
     assert tool.calls == 1
     assert provider.requests[1].messages[-1] == ModelMessage(
         role=ModelMessageRole.TOOL,
-        content="Error: tool execution timed out.",
+        content=(
+            "Error: tool execution timed out. "
+            "Do not retry the same tool call with the same arguments."
+        ),
         tool_call_id="call_123",
     )
+
+
+@pytest.mark.asyncio
+async def test_loop_blocks_the_second_identical_call_when_limit_is_one() -> None:
+    tool_call = ModelToolCall(
+        call_id="call_1",
+        name="builtin_echo",
+        arguments={"text": "hello"},
+    )
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(text=None, tool_calls=(tool_call,)),
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="call_2",
+                        name="builtin_echo",
+                        arguments={"text": "hello"},
+                    ),
+                ),
+            ),
+            ModelResponse(text="I will stop retrying.", tool_calls=()),
+        ),
+    )
+    tool = CountingEchoTool()
+
+    result = await _loop(
+        provider,
+        tool,
+        max_steps=4,
+        max_calls_per_tool_input=1,
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.steps_used == 3
+    assert tool.calls == 1
+    assert provider.requests[2].messages[-1] == ModelMessage(
+        role=ModelMessageRole.TOOL,
+        content="Error: repeated tool call limit reached.",
+        tool_call_id="call_2",
+    )
+
+
+@pytest.mark.asyncio
+async def test_loop_returns_allowlisted_tool_operation_errors() -> None:
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="call_1",
+                        name="builtin_echo",
+                        arguments={"text": "hello"},
+                    ),
+                ),
+            ),
+            ModelResponse(text="The target was obscured.", tool_calls=()),
+        ),
+    )
+    tool = OperationErrorTool()
+
+    result = await _loop(provider, tool, max_steps=3).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert tool.calls == 1
+    assert provider.requests[1].messages[-1] == ModelMessage(
+        role=ModelMessageRole.TOOL,
+        content="Error: target is obscured",
+        tool_call_id="call_1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_loop_allows_identical_call_after_a_different_tool_input() -> None:
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="call_1",
+                        name="builtin_echo",
+                        arguments={"text": "page"},
+                    ),
+                ),
+            ),
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="call_2",
+                        name="builtin_echo",
+                        arguments={"text": "click"},
+                    ),
+                ),
+            ),
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="call_3",
+                        name="builtin_echo",
+                        arguments={"text": "page"},
+                    ),
+                ),
+            ),
+            ModelResponse(text="Read the page again after the click.", tool_calls=()),
+        ),
+    )
+    tool = CountingEchoTool()
+
+    result = await _loop(
+        provider,
+        tool,
+        max_steps=4,
+        max_calls_per_tool_input=1,
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.steps_used == 4
+    assert tool.calls == 3
 
 
 @pytest.mark.asyncio
@@ -940,12 +1087,20 @@ def test_loop_requires_a_positive_step_limit() -> None:
     registry = ToolRegistry()
     registry.register(tool)
 
-    with pytest.raises(ValueError, match="max_steps must be positive"):
+    with pytest.raises(ValueError, match="max_steps must be between 1 and 50"):
         AgentLoop(
             model=provider,
             executor=ToolExecutor(registry),
             tool_snapshot=_snapshot(tool),
             max_steps=0,
+        )
+
+    with pytest.raises(ValueError, match="max_steps must be between 1 and 50"):
+        AgentLoop(
+            model=provider,
+            executor=ToolExecutor(registry),
+            tool_snapshot=_snapshot(tool),
+            max_steps=51,
         )
 
     with pytest.raises(

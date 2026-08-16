@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 7 进行中；阶段 0–6 的 Core、Agent Loop、SQLite 持久化、Context Builder 基础、受控 Workspace Tool 边界与 Local API/SSE 已完成，当前继续 Electron 最小集成。
-- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建（响应含可空 title，创建请求仍禁止 title）、可见 Message 查询/提交、按 Run ID 查询状态、协作取消，以及基于持久化 RunEvent 的认证 SSE 回放/实时观察。首条消息提交会在 RunStarter 同事务中生成会话标题。
+- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、按 `kind` 隔离的 Chat/Browser Conversation 列表/创建、可见 Message 查询/提交、按 Run ID 查询状态、协作取消，以及基于持久化 RunEvent 的认证 SSE 回放/实时观察。首条消息提交会在 RunStarter 同事务中生成会话标题。桌面 Browser 侧栏已接入独立的真实 Browser Conversation；仅绑定的 Browser Run 可注册 `browser.read_current_page`、`browser.inspect_interactive` 与 `browser.click(target_id)`。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
-- 当前日期：2026-08-11
-- 当前目标：桌面 Chat 已能显示并按最近活跃排序的会话；下一项在用户确认后继续阶段 7 体验回顾与下一真实用户价值路径。
+- 当前日期：2026-08-16
+- 当前目标：Browser inspect/click（含跨域 iframe）与共用 `max_steps` 已提交；已知 HF Space 交互清单误抽问题记为后续修复；下一项可选 `browser.fill` 或 inspector 启发式修复。
 
 ## 2. 已完成
 
@@ -3704,3 +3704,276 @@
 ### 决策变化
 
 - 新增 DEC-077。
+
+## 2026-08-15 Conversation rename ordering
+
+### 完成
+
+- 重命名 Conversation 只保存标题，不再更新其活跃时间；Renderer 也原位更新该列表项，因此重命名后不会移到列表首位。
+
+## 2026-08-15 Assistant Markdown table rendering
+
+### 完成
+
+- AssistantMessage 的安全 Markdown 渲染启用 GFM 表格语法；表格使用紧凑边框样式，超出消息宽度时在消息内横向滚动。
+
+### 验证
+
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（26 passed）和 `npm run build` 全部通过。
+
+## 2026-08-16 可见嵌入式浏览器基础：范围确认
+
+### 已确认
+
+- 新建独立功能分支 `visible-browser-foundation`，用于可见嵌入式浏览器基础；已有未提交的会话列表 CSS 调整不属于本功能，保持原样且不会纳入本功能提交。
+- 浏览器体验优先保证用户可见、可理解并可在未来人工接管：Electron Main 将成为 asAgent 专属持久浏览器 Session 的唯一所有者，使用 `WebContentsView`，不采用已弃用的 `BrowserView`。
+- 第一个小任务只新增独立 Browser 菜单、可见网页 View 和安全生命周期。它不连接 Python Agent、ToolRegistry、MCP、Gmail、Scheduler 或浏览器自动化操作。
+- 当前不会复制或导出 Cookie，也不允许 Playwright 或其他 Chromium 进程并发访问同一 Profile。网页的 Cookie、密码、Storage 与会话凭据不进入 Renderer、Python、日志、RunEvent、ToolCall 或模型上下文。
+
+### 下一步
+
+- 在本分支的一个独立小任务中设计并实现最小 `WebContentsView` 菜单与关闭生命周期，配套 Main 进程测试和安全导航验收；完成前不开始 AI BrowserAction。
+
+## 2026-08-16 可见嵌入式浏览器 Browser v0
+
+### 完成
+
+- Electron Main 现在创建并拥有使用 `browser-profile` 持久 Session 的 `WebContentsView`；Renderer 通过来源校验后的窄 IPC 显示、隐藏、导航、关闭和控制受管标签，不能读取网页 DOM、Cookie、Storage 或密码。
+- Browser 菜单提供可见标签、地址栏、后退、前进、刷新和主页。HTTP/HTTPS 地址可省略 scheme；`file:`、`javascript:`、`data:`、`ftp:` 等非网页协议被拒绝。
+- `window.open`/`target=_blank` 的 HTTP/HTTPS 目标不创建原生 Electron 子窗口，而是转换为当前可见 Session 中最多 16 个标签；不安全目标仍拒绝。
+- 原始带 userinfo 的 URL 只传给 Main 的 `loadURL()`，以保留 Basic Authentication 兼容性。所有发给 Renderer 的导航状态、地址栏回执和新标签状态均删除 username/password；页面加载失败返回安全错误，HTTP 404 继续作为正常页面加载。
+- 本功能仍不接入 Python Agent、ToolRegistry、MCP、Gmail 或 Scheduler。
+
+### 验证
+
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（79 passed）、`npm run build` 和 `git diff --check` 全部通过。
+- 手动桌面验收通过：普通 HTTP/HTTPS 导航、网页第三方链接的受管新标签、带 userinfo 地址在加载后的脱敏显示、`file:`/`javascript:`/`data:` 拒绝、Chat/Browser 切换后的页面保持，以及重启后的专属 Session/Profile 均符合预期。测试没有使用真实账号或密码。
+
+### 下一步
+
+- 先实现 Browser Conversation 的类型隔离与侧栏最近会话入口：它接入既有 Agent/Run 管线，但不能出现在 Chat 列表。随后在该独立入口实现只读当前可见页的最小 Browser Tool 闭环；页面加载状态只作为该 Tool 的必要结果，不单独开发观测产品功能。本次仍不开始通用点击/输入、站点范围、审批或 Scheduler。
+
+## 2026-08-16 Browser Conversation 与 Chat 隔离
+
+### 完成
+
+- Conversation 增加稳定类型 `kind`：`chat` 或 `browser`，默认 `chat`。SQLite `conversations` 表新增带 CHECK 约束的 `kind` 列；Alembic `20260816_06` 将旧行迁移为 `chat`。
+- 既有 `/api/v1/conversations` 只处理 Chat。新增四条固定 Browser 路由，复用 Message、Run、SSE 与首条消息自动标题，跨类型访问返回 404。不持久化 `tabId`、URL 或网页正文。
+- Electron Main/Preload 增加四个具名 Browser Conversation 操作；提交后继续复用既有 Run SSE。Renderer 用独立状态驱动 Page assistant，标签绑定只存在内存中。
+- Page assistant 增加紧凑的 New conversation 与 Recent conversations 入口，不搬入 Chat 的重命名/删除交互。本任务不注册页面读取或浏览器操作 Tool。
+
+### 验证
+
+- Python 定向测试 39 passed：`test_conversation.py`、`test_in_memory_conversation_repository.py`、`test_conversation_repository.py`、`test_api_conversations.py`、`test_local_api_openapi.py`。
+- `ruff format` / `ruff check`（相关文件）与 `uv run mypy` 通过。
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（80 passed）和 `npm run build` 全部通过。
+
+### 决策变化
+
+- 落实 DEC-079 的 Conversation 类型隔离；`browser.read_current_page` 仍未实现。
+
+### 下一步
+
+- 仅为 Browser Run 注册只读 `browser.read_current_page`：从当前可见 `WebContentsView` 返回限长文本。本次仍不开始点击、输入或其他浏览器操作 Tool。
+
+## 2026-08-16 browser.read_current_page
+
+### 完成
+
+- Browser Message API 接受瞬时 `tab_id`；Main 验证其为当前可见标签后提交。Python 在 Dispatcher 前把 `run_id → tab_id` 写入进程内 `BrowserRunBindings`，构建 Tool Registry 时 `take()` 消费，不写入 SQLite。
+- Electron Main 新增回环 `BrowserPageBridge`（Bearer Token + `POST /read-current-page`），经 bootstrap 把 `browser_bridge` 交给 Python；Token 不进 ready 输出、Renderer 或日志。
+- `VisibleBrowser.readCurrentPage` 用固定 `executeJavaScript` 读取 title/`innerText`，URL 经既有脱敏，标题/正文分别限 512 字符与 32 KiB。
+- 仅 `kind=browser` 且有绑定与 bridge 的 Run 注册 `browser.read_current_page` 并授予 `browser.read`；Chat Run 无此 Tool。无 bridge 时 Browser 对话仍可普通进行。
+
+### 验证
+
+- Python：`test_api_bootstrap.py`、`test_browser_read_current_page.py`、`test_api_conversations.py`、`test_persistent_runtime.py` 共 47 passed；`ruff` 与 `mypy` 通过。
+- Desktop：`npm run format`、`typecheck`、`lint`、`test`（84 passed）、`build` 通过。
+
+### 决策变化
+
+- 落实 DEC-079 的只读页面 Tool；点击/输入等仍未实现。
+
+### 下一步
+
+- 按需单独加入更高风险的 Browser Tool（点击、输入、导航等），各自带权限、范围与审批。
+
+## 2026-08-16 Browser 读页重复调用限制
+
+### 完成
+
+- 注册 `browser.read_current_page` 的 Browser Run 将 `max_calls_per_tool_input=1`，同一 `(tool_id, 参数)` 只执行一次，避免超时后二次空转。
+- 工具超时 TOOL 文案增加 “Do not retry the same tool call with the same arguments.”；读页 Tool description 明确失败/超时后不要在同一 Run 内再次调用。
+
+### 验证
+
+- `uv run pytest tests/unit/test_agent_loop.py tests/unit/test_browser_read_current_page.py -q`：29 passed；`ruff` 通过。
+- 手动：Browser 侧栏提问当前网页主题，约 14s 返回结果，不再出现约 25s 的二次超时空转。
+
+### 决策变化
+
+- 更新 DEC-032（Browser 读页 Run 启用上限 1）、DEC-036（超时文案）。
+
+### 下一步
+
+- 按需单独排查读页桥接/ `executeJavaScript` 超时根因；更高风险 Browser Tool 仍各自独立加入。
+
+## 2026-08-16 Browser 标签会话恢复
+
+### 完成
+
+- Electron Main 将打开的标签（稳定 `tabId` + 脱敏 URL）、`visibleTabId` 与 `tabId → conversationId` 绑定写入 appHome `browser-session.json`；debounce 保存，退出前 flush；启动时 `restorePersistedTabs` 并经 IPC 灌入 Renderer。
+- 恢复时用现有 Browser Conversation 列表过滤失效绑定；损坏/缺失文件回落到单个空白标签。标签壳不进 SQLite。
+
+### 验证
+
+- `desktop`：`npm run typecheck`、`npm run lint`、`npm test`：93 passed。
+
+### 决策变化
+
+- 更新 DEC-079、`01-architecture`、`03-desktop-and-docker`：桌面本地会话文件可跨重启，仍不把标签写入 SQLite。
+
+### 下一步
+
+- 手动验收：多标签 + 侧栏绑定 → 重启 → URL/可见/绑定恢复；删除对话后再重启 → 页在绑定空。
+
+## 2026-08-16 Browser 侧栏删除与助手消息操作
+
+### 完成
+
+- 新增 `DELETE /api/v1/browser/conversations/{id}` 与桌面 IPC；Recent 菜单每项可删除 Browser 对话，并清理标签绑定。
+- Browser 助手气泡下方增加时间与复制按钮（对齐 Chat 的 message-meta）。
+
+### 验证
+
+- `test_delete_browser_conversation_removes_only_browser_conversation`、OpenAPI contract；desktop typecheck/lint/test 通过。
+
+### 下一步
+
+- 按需继续 Browser Tool 或其它 UI 打磨。
+
+## 2026-08-16 browser.click
+
+### 完成
+
+- 新增 `browser.click`（selector only、`browser.click` 权限、`requires_approval`、`allows_conversation_approval=false`）；仅绑定 Browser Run 与 `browser.read_current_page` 一起注册。
+- Main `VisibleBrowser.clickCurrentPage`：可见标签校验、固定脚本定位/滚动/遮挡检查、Agent pointer、150ms 后 `mouseMove/mouseDown/mouseUp`；bridge 新增 `POST /click-current-page`。
+- 审批 UI 对不允许会话批准的 Tool 隐藏 `Allow for this conversation`。
+
+### 验证
+
+- Python：`test_browser_click.py`、`test_browser_read_current_page.py`、`test_tool_approval.py`；`mypy` 相关文件通过。
+- Desktop：`npm run typecheck`、`npm run lint`、`npm test`：95 passed。
+
+### 决策变化
+
+- 更新 DEC-079：`browser.click` 已落地且仅一次性批准；下一项可选 `browser.fill`。
+
+### 下一步
+
+- 手动验收点击审批与 pointer；再按需实现 `browser.fill`。
+
+## 2026-08-16 Browser 审批 UI
+
+### 完成
+
+- Browser 侧栏许可请求改为独立卡片：种类徽章、标题、selector/资源细节、等宽 Deny / Allow once（窄栏适配）；`browser.click` 仍不出现会话级批准。
+
+### 下一步
+
+- 手动确认审批卡片观感后再继续 `browser.fill`。
+
+## 2026-08-16 重复工具调用改为连续 streak
+
+### 完成
+
+- `max_calls_per_tool_input` 改为按**连续**相同 `(tool_id, 参数)` 计数；中间换工具/参数会重置。Browser Run 仍为上限 1，因此阻止连读空转，但允许 `read → click → read`。
+- 更新 `browser.read_current_page` 描述：页面变化后应再读；仅避免失败/超时后立刻同参重试。
+- 更新 DEC-032。
+
+### 验证
+
+- `uv run pytest tests/unit/test_agent_loop.py tests/unit/test_browser_read_current_page.py -q`：30 passed。
+
+### 下一步
+
+- 手动验收：点击后能再次读新页面；连续超时重试仍被拦住。
+
+## 2026-08-16 browser.click 免审批
+
+### 完成
+
+- `browser.click` 改为 `requires_approval=False`；在可见 Browser Run 中直接执行，不再弹出 Approval 卡片。
+- 保留 `allows_conversation_approval` 通用机制与 Browser 审批 UI，供未来 `browser.submit` / 上传 / 下载等一次性批准使用；审批单测改用测试用 `browser.submit` 定义。
+- 更新 DEC-079、`01-architecture`。
+
+### 验证
+
+- `uv run pytest tests/unit/test_browser_click.py tests/unit/test_tool_approval.py tests/integration/test_api_tool_approvals.py -q`：17 passed；`ruff`、`mypy` 通过。
+- Desktop：`npm run typecheck`、`npm run lint`、`npm run test`：95 passed。
+
+### 下一步
+
+- 手动验收：Click 无审批卡片、同一 Run 内可连续 read/click；再按需实现 `browser.fill`。
+
+## 2026-08-16 browser.inspect_interactive + target_id click
+
+### 完成
+
+- 新增 `browser.inspect_interactive`：返回有界交互元素清单；内部 selector 只留在 Main 按标签快照中，导航后清空。
+- `browser.click` 改为只接受 `target_id`；bridge 新增 `POST /inspect-interactive`，点击改为 `{tab_id,target_id}`。
+- 新增 `ToolOperationError` 与固定错误文案回传；AgentLoop 单独捕获。
+- 更新 DEC-079、`01-architecture`。
+
+### 验证
+
+- Python：相关 unit 50 passed；`ruff`、`mypy` 通过。
+- Desktop：`browser_view` / `browser_page_bridge` 46 passed；typecheck 通过。
+
+### 下一步
+
+- 手动验收 mofs.dev：inspect → Use Sample target_id → click，不应再猜 selector 或调用 Tavily。
+
+## 2026-08-16 共用 AgentSettings.max_steps（默认 20）
+
+### 完成
+
+- 新增 `AgentSettings` / `agent.toml`（默认 `max_steps=20`，范围 1–50）；Chat 与 Browser Runtime 启动时读取同一值。
+- Local API：`GET`/`PUT /api/v1/agent-settings`；桌面 Preferences 数字输入 + Sidecar 重启提示。
+- `AgentLoop` 默认与硬上限对齐到 1–50；记录 DEC-080，更新 DEC-031 / DEC-079 / `01-architecture`。
+
+### 验证
+
+- Python：相关 unit/integration/contract 64 passed；`ruff`、`mypy` 通过。
+- Desktop：`backend_launcher.test.ts` 20 passed；`npm run typecheck` 通过。
+
+### 下一步
+
+- 手动验收：新安装默认 20；Preferences 保存 30 并重启后，新 Chat/Browser Run 上限为 30；运行中 Run 不变。
+
+## 2026-08-16 跨域 iframe inspect / click
+
+### 完成
+
+- `VisibleBrowser` 深度优先遍历 `mainFrame` 与子 frame；inspect 连续编号合并最多 80 个元素；快照保存 frame 引用 + 内部 selector。
+- 顶层点击仍用 pointer + `sendInputEvent`；iframe 点击在目标 frame 内 pointer + `HTMLElement.click()`。
+- `will-frame-navigate` / `did-frame-navigate` / `did-navigate-in-page`（及既有顶层导航）清空交互快照。
+- Python / API / Preload / Renderer / 工具 schema 未改。更新 DEC-079。
+
+### 验证
+
+- Desktop：`browser_view` 相关 48 passed；全量 `npm test` 98 passed；`typecheck`、`lint`、`prettier --check` 通过。
+
+### 已知问题（延后修复）
+
+手动验收 [H2MOF-Predictor](https://huggingface.co/spaces/ytbai/H2MOF-Predictor) 仍失败。本地 Run（如 `run_d138…`）显示：
+
+- `inspect_interactive` 未列出 “Use sample file”，却列出 HF 外壳控件、可点的 `<iframe>` 壳（如 `docker space app`）以及吞掉子控件的巨型 `section`。
+- 真实控件是 Streamlit checkbox：原生 `input[type=checkbox]` 为 `opacity:0` / 零尺寸，可见可点表面是 `label`；当前 `isVisible` +「只保留最外层候选」启发式会丢掉 label / `Browse files`。
+- 模型常点到 iframe 壳并回报 clicked，但不会勾选 iframe 内控件。
+
+后续独立小任务（仅 Main inspector）：优先保留语义控件（`a/button/input/select/textarea/label` 与 `role=button|link|checkbox`）；排除整页级 `section` / 裸 `iframe`；对隐藏 checkbox 关联其可见 label。不在本次提交中修复。
+
+### 下一步
+
+- 可选：修复上述 inspector 启发式；或继续 `browser.fill`。

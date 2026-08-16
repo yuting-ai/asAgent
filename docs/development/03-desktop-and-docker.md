@@ -56,6 +56,8 @@ Docker 不是桌面客户端依赖。最终用户安装 Electron 应用后，不
 
 Main 不负责 Agent 业务。
 
+可见嵌入式浏览器同样由 Main 管理，但它不是 Renderer 的任意网页容器：新的浏览器菜单只创建一个采用 asAgent 专属持久 Electron Session 的 `WebContentsView`。网页显示与用户登录发生在该 View 中，Renderer 只显示 asAgent 自己的 UI 状态，不能访问网页 DOM、Cookie、Storage、密码或向网页注入 IPC。HTTP/HTTPS 的 popup 请求不会生成任意原生窗口，而是转换为同一可见 Session 中受数量限制的标签；`file:`、`javascript:`、`data:` 等协议被拒绝。URL userinfo 只可在 Main 内实际加载时存在，所有回传 Renderer 的导航状态和地址栏值均删除 username/password。打开的标签、可见标签与侧栏 `conversationId` 绑定由 Main 写入 appHome 下的 `browser-session.json`（仅脱敏 URL 与引用，不含正文/Cookie），应用退出前 flush，启动时恢复；不写入 SQLite。以后 BrowserAction 仍必须由 Main 在同一个可见 View 上执行，并先经既有站点范围、审批、超时和取消边界。不得让 Playwright/其他 Chromium 进程同时读取该 Profile 目录，也不得把该 Profile 当作 Gmail OAuth 或 MCP credential store。
+
 Preferences 中的本地文件范围由 Main 的原生 `showOpenDialog` 选择目录；Main 在校验 Renderer 来源后，将目录路径交给受 Bearer 保护的固定 Workspace Settings API。Renderer 仅能读取已授权目录列表、请求选择一个目录或替换该列表，不能取得 Node 文件系统、任意路径读取或通用 IPC。该范围会在后续 Run 中约束已接入的受控读写 File Tool；保存范围本身不会扫描或修改文件，写操作仍需其独立 Tool 审批。
 
 ### Preload
@@ -136,7 +138,7 @@ uv run asagent serve ...
 
 Electron Main 还会向 Renderer 暴露一个无敏感信息的处理模式：`local` 或 `external`。它只反映本次 Sidecar 的启动配置或已保存的桌面模型 Profile 是否可用，不包含 Provider 名、端口、Token 或 API Key；Privacy 与 Preferences 页面据此准确说明是否可能将请求内容发送到外部模型服务。默认离线模式明确不外发对话内容，真实 Provider 模式明确请求所需的对话内容和工具结果可能发送至选定服务商。
 
-桌面 Chat 仅对 AssistantMessage 使用安全 Markdown 渲染，以显示标题、列表、引用、代码块和普通外部链接；UserMessage 保持原始文本。Renderer 使用不启用原始 HTML 的解析配置，因此模型文本不会直接成为 DOM HTML。点击链接会经过窄 Main IPC：只允许无凭据的 `http`/`https` URL，并由系统默认浏览器打开；Renderer 不获得 Electron shell、任意 IPC 或页面内导航能力。消息数据库仍保存原始 Markdown 文本，显示规则不改变 API 或持久化契约。
+桌面 Chat 仅对 AssistantMessage 使用安全 Markdown 渲染，以显示标题、列表、引用、代码块、GFM 表格和普通外部链接；UserMessage 保持原始文本。Renderer 使用不启用原始 HTML 的解析配置，因此模型文本不会直接成为 DOM HTML。宽表格限制在消息区域内横向滚动。点击链接会经过窄 Main IPC：只允许无凭据的 `http`/`https` URL，并由系统默认浏览器打开；Renderer 不获得 Electron shell、任意 IPC 或页面内导航能力。消息数据库仍保存原始 Markdown 文本，显示规则不改变 API 或持久化契约。
 
 文件修改审批继续复用对话底部的 Approval 横幅，并保留 `Deny`、`Allow once` 与 `Allow for this conversation`。对 CREATE、REPLACE、DELETE，Backend 只把目标路径和影响摘要返回给 Main/Renderer，待写入正文不会进入审批 IPC。成功修改后 Renderer 通过固定的 FileChange 查询显示持久卡片；用户点击 `Undo` 时，Preload 只把 `change_id` 和卡片中的精确路径交给 Main，Main 再以私有 Bearer Token 调用固定 Undo API。Renderer 不取得快照、文件正文、Token 或通用文件系统能力；刷新后卡片从 SQLite-backed API 恢复，冲突只显示安全提示而不强制覆盖文件。
 
@@ -169,6 +171,7 @@ API 使用版本前缀：
 ```text
 /api/v1/health
 /api/v1/conversations
+/api/v1/browser/conversations
 /api/v1/runs
 /api/v1/runs/{run_id}
 /api/v1/runs/{run_id}/cancel

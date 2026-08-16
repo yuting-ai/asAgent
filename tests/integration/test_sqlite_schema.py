@@ -113,6 +113,18 @@ def test_initial_schema_enforces_foreign_keys_and_invariants(tmp_path: Path) -> 
                 with connection.begin_nested():
                     connection.execute(
                         sa.text(
+                            "INSERT INTO conversations "
+                            "(conversation_id, user_id, kind, created_at, updated_at) "
+                            "VALUES ('conversation-invalid-kind', 'local-user', "
+                            "'email', :time, :time)"
+                        ),
+                        {"time": timestamp},
+                    )
+
+            with pytest.raises(sa.exc.IntegrityError):
+                with connection.begin_nested():
+                    connection.execute(
+                        sa.text(
                             "INSERT INTO conversation_file_scopes "
                             "(conversation_id, additional_roots_json, "
                             "additional_files_json) "

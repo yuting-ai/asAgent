@@ -70,6 +70,7 @@ export type ToolApproval = {
   arguments: Record<string, unknown>
   resource_path: string | null
   impact_summary: string | null
+  allows_conversation_approval: boolean
 }
 
 export type FileChange = {
@@ -96,10 +97,18 @@ export type ModelSettingsStatus = {
   base_url: string | null
 }
 
+export type AgentSettingsStatus = {
+  max_steps: number
+}
+
 export type ModelSettingsInput = {
   model: string
   baseUrl: string
   apiKey?: string
+}
+
+export type AgentSettingsInput = {
+  maxSteps: number
 }
 
 export type WorkspaceSettingsStatus = {
@@ -125,6 +134,10 @@ type BackendLauncherOptions = {
   providerProfile?: string
   secretEnvironmentName?: string
   environmentFile?: string
+  browserBridge?: {
+    baseUrl: string
+    token: string
+  }
 }
 
 function parseReadyRecord(line: string): ServerReady | null {
@@ -230,6 +243,12 @@ export class BackendLauncher {
   private readonly providerProfile: string | undefined
   private readonly secretEnvironmentName: string | undefined
   private readonly environmentFile: string | undefined
+  private readonly browserBridge:
+    | {
+        baseUrl: string
+        token: string
+      }
+    | undefined
   private child: ChildProcess | undefined
   private ready: ServerReady | undefined
   private token: string | undefined
@@ -246,6 +265,7 @@ export class BackendLauncher {
     this.providerProfile = options.providerProfile
     this.secretEnvironmentName = options.secretEnvironmentName
     this.environmentFile = options.environmentFile
+    this.browserBridge = options.browserBridge
 
     const realProviderConfigured = this.providerProfile !== undefined
 
@@ -308,6 +328,13 @@ export class BackendLauncher {
     await this.request(`/api/v1/conversations/${encodeURIComponent(conversationId)}`, 'DELETE')
   }
 
+  async deleteBrowserConversation(conversationId: string): Promise<void> {
+    await this.request(
+      `/api/v1/browser/conversations/${encodeURIComponent(conversationId)}`,
+      'DELETE'
+    )
+  }
+
   async submitMessage(conversationId: string, content: string): Promise<SubmittedMessage> {
     if (!content.trim()) {
       throw new Error('Message content is invalid.')
@@ -317,6 +344,40 @@ export class BackendLauncher {
       `/api/v1/conversations/${encodeURIComponent(conversationId)}/messages`,
       'POST',
       { content }
+    )
+  }
+
+  async listBrowserConversations(): Promise<ConversationSummary[]> {
+    return this.requestJson('/api/v1/browser/conversations', 'GET')
+  }
+
+  async createBrowserConversation(): Promise<CreatedConversation> {
+    return this.requestJson('/api/v1/browser/conversations', 'POST', {})
+  }
+
+  async listBrowserConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
+    return this.requestJson(
+      `/api/v1/browser/conversations/${encodeURIComponent(conversationId)}/messages`,
+      'GET'
+    )
+  }
+
+  async submitBrowserMessage(
+    conversationId: string,
+    content: string,
+    tabId: string
+  ): Promise<SubmittedMessage> {
+    if (!content.trim()) {
+      throw new Error('Message content is invalid.')
+    }
+    if (!tabId.trim()) {
+      throw new Error('Browser tab is invalid.')
+    }
+
+    return this.requestJson<SubmittedMessage>(
+      `/api/v1/browser/conversations/${encodeURIComponent(conversationId)}/messages`,
+      'POST',
+      { content, tab_id: tabId }
     )
   }
 
@@ -370,6 +431,16 @@ export class BackendLauncher {
 
   async deleteModelSettings(): Promise<ModelSettingsStatus> {
     return this.requestJson('/api/v1/settings/model', 'DELETE')
+  }
+
+  async getAgentSettings(): Promise<AgentSettingsStatus> {
+    return this.requestJson('/api/v1/agent-settings', 'GET')
+  }
+
+  async saveAgentSettings(input: AgentSettingsInput): Promise<AgentSettingsStatus> {
+    return this.requestJson('/api/v1/agent-settings', 'PUT', {
+      max_steps: input.maxSteps
+    })
   }
 
   async getConversationFileAccess(conversationId: string): Promise<WorkspaceSettingsStatus> {
@@ -522,7 +593,14 @@ export class BackendLauncher {
     this.child = child
     this.token = token
     child.stderr?.resume()
-    child.stdin.end(`${JSON.stringify({ token })}\n`)
+    const bootstrap: Record<string, unknown> = { token }
+    if (this.browserBridge !== undefined) {
+      bootstrap['browser_bridge'] = {
+        base_url: this.browserBridge.baseUrl,
+        token: this.browserBridge.token
+      }
+    }
+    child.stdin.end(`${JSON.stringify(bootstrap)}\n`)
 
     try {
       const ready = await this.waitForReady(child)

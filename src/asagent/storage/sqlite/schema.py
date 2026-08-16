@@ -31,8 +31,13 @@ conversations = Table(
         nullable=False,
     ),
     Column("title", String),
+    Column("kind", Text, nullable=False, server_default="chat"),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "kind IN ('chat', 'browser')",
+        name="conversation_kind_valid",
+    ),
 )
 
 conversation_file_scopes = Table(

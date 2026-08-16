@@ -1,4 +1,14 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell, type WebContents } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  session,
+  shell,
+  WebContentsView,
+  type WebContents
+} from 'electron'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -10,12 +20,42 @@ import {
   type SubmittedMessage,
   type ToolApproval
 } from './backend_launcher'
+import { BrowserPageBridge } from './browser_page_bridge'
+import { BROWSER_SESSION_FILE_NAME, BrowserSessionStore } from './browser_session'
+import {
+  parseBrowserControlAction,
+  parseBrowserTabId,
+  parseBrowserViewBounds,
+  VisibleBrowser,
+  type BrowserHostWindow,
+  type BrowserTabState
+} from './browser_view'
 import { parseExternalWebUrl } from './external_url'
 
 let backendLauncher: BackendLauncher | undefined
+let visibleBrowser: VisibleBrowser | undefined
+let browserPageBridge: BrowserPageBridge | undefined
+let browserSessionStore: BrowserSessionStore | undefined
 let isQuitting = false
 const runWatchers = new Map<string, () => void>()
 let dataProcessingMode: 'local' | 'external' = 'local'
+
+function desktopAppHome(): string {
+  return join(app.getAppPath(), '..', '.local-data')
+}
+
+function scheduleBrowserSessionSave(): void {
+  if (browserSessionStore === undefined || visibleBrowser === undefined) {
+    return
+  }
+
+  browserSessionStore.scheduleSave(visibleBrowser)
+}
+
+function noteBrowserTabState(state: BrowserTabState): void {
+  broadcastBrowserTabState(state)
+  scheduleBrowserSessionSave()
+}
 
 function rendererUrl(): string {
   if (is.dev) {
@@ -76,6 +116,10 @@ function createWindow(): void {
     if (!isTrustedRendererUrl(url)) {
       event.preventDefault()
     }
+  })
+
+  mainWindow.on('closed', () => {
+    visibleBrowser?.hide()
   })
 
   void mainWindow.loadURL(rendererUrl())
@@ -145,6 +189,29 @@ function parseModelSettingsInput(value: unknown): {
   }
 }
 
+function parseAgentSettingsInput(value: unknown): { maxSteps: number } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('Agent settings are invalid.')
+  }
+
+  const input = value as Record<string, unknown>
+  if (Object.keys(input).length !== 1 || !('maxSteps' in input)) {
+    throw new Error('Agent settings are invalid.')
+  }
+
+  const maxSteps = input['maxSteps']
+  if (
+    typeof maxSteps !== 'number' ||
+    !Number.isInteger(maxSteps) ||
+    maxSteps < 1 ||
+    maxSteps > 50
+  ) {
+    throw new Error('Agent settings are invalid.')
+  }
+
+  return { maxSteps }
+}
+
 function parseWorkspaceSettings(value: unknown): {
   additionalFiles: string[]
   additionalRoots: string[]
@@ -181,16 +248,21 @@ function parseWorkspaceSettings(value: unknown): {
   }
 }
 
-function createDevelopmentBackendLauncher(): BackendLauncher {
+function createDevelopmentBackendLauncher(browserBridge?: {
+  baseUrl: string
+  token: string
+}): BackendLauncher {
   const projectRoot = join(app.getAppPath(), '..')
   const providerProfile = process.env['ASAGENT_DESKTOP_PROFILE']
   const secretEnvironmentName = process.env['ASAGENT_DESKTOP_SECRET_ENV']
+  const appHome = desktopAppHome()
 
   if (providerProfile === undefined && secretEnvironmentName === undefined) {
     dataProcessingMode = 'local'
     return new BackendLauncher({
       projectRoot,
-      appHome: join(projectRoot, '.local-data')
+      appHome,
+      browserBridge
     })
   }
 
@@ -201,10 +273,11 @@ function createDevelopmentBackendLauncher(): BackendLauncher {
   dataProcessingMode = 'external'
   return new BackendLauncher({
     projectRoot,
-    appHome: join(projectRoot, '.local-data'),
+    appHome,
     providerProfile,
     secretEnvironmentName,
-    environmentFile: join(projectRoot, '.env')
+    environmentFile: join(projectRoot, '.env'),
+    browserBridge
   })
 }
 
@@ -312,6 +385,14 @@ function watchRun(sender: WebContents, conversationId: string, submitted: Submit
   runWatchers.set(submitted.run.run_id, stop)
 }
 
+function broadcastBrowserTabState(state: BrowserTabState): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send('desktop:browser-tab-state', state)
+    }
+  }
+}
+
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.asagent.desktop')
 
@@ -319,7 +400,54 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  backendLauncher = createDevelopmentBackendLauncher()
+  visibleBrowser = new VisibleBrowser({
+    session: session.fromPath(join(app.getPath('userData'), 'browser-profile')),
+    createView: (options) => new WebContentsView(options),
+    onTabState: noteBrowserTabState
+  })
+
+  browserSessionStore = new BrowserSessionStore(join(desktopAppHome(), BROWSER_SESSION_FILE_NAME))
+  try {
+    await browserSessionStore.restore(visibleBrowser)
+  } catch {
+    await browserSessionStore.ensureReady(visibleBrowser)
+  }
+
+  browserPageBridge = new BrowserPageBridge({
+    readCurrentPage: (tabId) => {
+      if (visibleBrowser === undefined) {
+        throw new Error('current browser tab is not visible')
+      }
+      return visibleBrowser.readCurrentPage(tabId)
+    },
+    inspectInteractive: (tabId) => {
+      if (visibleBrowser === undefined) {
+        throw new Error('current browser tab is not visible')
+      }
+      return visibleBrowser.inspectInteractive(tabId)
+    },
+    clickCurrentPage: (tabId, targetId) => {
+      if (visibleBrowser === undefined) {
+        throw new Error('current browser tab is not visible')
+      }
+      return visibleBrowser.clickCurrentPage(tabId, targetId)
+    }
+  })
+
+  let bridgeInfo
+  try {
+    bridgeInfo = await browserPageBridge.start()
+  } catch (error) {
+    dialog.showErrorBox(
+      'asAgent browser bridge unavailable',
+      error instanceof Error ? error.message : 'Browser page bridge startup failed.'
+    )
+    await browserPageBridge.stop()
+    app.quit()
+    return
+  }
+
+  backendLauncher = createDevelopmentBackendLauncher(bridgeInfo)
 
   try {
     await backendLauncher.start()
@@ -330,6 +458,7 @@ app.whenReady().then(async () => {
       error instanceof Error ? error.message : 'Backend startup failed.'
     )
     await backendLauncher.stop()
+    await browserPageBridge.stop()
     app.quit()
     return
   }
@@ -347,6 +476,123 @@ app.whenReady().then(async () => {
     }
   })
 
+  ipcMain.handle('desktop:show-browser', (event, tabId: unknown, bounds: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    const senderWindow = BrowserWindow.fromWebContents(event.sender)
+    if (senderWindow === null || visibleBrowser === undefined) {
+      throw new Error('Browser window is unavailable.')
+    }
+
+    visibleBrowser.show(
+      senderWindow as unknown as BrowserHostWindow,
+      parseBrowserViewBounds(bounds),
+      parseBrowserTabId(tabId)
+    )
+    browserSessionStore?.noteVisibleTab(parseBrowserTabId(tabId))
+    scheduleBrowserSessionSave()
+  })
+
+  ipcMain.handle('desktop:hide-browser', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    visibleBrowser?.hide()
+  })
+
+  ipcMain.handle('desktop:navigate-browser', (event, tabId: unknown, url: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    if (visibleBrowser === undefined) {
+      throw new Error('Browser window is unavailable.')
+    }
+
+    return visibleBrowser
+      .navigate(parseBrowserTabId(tabId), typeof url === 'string' ? url : '')
+      .then((displayUrl) => {
+        scheduleBrowserSessionSave()
+        return displayUrl
+      })
+  })
+
+  ipcMain.handle('desktop:close-browser-tab', (event, tabId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    const parsedTabId = parseBrowserTabId(tabId)
+    visibleBrowser?.closeTab(parsedTabId)
+    browserSessionStore?.forgetTab(parsedTabId)
+    scheduleBrowserSessionSave()
+  })
+
+  ipcMain.handle('desktop:control-browser', (event, tabId: unknown, action: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    if (visibleBrowser === undefined) {
+      throw new Error('Browser window is unavailable.')
+    }
+
+    return visibleBrowser
+      .control(parseBrowserTabId(tabId), parseBrowserControlAction(action))
+      .then(() => {
+        scheduleBrowserSessionSave()
+      })
+  })
+
+  ipcMain.handle('desktop:get-browser-session', async (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    if (visibleBrowser === undefined || browserSessionStore === undefined) {
+      throw new Error('Browser session is unavailable.')
+    }
+
+    return browserSessionStore.ensureReady(visibleBrowser)
+  })
+
+  ipcMain.handle(
+    'desktop:set-browser-tab-conversation',
+    (event, tabId: unknown, conversationId: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) {
+        throw new Error('Untrusted renderer IPC request.')
+      }
+
+      assertTrustedRenderer(frame.url)
+      if (browserSessionStore === undefined || visibleBrowser === undefined) {
+        throw new Error('Browser session is unavailable.')
+      }
+
+      const parsedTabId = parseBrowserTabId(tabId)
+      if (conversationId !== null && typeof conversationId !== 'string') {
+        throw new Error('Conversation ID is invalid.')
+      }
+
+      browserSessionStore.setConversation(parsedTabId, conversationId)
+      scheduleBrowserSessionSave()
+    }
+  )
   ipcMain.handle('desktop:open-external-link', (event, url: unknown) => {
     const frame = event.senderFrame
     if (frame === null) {
@@ -489,6 +735,21 @@ app.whenReady().then(async () => {
     return getReadyBackendLauncher().deleteConversation(conversationId.trim())
   })
 
+  ipcMain.handle('desktop:delete-browser-conversation', (event, conversationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+
+    if (typeof conversationId !== 'string' || !conversationId.trim()) {
+      throw new Error('Conversation ID is invalid.')
+    }
+
+    return getReadyBackendLauncher().deleteBrowserConversation(conversationId.trim())
+  })
+
   ipcMain.handle('desktop:submit-message', (event, conversationId: unknown, content: unknown) => {
     const frame = event.senderFrame
     if (frame === null) {
@@ -512,6 +773,73 @@ app.whenReady().then(async () => {
         return submitted
       })
   })
+
+  ipcMain.handle('desktop:list-browser-conversations', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().listBrowserConversations()
+  })
+
+  ipcMain.handle('desktop:create-browser-conversation', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().createBrowserConversation()
+  })
+
+  ipcMain.handle('desktop:list-browser-conversation-messages', (event, conversationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+
+    if (typeof conversationId !== 'string' || !conversationId.trim()) {
+      throw new Error('Conversation ID is invalid.')
+    }
+
+    return getReadyBackendLauncher().listBrowserConversationMessages(conversationId)
+  })
+
+  ipcMain.handle(
+    'desktop:submit-browser-message',
+    (event, conversationId: unknown, content: unknown, tabId: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) {
+        throw new Error('Untrusted renderer IPC request.')
+      }
+
+      assertTrustedRenderer(frame.url)
+
+      if (typeof conversationId !== 'string' || !conversationId.trim()) {
+        throw new Error('Conversation ID is invalid.')
+      }
+
+      if (typeof content !== 'string' || !content.trim()) {
+        throw new Error('Message content is invalid.')
+      }
+
+      const parsedTabId = parseBrowserTabId(tabId)
+      if (visibleBrowser === undefined || !visibleBrowser.isVisibleTab(parsedTabId)) {
+        throw new Error('Browser page is not visible.')
+      }
+
+      return getReadyBackendLauncher()
+        .submitBrowserMessage(conversationId, content, parsedTabId)
+        .then((submitted) => {
+          watchRun(event.sender, conversationId, submitted)
+          return submitted
+        })
+    }
+  )
 
   ipcMain.handle('desktop:cancel-run', async (event, runId: unknown) => {
     const frame = event.senderFrame
@@ -619,6 +947,26 @@ app.whenReady().then(async () => {
     return getReadyBackendLauncher().deleteModelSettings()
   })
 
+  ipcMain.handle('desktop:get-agent-settings', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().getAgentSettings()
+  })
+
+  ipcMain.handle('desktop:save-agent-settings', (event, input: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().saveAgentSettings(parseAgentSettingsInput(input))
+  })
+
   ipcMain.handle('desktop:get-conversation-file-access', (event, conversationId: unknown) => {
     const frame = event.senderFrame
     if (frame === null) {
@@ -697,7 +1045,25 @@ app.on('before-quit', (event) => {
     stopRunWatcher(runId)
   }
 
-  void (backendLauncher?.stop() ?? Promise.resolve()).finally(() => {
+  const browser = visibleBrowser
+  const sessionStore = browserSessionStore
+  visibleBrowser = undefined
+  browserSessionStore = undefined
+
+  void (async () => {
+    if (sessionStore !== undefined && browser !== undefined) {
+      try {
+        await sessionStore.flush(browser)
+      } catch {
+        // Best-effort persistence before teardown.
+      }
+    }
+
+    browser?.dispose()
+
+    await (browserPageBridge?.stop() ?? Promise.resolve())
+    await (backendLauncher?.stop() ?? Promise.resolve())
+  })().finally(() => {
     app.quit()
   })
 })
