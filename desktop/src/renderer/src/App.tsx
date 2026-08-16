@@ -78,6 +78,7 @@ type FileChange = {
 
 type AppView =
   | 'chat'
+  | 'browser'
   | 'activity'
   | 'privacy'
   | 'scheduled'
@@ -107,6 +108,14 @@ type WorkspaceSettingsStatus = {
   additional_files: string[]
 }
 
+type BrowserTab = {
+  id: string
+  title: string
+  address: string
+  canGoBack: boolean
+  canGoForward: boolean
+}
+
 type ActivityTab = 'approvals' | 'schedule'
 type ScrollArea = 'threads' | 'messages'
 type ResizableColumn = 'rail' | 'threads' | 'attention'
@@ -126,6 +135,40 @@ const MODEL_SETTINGS_UPDATE_ERROR = 'Model settings could not be updated.'
 const MODEL_SETTINGS_REQUIRED = 'Enter a model, base URL, and API key before saving.'
 const MODEL_DELETE_CONFIRM = 'Remove the saved model configuration and API key?'
 const CONVERSATION_DELETE_CONFIRM = 'Delete this conversation? This cannot be undone.'
+const BROWSER_ADDRESS_ERROR =
+  'This address is not allowed. Enter a web address such as example.com.'
+const BROWSER_LOAD_ERROR = 'This page could not be opened.'
+const MAX_BROWSER_TABS = 16
+
+function browserNavigationError(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error)
+  return text.includes('could not be opened') ? BROWSER_LOAD_ERROR : BROWSER_ADDRESS_ERROR
+}
+
+function createBrowserTab(): BrowserTab {
+  return {
+    id: crypto.randomUUID(),
+    title: 'New Tab',
+    address: '',
+    canGoBack: false,
+    canGoForward: false
+  }
+}
+
+function browserTabTitle(address: string): string {
+  const trimmed = address.trim()
+  if (trimmed === '') {
+    return 'New Tab'
+  }
+
+  try {
+    const value = trimmed.includes('://') ? trimmed : `https://${trimmed}`
+    const hostname = new URL(value).hostname.replace(/^www\./u, '')
+    return hostname === '' ? 'New Tab' : hostname
+  } catch {
+    return trimmed
+  }
+}
 const DEFAULT_RAIL_WIDTH = 226
 const COLLAPSED_RAIL_WIDTH = 96
 const DEFAULT_THREAD_WIDTH = 210
@@ -340,6 +383,47 @@ function activitySummaryLabel(activity: RunActivity): string {
   }
 }
 
+function BrowserNavIcon({
+  name
+}: {
+  name: 'back' | 'forward' | 'reload' | 'home'
+}): React.JSX.Element {
+  if (name === 'back') {
+    return <Icon path="M15 18 9 12l6-6" />
+  }
+
+  if (name === 'forward') {
+    return <Icon path="m9 18 6-6-6-6" />
+  }
+
+  if (name === 'reload') {
+    return (
+      <svg
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="2"
+        viewBox="0 0 24 24"
+      >
+        <path d="M21 12a9 9 0 1 1-3.2-6.9" />
+        <path d="M21 3v6h-6" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg
+      fill="none"
+      stroke="currentColor"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-7h-4v7H5a1 1 0 0 1-1-1z" />
+    </svg>
+  )
+}
+
 function Icon({ path, className }: { path: string; className?: string }): React.JSX.Element {
   return (
     <svg
@@ -403,6 +487,11 @@ export default function App(): React.JSX.Element {
   const [pendingApproval, setPendingApproval] = useState<ToolApproval | null>(null)
   const [isDecidingApproval, setIsDecidingApproval] = useState(false)
   const [activeView, setActiveView] = useState<AppView>('chat')
+  const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>(() => [createBrowserTab()])
+  const [activeBrowserTabId, setActiveBrowserTabId] = useState(
+    () => browserTabs[0]?.id ?? createBrowserTab().id
+  )
+  const [browserError, setBrowserError] = useState<string | null>(null)
   const [activityTab, setActivityTab] = useState<ActivityTab>('approvals')
   const [tavilySettings, setTavilySettings] = useState<TavilySettingsStatus | null>(null)
   const [tavilyLoadError, setTavilyLoadError] = useState<string | null>(null)
@@ -432,11 +521,63 @@ export default function App(): React.JSX.Element {
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const browserSurfaceRef = useRef<HTMLDivElement | null>(null)
+  const browserAddressRef = useRef<HTMLInputElement | null>(null)
+  const browserTabsRef = useRef(browserTabs)
+  const activeBrowserTabIdRef = useRef(activeBrowserTabId)
   const scrollbarHideTimerRef = useRef<number | null>(null)
   const copyFeedbackTimerRef = useRef<number | null>(null)
   const desktopLayoutRef = useRef(desktopLayout)
   const resizingColumnRef = useRef<ResizableColumn | null>(null)
   const railWidth = isRailCollapsed ? COLLAPSED_RAIL_WIDTH : desktopLayout.railWidth
+  browserTabsRef.current = browserTabs
+  activeBrowserTabIdRef.current = activeBrowserTabId
+
+  const addBrowserTab = useCallback((): void => {
+    const current = browserTabsRef.current
+    if (current.length >= MAX_BROWSER_TABS) {
+      return
+    }
+
+    const created = createBrowserTab()
+    setBrowserTabs([...current, created])
+    setActiveBrowserTabId(created.id)
+    setBrowserError(null)
+    window.setTimeout(() => {
+      browserAddressRef.current?.focus()
+    }, 0)
+  }, [])
+
+  const closeBrowserTab = useCallback((tabId: string): void => {
+    void window.desktop.closeBrowserTab(tabId).catch(() => undefined)
+    const current = browserTabsRef.current
+    const index = current.findIndex((tab) => tab.id === tabId)
+    const remaining = current.filter((tab) => tab.id !== tabId)
+    if (remaining.length === 0) {
+      const created = createBrowserTab()
+      setBrowserTabs([created])
+      setActiveBrowserTabId(created.id)
+      setBrowserError(null)
+      return
+    }
+
+    setBrowserTabs(remaining)
+    if (tabId === activeBrowserTabIdRef.current) {
+      const fallback = remaining[Math.max(0, index - 1)] ?? remaining[0]
+      if (fallback !== undefined) {
+        setActiveBrowserTabId(fallback.id)
+      }
+    }
+    setBrowserError(null)
+  }, [])
+
+  const controlBrowser = useCallback((action: 'back' | 'forward' | 'reload' | 'home'): void => {
+    void window.desktop
+      .controlBrowser(activeBrowserTabIdRef.current, action)
+      .catch((error: unknown) => {
+        setBrowserError(browserNavigationError(error))
+      })
+  }, [])
 
   function revealScrollbar(area: ScrollArea): void {
     setVisibleScrollbar(area)
@@ -809,6 +950,135 @@ export default function App(): React.JSX.Element {
     selectedConversationId
   ])
 
+  useEffect(() => {
+    if (activeView !== 'browser') {
+      void window.desktop.hideBrowser()
+      return
+    }
+
+    const surface = browserSurfaceRef.current
+    if (surface === null) {
+      return
+    }
+
+    const reportBounds = (): void => {
+      const rect = surface.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) {
+        return
+      }
+
+      void window.desktop.showBrowser(activeBrowserTabId, {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      })
+    }
+
+    reportBounds()
+    const observer = new ResizeObserver(reportBounds)
+    observer.observe(surface)
+    return () => {
+      observer.disconnect()
+    }
+  }, [activeView, activeBrowserTabId])
+
+  useEffect(() => {
+    return () => {
+      void window.desktop.hideBrowser()
+    }
+  }, [])
+
+  useEffect(() => {
+    return window.desktop.onBrowserTabState((state) => {
+      setBrowserTabs((current) => {
+        const existing = current.find((tab) => tab.id === state.tabId)
+        if (existing === undefined) {
+          setActiveBrowserTabId(state.tabId)
+          return [
+            ...current,
+            {
+              id: state.tabId,
+              title: state.title,
+              address: state.url,
+              canGoBack: state.canGoBack,
+              canGoForward: state.canGoForward
+            }
+          ]
+        }
+
+        const editing =
+          state.tabId === activeBrowserTabIdRef.current &&
+          document.activeElement === browserAddressRef.current
+        return current.map((tab) =>
+          tab.id === state.tabId
+            ? {
+                ...tab,
+                canGoBack: state.canGoBack,
+                canGoForward: state.canGoForward,
+                title: state.title,
+                address: editing ? tab.address : state.url
+              }
+            : tab
+        )
+      })
+    })
+  }, [])
+
+  useEffect(() => {
+    if (activeView !== 'browser') {
+      return
+    }
+
+    function onBrowserShortcut(event: KeyboardEvent): void {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) {
+        return
+      }
+
+      const key = event.key.toLowerCase()
+      if (key === 't') {
+        event.preventDefault()
+        addBrowserTab()
+        return
+      }
+
+      if (key === 'w') {
+        event.preventDefault()
+        closeBrowserTab(activeBrowserTabId)
+        return
+      }
+
+      if (key === 'l') {
+        event.preventDefault()
+        browserAddressRef.current?.focus()
+        browserAddressRef.current?.select()
+        return
+      }
+
+      if (key === 'r') {
+        event.preventDefault()
+        controlBrowser('reload')
+        return
+      }
+
+      if (key === '[') {
+        event.preventDefault()
+        controlBrowser('back')
+        return
+      }
+
+      if (key === ']') {
+        event.preventDefault()
+        controlBrowser('forward')
+      }
+    }
+
+    window.addEventListener('keydown', onBrowserShortcut)
+    return () => {
+      window.removeEventListener('keydown', onBrowserShortcut)
+    }
+  }, [activeView, activeBrowserTabId, addBrowserTab, closeBrowserTab, controlBrowser])
+
   const selectedConversation = conversations.find(
     (conversation) => conversation.conversation_id === selectedConversationId
   )
@@ -830,6 +1100,41 @@ export default function App(): React.JSX.Element {
     void window.desktop.openExternalLink(href).catch(() => {
       setErrorMessage('The link could not be opened.')
     })
+  }
+
+  const activeBrowserTab =
+    browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? browserTabs[0]
+
+  function selectBrowserTab(tabId: string): void {
+    setActiveBrowserTabId(tabId)
+    setBrowserError(null)
+  }
+
+  function updateActiveBrowserAddress(address: string): void {
+    setBrowserTabs((current) =>
+      current.map((tab) => (tab.id === activeBrowserTabId ? { ...tab, address } : tab))
+    )
+    if (browserError !== null) {
+      setBrowserError(null)
+    }
+  }
+
+  async function openBrowserAddress(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+    const address = activeBrowserTab?.address ?? ''
+    setBrowserError(null)
+    try {
+      const opened = await window.desktop.navigateBrowser(activeBrowserTabId, address)
+      setBrowserTabs((current) =>
+        current.map((tab) =>
+          tab.id === activeBrowserTabId
+            ? { ...tab, address: opened, title: browserTabTitle(opened) }
+            : tab
+        )
+      )
+    } catch (error) {
+      setBrowserError(browserNavigationError(error))
+    }
   }
 
   function setRunActivityStatus(runId: string, currentLabel: string): void {
@@ -1549,6 +1854,23 @@ export default function App(): React.JSX.Element {
               <span className="rail-item-label">Chat</span>
             </button>
             <button
+              className={railItemClass('browser')}
+              onClick={() => setActiveView('browser')}
+              type="button"
+            >
+              <svg
+                className="rail-icon"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" />
+              </svg>
+              <span className="rail-item-label">Browser</span>
+            </button>
+            <button
               className={railItemClass('activity')}
               onClick={() => setActiveView('activity')}
               type="button"
@@ -2254,6 +2576,128 @@ export default function App(): React.JSX.Element {
               </div>
             </div>
           </AttentionAside>
+        </div>
+
+        <div className={`view${activeView === 'browser' ? ' active' : ''}`}>
+          <section className="center browser-center">
+            <div className="browser-page">
+              <div className="browser-chrome">
+                <div aria-label="Browser tabs" className="browser-tabstrip" role="tablist">
+                  {browserTabs.map((tab) => {
+                    const selected = tab.id === activeBrowserTabId
+                    return (
+                      <div
+                        aria-selected={selected}
+                        className={`browser-tab${selected ? ' is-active' : ''}`}
+                        key={tab.id}
+                        onClick={() => selectBrowserTab(tab.id)}
+                        onAuxClick={(event) => {
+                          if (event.button === 1) {
+                            event.preventDefault()
+                            closeBrowserTab(tab.id)
+                          }
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            selectBrowserTab(tab.id)
+                          }
+                        }}
+                        role="tab"
+                        tabIndex={selected ? 0 : -1}
+                        title={tab.title}
+                      >
+                        <span className="browser-tab-title">{tab.title}</span>
+                        <button
+                          aria-label={`Close ${tab.title}`}
+                          className="browser-tab-close"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            closeBrowserTab(tab.id)
+                          }}
+                          type="button"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )
+                  })}
+                  <button
+                    aria-label="New tab"
+                    className="browser-tab-new"
+                    disabled={browserTabs.length >= MAX_BROWSER_TABS}
+                    onClick={addBrowserTab}
+                    type="button"
+                  >
+                    <Icon path="M12 5v14M5 12h14" />
+                  </button>
+                </div>
+                <form
+                  className="browser-address-form"
+                  onSubmit={(event) => void openBrowserAddress(event)}
+                >
+                  <div className="browser-nav">
+                    <button
+                      aria-label="Back"
+                      className="browser-nav-button"
+                      disabled={!(activeBrowserTab?.canGoBack ?? false)}
+                      onClick={() => controlBrowser('back')}
+                      type="button"
+                    >
+                      <BrowserNavIcon name="back" />
+                    </button>
+                    <button
+                      aria-label="Forward"
+                      className="browser-nav-button"
+                      disabled={!(activeBrowserTab?.canGoForward ?? false)}
+                      onClick={() => controlBrowser('forward')}
+                      type="button"
+                    >
+                      <BrowserNavIcon name="forward" />
+                    </button>
+                    <button
+                      aria-label="Reload"
+                      className="browser-nav-button"
+                      disabled={(activeBrowserTab?.address ?? '') === ''}
+                      onClick={() => controlBrowser('reload')}
+                      type="button"
+                    >
+                      <BrowserNavIcon name="reload" />
+                    </button>
+                    <button
+                      aria-label="Home"
+                      className="browser-nav-button"
+                      onClick={() => controlBrowser('home')}
+                      type="button"
+                    >
+                      <BrowserNavIcon name="home" />
+                    </button>
+                  </div>
+                  <label className="browser-address-label" htmlFor="browser-address">
+                    Address
+                  </label>
+                  <input
+                    autoCapitalize="off"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    className="browser-address-input"
+                    id="browser-address"
+                    onChange={(event) => updateActiveBrowserAddress(event.target.value)}
+                    placeholder="example.com"
+                    ref={browserAddressRef}
+                    spellCheck={false}
+                    type="text"
+                    value={activeBrowserTab?.address ?? ''}
+                  />
+                  <button className="browser-go" type="submit">
+                    Go
+                  </button>
+                </form>
+              </div>
+              {browserError !== null ? <p className="browser-error">{browserError}</p> : null}
+              <div className="browser-surface" ref={browserSurfaceRef} />
+            </div>
+          </section>
         </div>
 
         <div className={`view${activeView === 'activity' ? ' active' : ''}`}>

@@ -1,4 +1,14 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell, type WebContents } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  session,
+  shell,
+  WebContentsView,
+  type WebContents
+} from 'electron'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -10,9 +20,18 @@ import {
   type SubmittedMessage,
   type ToolApproval
 } from './backend_launcher'
+import {
+  parseBrowserControlAction,
+  parseBrowserTabId,
+  parseBrowserViewBounds,
+  VisibleBrowser,
+  type BrowserHostWindow,
+  type BrowserTabState
+} from './browser_view'
 import { parseExternalWebUrl } from './external_url'
 
 let backendLauncher: BackendLauncher | undefined
+let visibleBrowser: VisibleBrowser | undefined
 let isQuitting = false
 const runWatchers = new Map<string, () => void>()
 let dataProcessingMode: 'local' | 'external' = 'local'
@@ -76,6 +95,10 @@ function createWindow(): void {
     if (!isTrustedRendererUrl(url)) {
       event.preventDefault()
     }
+  })
+
+  mainWindow.on('closed', () => {
+    visibleBrowser?.hide()
   })
 
   void mainWindow.loadURL(rendererUrl())
@@ -312,11 +335,25 @@ function watchRun(sender: WebContents, conversationId: string, submitted: Submit
   runWatchers.set(submitted.run.run_id, stop)
 }
 
+function broadcastBrowserTabState(state: BrowserTabState): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send('desktop:browser-tab-state', state)
+    }
+  }
+}
+
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.asagent.desktop')
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
+  })
+
+  visibleBrowser = new VisibleBrowser({
+    session: session.fromPath(join(app.getPath('userData'), 'browser-profile')),
+    createView: (options) => new WebContentsView(options),
+    onTabState: broadcastBrowserTabState
   })
 
   backendLauncher = createDevelopmentBackendLauncher()
@@ -345,6 +382,73 @@ app.whenReady().then(async () => {
       version: app.getVersion(),
       dataProcessingMode
     }
+  })
+
+  ipcMain.handle('desktop:show-browser', (event, tabId: unknown, bounds: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    const senderWindow = BrowserWindow.fromWebContents(event.sender)
+    if (senderWindow === null || visibleBrowser === undefined) {
+      throw new Error('Browser window is unavailable.')
+    }
+
+    visibleBrowser.show(
+      senderWindow as unknown as BrowserHostWindow,
+      parseBrowserViewBounds(bounds),
+      parseBrowserTabId(tabId)
+    )
+  })
+
+  ipcMain.handle('desktop:hide-browser', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    visibleBrowser?.hide()
+  })
+
+  ipcMain.handle('desktop:navigate-browser', (event, tabId: unknown, url: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    if (visibleBrowser === undefined) {
+      throw new Error('Browser window is unavailable.')
+    }
+
+    return visibleBrowser.navigate(parseBrowserTabId(tabId), typeof url === 'string' ? url : '')
+  })
+
+  ipcMain.handle('desktop:close-browser-tab', (event, tabId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    visibleBrowser?.closeTab(parseBrowserTabId(tabId))
+  })
+
+  ipcMain.handle('desktop:control-browser', (event, tabId: unknown, action: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    if (visibleBrowser === undefined) {
+      throw new Error('Browser window is unavailable.')
+    }
+
+    return visibleBrowser.control(parseBrowserTabId(tabId), parseBrowserControlAction(action))
   })
 
   ipcMain.handle('desktop:open-external-link', (event, url: unknown) => {
@@ -696,6 +800,9 @@ app.on('before-quit', (event) => {
   for (const runId of runWatchers.keys()) {
     stopRunWatcher(runId)
   }
+
+  visibleBrowser?.dispose()
+  visibleBrowser = undefined
 
   void (backendLauncher?.stop() ?? Promise.resolve()).finally(() => {
     app.quit()

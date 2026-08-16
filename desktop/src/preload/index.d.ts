@@ -98,6 +98,14 @@ interface WorkspaceSettingsInput {
 
 interface DesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>
+  showBrowser(
+    tabId: string,
+    bounds: { x: number; y: number; width: number; height: number }
+  ): Promise<void>
+  hideBrowser(): Promise<void>
+  navigateBrowser(tabId: string, url: string): Promise<string>
+  closeBrowserTab(tabId: string): Promise<void>
+  controlBrowser(tabId: string, action: 'back' | 'forward' | 'reload' | 'home'): Promise<void>
   openExternalLink(url: string): Promise<void>
   copyText(content: string): Promise<void>
   getBackendStatus(): Promise<{ status: 'ready' | 'unavailable' }>
@@ -132,6 +140,15 @@ interface DesktopBridge {
   onRunStreamError(callback: (error: RunStreamError) => void): () => void
   onToolApprovalRequested(callback: (approval: ToolApproval) => void): () => void
   onToolApprovalError(callback: (error: RunStreamError) => void): () => void
+  onBrowserTabState(
+    callback: (state: {
+      tabId: string
+      url: string
+      title: string
+      canGoBack: boolean
+      canGoForward: boolean
+    }) => void
+  ): () => void
 }
 
 declare global {

@@ -3733,3 +3733,21 @@
 ### 下一步
 
 - 在本分支的一个独立小任务中设计并实现最小 `WebContentsView` 菜单与关闭生命周期，配套 Main 进程测试和安全导航验收；完成前不开始 AI BrowserAction。
+
+## 2026-08-16 可见嵌入式浏览器 Browser v0
+
+### 完成
+
+- Electron Main 现在创建并拥有使用 `browser-profile` 持久 Session 的 `WebContentsView`；Renderer 通过来源校验后的窄 IPC 显示、隐藏、导航、关闭和控制受管标签，不能读取网页 DOM、Cookie、Storage 或密码。
+- Browser 菜单提供可见标签、地址栏、后退、前进、刷新和主页。HTTP/HTTPS 地址可省略 scheme；`file:`、`javascript:`、`data:`、`ftp:` 等非网页协议被拒绝。
+- `window.open`/`target=_blank` 的 HTTP/HTTPS 目标不创建原生 Electron 子窗口，而是转换为当前可见 Session 中最多 16 个标签；不安全目标仍拒绝。
+- 原始带 userinfo 的 URL 只传给 Main 的 `loadURL()`，以保留 Basic Authentication 兼容性。所有发给 Renderer 的导航状态、地址栏回执和新标签状态均删除 username/password；页面加载失败返回安全错误，HTTP 404 继续作为正常页面加载。
+- 本功能仍不接入 Python Agent、ToolRegistry、MCP、Gmail 或 Scheduler。
+
+### 验证
+
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（79 passed）、`npm run build` 和 `git diff --check` 全部通过。
+
+### 下一步
+
+- 在真实桌面应用中手动验证普通导航、带 Basic Authentication 的地址栏脱敏、第三方新标签、切换 Chat 后恢复、重启后的 Session 持久化，以及非法协议拒绝；通过前不开始 AI BrowserAction。

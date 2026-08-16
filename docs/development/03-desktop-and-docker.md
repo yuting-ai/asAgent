@@ -56,7 +56,7 @@ Docker 不是桌面客户端依赖。最终用户安装 Electron 应用后，不
 
 Main 不负责 Agent 业务。
 
-可见嵌入式浏览器同样由 Main 管理，但它不是 Renderer 的任意网页容器：新的浏览器菜单只创建一个采用 asAgent 专属持久 Electron Session 的 `WebContentsView`。网页显示与用户登录发生在该 View 中，Renderer 只显示 asAgent 自己的 UI 状态，不能访问网页 DOM、Cookie、Storage、密码或向网页注入 IPC。首版不接入 Python Backend 或 Agent；以后 BrowserAction 仍必须由 Main 在同一个可见 View 上执行，并先经既有站点范围、审批、超时和取消边界。不得让 Playwright/其他 Chromium 进程同时读取该 Profile 目录，也不得把该 Profile 当作 Gmail OAuth 或 MCP credential store。
+可见嵌入式浏览器同样由 Main 管理，但它不是 Renderer 的任意网页容器：新的浏览器菜单只创建一个采用 asAgent 专属持久 Electron Session 的 `WebContentsView`。网页显示与用户登录发生在该 View 中，Renderer 只显示 asAgent 自己的 UI 状态，不能访问网页 DOM、Cookie、Storage、密码或向网页注入 IPC。HTTP/HTTPS 的 popup 请求不会生成任意原生窗口，而是转换为同一可见 Session 中受数量限制的标签；`file:`、`javascript:`、`data:` 等协议被拒绝。URL userinfo 只可在 Main 内实际加载时存在，所有回传 Renderer 的导航状态和地址栏值均删除 username/password。首版不接入 Python Backend 或 Agent；以后 BrowserAction 仍必须由 Main 在同一个可见 View 上执行，并先经既有站点范围、审批、超时和取消边界。不得让 Playwright/其他 Chromium 进程同时读取该 Profile 目录，也不得把该 Profile 当作 Gmail OAuth 或 MCP credential store。
 
 Preferences 中的本地文件范围由 Main 的原生 `showOpenDialog` 选择目录；Main 在校验 Renderer 来源后，将目录路径交给受 Bearer 保护的固定 Workspace Settings API。Renderer 仅能读取已授权目录列表、请求选择一个目录或替换该列表，不能取得 Node 文件系统、任意路径读取或通用 IPC。该范围会在后续 Run 中约束已接入的受控读写 File Tool；保存范围本身不会扫描或修改文件，写操作仍需其独立 Tool 审批。
 

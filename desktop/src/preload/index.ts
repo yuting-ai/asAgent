@@ -98,6 +98,17 @@ const desktopBridge = {
     version: string
     dataProcessingMode: 'local' | 'external'
   }> => ipcRenderer.invoke('desktop:get-app-info'),
+  showBrowser: (
+    tabId: string,
+    bounds: { x: number; y: number; width: number; height: number }
+  ): Promise<void> => ipcRenderer.invoke('desktop:show-browser', tabId, bounds),
+  hideBrowser: (): Promise<void> => ipcRenderer.invoke('desktop:hide-browser'),
+  navigateBrowser: (tabId: string, url: string): Promise<string> =>
+    ipcRenderer.invoke('desktop:navigate-browser', tabId, url),
+  closeBrowserTab: (tabId: string): Promise<void> =>
+    ipcRenderer.invoke('desktop:close-browser-tab', tabId),
+  controlBrowser: (tabId: string, action: 'back' | 'forward' | 'reload' | 'home'): Promise<void> =>
+    ipcRenderer.invoke('desktop:control-browser', tabId, action),
   openExternalLink: (url: string): Promise<void> =>
     ipcRenderer.invoke('desktop:open-external-link', url),
   copyText: (content: string): Promise<void> => ipcRenderer.invoke('desktop:copy-text', content),
@@ -177,6 +188,31 @@ const desktopBridge = {
 
     ipcRenderer.on('desktop:tool-approval-error', listener)
     return () => ipcRenderer.removeListener('desktop:tool-approval-error', listener)
+  },
+  onBrowserTabState: (
+    callback: (state: {
+      tabId: string
+      url: string
+      title: string
+      canGoBack: boolean
+      canGoForward: boolean
+    }) => void
+  ): (() => void) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      state: {
+        tabId: string
+        url: string
+        title: string
+        canGoBack: boolean
+        canGoForward: boolean
+      }
+    ): void => {
+      callback(state)
+    }
+
+    ipcRenderer.on('desktop:browser-tab-state', listener)
+    return () => ipcRenderer.removeListener('desktop:browser-tab-state', listener)
   }
 }
 
