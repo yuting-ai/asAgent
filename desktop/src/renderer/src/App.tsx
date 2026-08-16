@@ -118,12 +118,14 @@ type BrowserTab = {
 
 type ActivityTab = 'approvals' | 'schedule'
 type ScrollArea = 'threads' | 'messages'
-type ResizableColumn = 'rail' | 'threads' | 'attention'
+type ResizableColumn = 'rail' | 'threads' | 'attention' | 'browserAgent'
 type DesktopLayout = {
   railWidth: number
   threadWidth: number
   attentionWidth: number
   attentionPanelOpen: boolean
+  browserAgentPanelOpen: boolean
+  browserAgentWidth: number
 }
 
 const TAVILY_SETTINGS_LOAD_ERROR = 'Tavily settings could not be loaded.'
@@ -179,7 +181,11 @@ const MIN_THREAD_WIDTH = 160
 const MAX_THREAD_WIDTH = 360
 const MIN_ATTENTION_WIDTH = 240
 const MAX_ATTENTION_WIDTH = 460
+const DEFAULT_BROWSER_AGENT_WIDTH = 300
+const MIN_BROWSER_AGENT_WIDTH = 240
+const MAX_BROWSER_AGENT_WIDTH = 480
 const MIN_CHAT_CONTENT_WIDTH = 360
+const MIN_BROWSER_SURFACE_WIDTH = 360
 const MIN_CENTER_WIDTH = MIN_THREAD_WIDTH + MIN_CHAT_CONTENT_WIDTH
 const DESKTOP_LAYOUT_STORAGE_KEY = 'asagent.desktop.layout.v1'
 
@@ -188,7 +194,9 @@ function defaultDesktopLayout(): DesktopLayout {
     railWidth: DEFAULT_RAIL_WIDTH,
     threadWidth: DEFAULT_THREAD_WIDTH,
     attentionWidth: DEFAULT_ATTENTION_WIDTH,
-    attentionPanelOpen: false
+    attentionPanelOpen: false,
+    browserAgentPanelOpen: true,
+    browserAgentWidth: DEFAULT_BROWSER_AGENT_WIDTH
   }
 }
 
@@ -209,6 +217,8 @@ function storedDesktopLayout(): DesktopLayout {
     const threadWidth = layout['threadWidth']
     const attentionWidth = layout['attentionWidth']
     const attentionPanelOpen = layout['attentionPanelOpen']
+    const browserAgentPanelOpen = layout['browserAgentPanelOpen']
+    const browserAgentWidth = layout['browserAgentWidth']
     if (
       !isLayoutWidth(railWidth, MIN_RAIL_WIDTH, MAX_RAIL_WIDTH) ||
       !isLayoutWidth(threadWidth, MIN_THREAD_WIDTH, MAX_THREAD_WIDTH) ||
@@ -221,7 +231,15 @@ function storedDesktopLayout(): DesktopLayout {
       railWidth,
       threadWidth,
       attentionWidth,
-      attentionPanelOpen: attentionPanelOpen === true
+      attentionPanelOpen: attentionPanelOpen === true,
+      browserAgentPanelOpen: browserAgentPanelOpen !== false,
+      browserAgentWidth: isLayoutWidth(
+        browserAgentWidth,
+        MIN_BROWSER_AGENT_WIDTH,
+        MAX_BROWSER_AGENT_WIDTH
+      )
+        ? browserAgentWidth
+        : DEFAULT_BROWSER_AGENT_WIDTH
     }
   } catch {
     return defaultDesktopLayout()
@@ -461,6 +479,27 @@ function ContextPanelIcon({ direction }: { direction: 'collapse' | 'expand' }): 
   )
 }
 
+function BrowserAgentToggleIcon({ expanded }: { expanded: boolean }): React.JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <rect height="16" rx="3" width="18" x="3" y="4" />
+      {expanded ? (
+        <path d="M15 4v16H18a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3h-3Z" fill="currentColor" stroke="none" />
+      ) : null}
+      <path d="M15 4v16" />
+      {expanded ? <path d="m8 9 3.5 3L8 15" /> : <path d="m11.5 9-3.5 3 3.5 3" />}
+    </svg>
+  )
+}
+
 export default function App(): React.JSX.Element {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
   const [backendStatus, setBackendStatus] = useState<'checking' | 'ready' | 'unavailable'>(
@@ -492,6 +531,14 @@ export default function App(): React.JSX.Element {
     () => browserTabs[0]?.id ?? createBrowserTab().id
   )
   const [browserError, setBrowserError] = useState<string | null>(null)
+  const [browserConversations, setBrowserConversations] = useState<ConversationSummary[]>([])
+  const [browserMessages, setBrowserMessages] = useState<ConversationMessage[]>([])
+  const [browserDraft, setBrowserDraft] = useState('')
+  const [browserConversationByTabId, setBrowserConversationByTabId] = useState<
+    Record<string, string>
+  >({})
+  const [browserRecentOpen, setBrowserRecentOpen] = useState(false)
+  const selectedBrowserConversationId = browserConversationByTabId[activeBrowserTabId] ?? null
   const [activityTab, setActivityTab] = useState<ActivityTab>('approvals')
   const [tavilySettings, setTavilySettings] = useState<TavilySettingsStatus | null>(null)
   const [tavilyLoadError, setTavilyLoadError] = useState<string | null>(null)
@@ -521,17 +568,28 @@ export default function App(): React.JSX.Element {
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const browserAgentMessagesEndRef = useRef<HTMLDivElement | null>(null)
+  const browserRecentRef = useRef<HTMLDivElement | null>(null)
   const browserSurfaceRef = useRef<HTMLDivElement | null>(null)
   const browserAddressRef = useRef<HTMLInputElement | null>(null)
   const browserTabsRef = useRef(browserTabs)
   const activeBrowserTabIdRef = useRef(activeBrowserTabId)
+  const selectedConversationIdRef = useRef(selectedConversationId)
+  const selectedBrowserConversationIdRef = useRef(selectedBrowserConversationId)
+  const browserMessageLoadIdRef = useRef(0)
   const scrollbarHideTimerRef = useRef<number | null>(null)
   const copyFeedbackTimerRef = useRef<number | null>(null)
   const desktopLayoutRef = useRef(desktopLayout)
+  const activeViewRef = useRef(activeView)
   const resizingColumnRef = useRef<ResizableColumn | null>(null)
   const railWidth = isRailCollapsed ? COLLAPSED_RAIL_WIDTH : desktopLayout.railWidth
   browserTabsRef.current = browserTabs
   activeBrowserTabIdRef.current = activeBrowserTabId
+  selectedConversationIdRef.current = selectedConversationId
+  selectedBrowserConversationIdRef.current = selectedBrowserConversationId
+  activeViewRef.current = activeView
+  const isAttentionPanelVisible =
+    activeView !== 'chat' && activeView !== 'browser' && desktopLayout.attentionPanelOpen
 
   const addBrowserTab = useCallback((): void => {
     const current = browserTabsRef.current
@@ -543,6 +601,7 @@ export default function App(): React.JSX.Element {
     setBrowserTabs([...current, created])
     setActiveBrowserTabId(created.id)
     setBrowserError(null)
+    setBrowserRecentOpen(false)
     window.setTimeout(() => {
       browserAddressRef.current?.focus()
     }, 0)
@@ -550,6 +609,15 @@ export default function App(): React.JSX.Element {
 
   const closeBrowserTab = useCallback((tabId: string): void => {
     void window.desktop.closeBrowserTab(tabId).catch(() => undefined)
+    setBrowserConversationByTabId((current) => {
+      if (!(tabId in current)) {
+        return current
+      }
+      const next = { ...current }
+      delete next[tabId]
+      return next
+    })
+    setBrowserRecentOpen(false)
     const current = browserTabsRef.current
     const index = current.findIndex((tab) => tab.id === tabId)
     const remaining = current.filter((tab) => tab.id !== tabId)
@@ -633,7 +701,10 @@ export default function App(): React.JSX.Element {
       }
 
       const attentionIsVisible =
-        window.innerWidth > 1100 && desktopLayoutRef.current.attentionPanelOpen
+        window.innerWidth > 1100 &&
+        desktopLayoutRef.current.attentionPanelOpen &&
+        activeViewRef.current !== 'chat' &&
+        activeViewRef.current !== 'browser'
       const railIsVisible = window.innerWidth > 820
       const layout = desktopLayoutRef.current
       const currentRailWidth = isRailCollapsed ? COLLAPSED_RAIL_WIDTH : layout.railWidth
@@ -646,7 +717,7 @@ export default function App(): React.JSX.Element {
       const otherColumnWidth =
         column === 'rail' && attentionIsVisible
           ? layout.attentionWidth
-          : column === 'attention'
+          : column === 'attention' || column === 'browserAgent'
             ? railIsVisible
               ? currentRailWidth
               : 0
@@ -656,19 +727,25 @@ export default function App(): React.JSX.Element {
           ? MIN_RAIL_WIDTH
           : column === 'threads'
             ? MIN_THREAD_WIDTH
-            : MIN_ATTENTION_WIDTH
+            : column === 'browserAgent'
+              ? MIN_BROWSER_AGENT_WIDTH
+              : MIN_ATTENTION_WIDTH
       const maximumWidth = Math.min(
         column === 'rail'
           ? MAX_RAIL_WIDTH
           : column === 'threads'
             ? MAX_THREAD_WIDTH
-            : MAX_ATTENTION_WIDTH,
+            : column === 'browserAgent'
+              ? MAX_BROWSER_AGENT_WIDTH
+              : MAX_ATTENTION_WIDTH,
         column === 'threads'
           ? window.innerWidth -
               (railIsVisible ? currentRailWidth : 0) -
               (attentionIsVisible ? layout.attentionWidth : 0) -
               MIN_CHAT_CONTENT_WIDTH
-          : window.innerWidth - otherColumnWidth - MIN_CENTER_WIDTH
+          : column === 'browserAgent'
+            ? window.innerWidth - otherColumnWidth - MIN_BROWSER_SURFACE_WIDTH
+            : window.innerWidth - otherColumnWidth - MIN_CENTER_WIDTH
       )
       const width = Math.max(minimumWidth, Math.min(requestedWidth, maximumWidth))
       const nextLayout = {
@@ -677,7 +754,9 @@ export default function App(): React.JSX.Element {
           ? { railWidth: width }
           : column === 'threads'
             ? { threadWidth: width }
-            : { attentionWidth: width })
+            : column === 'browserAgent'
+              ? { browserAgentWidth: width }
+              : { attentionWidth: width })
       }
       desktopLayoutRef.current = nextLayout
       setDesktopLayout(nextLayout)
@@ -713,10 +792,11 @@ export default function App(): React.JSX.Element {
 
     async function loadInitialData(): Promise<void> {
       try {
-        const [info, status, items] = await Promise.all([
+        const [info, status, items, browserItems] = await Promise.all([
           window.desktop.getAppInfo(),
           window.desktop.getBackendStatus(),
-          window.desktop.listConversations()
+          window.desktop.listConversations(),
+          window.desktop.listBrowserConversations()
         ])
 
         if (cancelled) {
@@ -727,6 +807,7 @@ export default function App(): React.JSX.Element {
         setBackendStatus(status.status)
         setConversations(orderConversations(items))
         setSelectedConversationId(items[0]?.conversation_id ?? null)
+        setBrowserConversations(orderConversations(browserItems))
       } catch {
         if (!cancelled) {
           setBackendStatus('unavailable')
@@ -876,6 +957,64 @@ export default function App(): React.JSX.Element {
   }, [selectedConversationId])
 
   useEffect(() => {
+    if (selectedBrowserConversationId === null) {
+      queueMicrotask(() => {
+        setBrowserMessages([])
+      })
+      return
+    }
+
+    const conversationId = selectedBrowserConversationId
+    const loadId = ++browserMessageLoadIdRef.current
+    let cancelled = false
+
+    async function loadBrowserConversation(): Promise<void> {
+      try {
+        const items = await window.desktop.listBrowserConversationMessages(conversationId)
+        if (!cancelled && loadId === browserMessageLoadIdRef.current) {
+          setBrowserMessages(items)
+        }
+      } catch {
+        if (!cancelled && loadId === browserMessageLoadIdRef.current) {
+          setErrorMessage('Messages could not be loaded.')
+        }
+      }
+    }
+
+    void loadBrowserConversation()
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedBrowserConversationId])
+
+  useEffect(() => {
+    if (!browserRecentOpen) {
+      return
+    }
+
+    function handlePointerDown(event: MouseEvent): void {
+      if (browserRecentRef.current?.contains(event.target as Node) === true) {
+        return
+      }
+      setBrowserRecentOpen(false)
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        setBrowserRecentOpen(false)
+      }
+    }
+
+    window.addEventListener('mousedown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [browserRecentOpen])
+
+  useEffect(() => {
     const removeEventListener = window.desktop.onRunEvent((update) => {
       recordRunEvent(update.runId, update.event.event_type)
 
@@ -888,7 +1027,7 @@ export default function App(): React.JSX.Element {
       setActiveRun((current) => (current?.runId === update.runId ? null : current))
       setIsCancellingRun(false)
 
-      if (update.conversationId === selectedConversationId) {
+      if (update.conversationId === selectedConversationIdRef.current) {
         void Promise.all([
           window.desktop.listConversationMessages(update.conversationId),
           window.desktop.listConversationFileChanges(update.conversationId)
@@ -896,6 +1035,15 @@ export default function App(): React.JSX.Element {
           .then(([nextMessages, changes]) => {
             setMessages(nextMessages)
             setFileChanges(changes)
+          })
+          .catch(() => setErrorMessage('Messages could not be refreshed.'))
+      }
+
+      if (update.conversationId === selectedBrowserConversationIdRef.current) {
+        void window.desktop
+          .listBrowserConversationMessages(update.conversationId)
+          .then((nextMessages) => {
+            setBrowserMessages(nextMessages)
           })
           .catch(() => setErrorMessage('Messages could not be refreshed.'))
       }
@@ -929,7 +1077,7 @@ export default function App(): React.JSX.Element {
     // The event handlers below only close over React state setters and stable helpers.
     // Re-subscribing on every render would risk a gap in the single active Run stream.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedConversationId])
+  }, [])
 
   useEffect(() => {
     if (renamingConversationId === null) {
@@ -949,6 +1097,10 @@ export default function App(): React.JSX.Element {
     runActivity?.phase,
     selectedConversationId
   ])
+
+  useEffect(() => {
+    browserAgentMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [browserMessages, selectedBrowserConversationId])
 
   useEffect(() => {
     if (activeView !== 'browser') {
@@ -981,7 +1133,12 @@ export default function App(): React.JSX.Element {
     return () => {
       observer.disconnect()
     }
-  }, [activeView, activeBrowserTabId])
+  }, [
+    activeView,
+    activeBrowserTabId,
+    desktopLayout.browserAgentPanelOpen,
+    desktopLayout.browserAgentWidth
+  ])
 
   useEffect(() => {
     return () => {
@@ -1085,8 +1242,12 @@ export default function App(): React.JSX.Element {
   const visibleMessages = selectedConversationId === null ? [] : messages
   const visibleApproval =
     pendingApproval?.conversation_id === selectedConversationId ? pendingApproval : null
+  const visibleBrowserApproval =
+    pendingApproval?.conversation_id === selectedBrowserConversationId ? pendingApproval : null
   const visibleApprovalServer =
     visibleApproval === null ? null : mcpServerNameFromToolId(visibleApproval.tool_id)
+  const visibleBrowserApprovalServer =
+    visibleBrowserApproval === null ? null : mcpServerNameFromToolId(visibleBrowserApproval.tool_id)
   const isBusy =
     backendStatus !== 'ready' || isCreatingConversation || isSubmittingMessage || activeRun !== null
 
@@ -1108,6 +1269,7 @@ export default function App(): React.JSX.Element {
   function selectBrowserTab(tabId: string): void {
     setActiveBrowserTabId(tabId)
     setBrowserError(null)
+    setBrowserRecentOpen(false)
   }
 
   function updateActiveBrowserAddress(address: string): void {
@@ -1234,7 +1396,6 @@ export default function App(): React.JSX.Element {
       setSelectedConversationId(conversation.conversation_id)
       setRunActivity(null)
       setActivityExpanded(false)
-      setActiveView('chat')
     } catch {
       setErrorMessage('A new conversation could not be created.')
     } finally {
@@ -1721,6 +1882,101 @@ export default function App(): React.JSX.Element {
     setAttentionPanelOpen(true)
   }
 
+  function setBrowserAgentPanelOpen(open: boolean): void {
+    const next = { ...desktopLayoutRef.current, browserAgentPanelOpen: open }
+    desktopLayoutRef.current = next
+    setDesktopLayout(next)
+    saveDesktopLayout(next)
+  }
+
+  function bindBrowserConversationToActiveTab(conversationId: string): void {
+    const tabId = activeBrowserTabId
+    setBrowserConversationByTabId((current) =>
+      current[tabId] === conversationId ? current : { ...current, [tabId]: conversationId }
+    )
+    setBrowserRecentOpen(false)
+  }
+
+  async function createBrowserConversationForActiveTab(): Promise<void> {
+    if (isBusy) {
+      return
+    }
+
+    setIsCreatingConversation(true)
+    setErrorMessage(null)
+    try {
+      const created = await window.desktop.createBrowserConversation()
+      setBrowserConversations((current) => orderConversations([created, ...current]))
+      browserMessageLoadIdRef.current += 1
+      setBrowserMessages([])
+      bindBrowserConversationToActiveTab(created.conversation_id)
+      setBrowserDraft('')
+    } catch {
+      setErrorMessage('The conversation could not be created.')
+    } finally {
+      setIsCreatingConversation(false)
+    }
+  }
+
+  async function submitBrowserMessage(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+    const content = browserDraft
+    const tabId = activeBrowserTabId
+    if (!content.trim() || isBusy) {
+      return
+    }
+
+    setIsSubmittingMessage(true)
+    setErrorMessage(null)
+
+    try {
+      let conversationId = browserConversationByTabId[tabId] ?? selectedBrowserConversationId
+      if (conversationId === null) {
+        const created = await window.desktop.createBrowserConversation()
+        conversationId = created.conversation_id
+        setBrowserConversations((current) => orderConversations([created, ...current]))
+        bindBrowserConversationToActiveTab(conversationId)
+      }
+
+      const submitted = await window.desktop.submitBrowserMessage(conversationId, content)
+      if (selectedBrowserConversationIdRef.current === conversationId) {
+        browserMessageLoadIdRef.current += 1
+        setBrowserMessages((current) => [...current, submitted.message])
+      }
+      setBrowserConversations((current) =>
+        orderConversations(
+          current.map((conversation) =>
+            conversation.conversation_id === submitted.conversation.conversation_id
+              ? submitted.conversation
+              : conversation
+          )
+        )
+      )
+      setBrowserDraft('')
+      setActiveRun({
+        runId: submitted.run.run_id,
+        conversationId,
+        status: 'running'
+      })
+      setRunActivity({
+        runId: submitted.run.run_id,
+        conversationId,
+        entries: ['Started'],
+        currentLabel: 'Starting…',
+        toolNames: [],
+        phase: 'live',
+        outcome: null,
+        startedAt: Date.now(),
+        endedAt: null
+      })
+      setActivityExpanded(false)
+    } catch {
+      setErrorMessage('Message submission failed.')
+    } finally {
+      setIsSubmittingMessage(false)
+    }
+  }
+
   function ContextPanelExpandButton(): React.JSX.Element | null {
     if (desktopLayout.attentionPanelOpen) {
       return null
@@ -1816,8 +2072,10 @@ export default function App(): React.JSX.Element {
 
       <div
         className={`app${isRailCollapsed ? ' rail-collapsed' : ''}${
-          desktopLayout.attentionPanelOpen ? ' attention-open' : ' attention-collapsed'
-        }${resizingColumn === null ? '' : ' is-resizing'}`}
+          isAttentionPanelVisible ? ' attention-open' : ' attention-collapsed'
+        }${activeView === 'browser' ? ' browser-active' : ''}${
+          resizingColumn === null ? '' : ' is-resizing'
+        }`}
         style={
           {
             '--rail-width': `${railWidth}px`,
@@ -2169,7 +2427,6 @@ export default function App(): React.JSX.Element {
                       ? conversationLabel(selectedConversation.title)
                       : 'No conversation selected'}
                   </div>
-                  <ContextPanelExpandButton />
                 </div>
 
                 {errorMessage ? <p className="chat-error">{errorMessage}</p> : null}
@@ -2561,26 +2818,18 @@ export default function App(): React.JSX.Element {
               </div>
             </div>
           </section>
-
-          <AttentionAside header={<div className="attn-header">Referenced in this chat</div>}>
-            <p className="chat-context-sub">
-              Files, previews, and actions for this conversation will appear here.
-            </p>
-            <div className="ctx-file">
-              <div className="ctx-file-icon">
-                <Icon path="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6" />
-              </div>
-              <div>
-                <div className="ctx-file-name">Nothing referenced yet</div>
-                <div className="ctx-file-meta">File preview coming soon</div>
-              </div>
-            </div>
-          </AttentionAside>
         </div>
 
         <div className={`view${activeView === 'browser' ? ' active' : ''}`}>
           <section className="center browser-center">
-            <div className="browser-page">
+            <div
+              className="browser-page"
+              style={
+                {
+                  '--browser-agent-width': `${desktopLayout.browserAgentWidth}px`
+                } as CSSProperties
+              }
+            >
               <div className="browser-chrome">
                 <div aria-label="Browser tabs" className="browser-tabstrip" role="tablist">
                   {browserTabs.map((tab) => {
@@ -2689,13 +2938,221 @@ export default function App(): React.JSX.Element {
                     type="text"
                     value={activeBrowserTab?.address ?? ''}
                   />
-                  <button className="browser-go" type="submit">
-                    Go
+                  <button aria-label="Go" className="browser-go" title="Go" type="submit">
+                    <Icon path="M5 12h14M13 6l6 6-6 6" />
+                  </button>
+                  <button
+                    aria-expanded={desktopLayout.browserAgentPanelOpen}
+                    aria-label={
+                      desktopLayout.browserAgentPanelOpen
+                        ? 'Collapse page assistant'
+                        : 'Expand page assistant'
+                    }
+                    className="browser-agent-toggle"
+                    onClick={() => setBrowserAgentPanelOpen(!desktopLayout.browserAgentPanelOpen)}
+                    title={
+                      desktopLayout.browserAgentPanelOpen
+                        ? 'Collapse page assistant'
+                        : 'Expand page assistant'
+                    }
+                    type="button"
+                  >
+                    <BrowserAgentToggleIcon expanded={desktopLayout.browserAgentPanelOpen} />
                   </button>
                 </form>
               </div>
               {browserError !== null ? <p className="browser-error">{browserError}</p> : null}
-              <div className="browser-surface" ref={browserSurfaceRef} />
+              <div className="browser-body">
+                <div className="browser-surface" ref={browserSurfaceRef} />
+                {desktopLayout.browserAgentPanelOpen ? (
+                  <aside aria-label="Page assistant" className="browser-agent">
+                    <div
+                      aria-label="Resize page assistant"
+                      className="browser-agent-resizer"
+                      onPointerDown={(event) => beginColumnResize('browserAgent', event)}
+                      role="separator"
+                    />
+                    <div className="browser-agent-toolbar">
+                      <button
+                        aria-label="New conversation"
+                        className="browser-agent-toolbar-button"
+                        disabled={isBusy}
+                        onClick={() => void createBrowserConversationForActiveTab()}
+                        title="New conversation"
+                        type="button"
+                      >
+                        <Icon path="M12 5v14M5 12h14" />
+                      </button>
+                      <div className="browser-recent" ref={browserRecentRef}>
+                        <button
+                          aria-expanded={browserRecentOpen}
+                          aria-label="Recent conversations"
+                          className="browser-agent-toolbar-button"
+                          onClick={() => setBrowserRecentOpen((open) => !open)}
+                          title="Recent conversations"
+                          type="button"
+                        >
+                          <Icon path="M12 8v4l3 2m6-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+                        </button>
+                        {browserRecentOpen ? (
+                          <div className="browser-recent-menu" role="listbox">
+                            {browserConversations.length === 0 ? (
+                              <p className="browser-recent-empty">No recent conversations</p>
+                            ) : (
+                              browserConversations.map((conversation) => {
+                                const selected =
+                                  conversation.conversation_id === selectedBrowserConversationId
+                                return (
+                                  <button
+                                    aria-selected={selected}
+                                    className={`browser-recent-item${selected ? ' selected' : ''}`}
+                                    key={conversation.conversation_id}
+                                    onClick={() =>
+                                      bindBrowserConversationToActiveTab(
+                                        conversation.conversation_id
+                                      )
+                                    }
+                                    role="option"
+                                    type="button"
+                                  >
+                                    <span className="browser-recent-title">
+                                      {conversationLabel(conversation.title)}
+                                    </span>
+                                    <time
+                                      className="browser-recent-time"
+                                      dateTime={conversation.updated_at}
+                                    >
+                                      {formatThreadTime(conversation.updated_at)}
+                                    </time>
+                                  </button>
+                                )
+                              })
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                    {errorMessage !== null && activeView === 'browser' ? (
+                      <p className="browser-agent-error">{errorMessage}</p>
+                    ) : null}
+                    <div className="browser-agent-messages">
+                      {browserMessages.length === 0 &&
+                      runActivity?.conversationId !== selectedBrowserConversationId ? (
+                        <div className="browser-agent-empty">
+                          <div aria-hidden="true" className="browser-agent-empty-icon">
+                            <Icon path="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                          </div>
+                          <p className="browser-agent-empty-title">Talk with asAgent</p>
+                          <p className="browser-agent-empty-copy">
+                            Messages here are a separate Browser conversation. asAgent cannot read
+                            or operate on this page yet.
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          {browserMessages.map((message) => (
+                            <div
+                              className={`browser-agent-turn ${message.role === 'user' ? 'is-user' : 'is-assistant'}`}
+                              key={message.message_id}
+                            >
+                              <div className="browser-agent-bubble">
+                                {message.role === 'assistant' ? (
+                                  <div className="markdown-content">
+                                    <ReactMarkdown
+                                      remarkPlugins={[remarkGfm]}
+                                      components={{
+                                        a: ({ children, href }) => (
+                                          <a
+                                            href={href}
+                                            onClick={(event) => {
+                                              event.preventDefault()
+                                              openAssistantLink(href)
+                                            }}
+                                            title="Open in your default browser"
+                                          >
+                                            {children}
+                                          </a>
+                                        )
+                                      }}
+                                    >
+                                      {message.content}
+                                    </ReactMarkdown>
+                                  </div>
+                                ) : (
+                                  message.content
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                          {runActivity?.conversationId === selectedBrowserConversationId ? (
+                            <p className="browser-agent-status">
+                              {runActivity.phase === 'live'
+                                ? runActivity.currentLabel
+                                : activitySummaryLabel(runActivity)}
+                            </p>
+                          ) : null}
+                          <div ref={browserAgentMessagesEndRef} />
+                        </>
+                      )}
+                    </div>
+                    {visibleBrowserApproval !== null ? (
+                      <div
+                        aria-label="Tool approval"
+                        className="browser-agent-approval"
+                        role="region"
+                      >
+                        <p className="browser-agent-approval-copy">
+                          Allow {visibleBrowserApproval.display_name}?
+                          {visibleBrowserApprovalServer !== null
+                            ? ` (${visibleBrowserApprovalServer})`
+                            : ''}
+                        </p>
+                        <div className="browser-agent-approval-actions">
+                          {TOOL_APPROVAL_BANNER_ACTIONS.map((action) => (
+                            <button
+                              className={action.className}
+                              disabled={isDecidingApproval}
+                              key={action.decision}
+                              onClick={() => void decidePendingApproval(action.decision)}
+                              type="button"
+                            >
+                              {action.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    <form
+                      className="browser-agent-composer"
+                      onSubmit={(event) => void submitBrowserMessage(event)}
+                    >
+                      <label className="browser-agent-input">
+                        <textarea
+                          onChange={(event) => setBrowserDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' && !event.shiftKey) {
+                              event.preventDefault()
+                              event.currentTarget.form?.requestSubmit()
+                            }
+                          }}
+                          placeholder="Message asAgent…"
+                          rows={1}
+                          value={browserDraft}
+                        />
+                        <button
+                          aria-label="Send message"
+                          className="composer-send"
+                          disabled={!browserDraft.trim() || isBusy}
+                          title="Send message"
+                          type="submit"
+                        >
+                          <Icon path="M12 19V5m-6 6 6-6 6 6" />
+                        </button>
+                      </label>
+                    </form>
+                  </aside>
+                ) : null}
+              </div>
             </div>
           </section>
         </div>

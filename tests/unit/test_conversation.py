@@ -22,6 +22,32 @@ def test_conversation_preserves_identity_owner_and_timestamps() -> None:
     assert conversation.user_id == "local-user"
     assert conversation.created_at == created_at
     assert conversation.updated_at == updated_at
+    assert conversation.kind == "chat"
+
+
+def test_conversation_defaults_to_chat_kind() -> None:
+    created_at = datetime(2026, 8, 4, 9, 0, tzinfo=UTC)
+    conversation = Conversation(
+        conversation_id=ConversationId("conv_123"),
+        user_id=UserId("local-user"),
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+    assert conversation.kind == "chat"
+
+
+def test_conversation_preserves_browser_kind() -> None:
+    created_at = datetime(2026, 8, 4, 9, 0, tzinfo=UTC)
+    conversation = Conversation(
+        conversation_id=ConversationId("conv_browser"),
+        user_id=UserId("local-user"),
+        created_at=created_at,
+        updated_at=created_at,
+        kind="browser",
+    )
+
+    assert conversation.kind == "browser"
 
 
 def test_conversation_is_immutable() -> None:

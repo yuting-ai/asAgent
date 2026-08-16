@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from asagent.core.conversation import Conversation
+from asagent.core.conversation import Conversation, ConversationKind
 from asagent.core.file_change import FileChange, FileChangeOperation, FileChangeStatus
 from asagent.core.ids import (
     ConversationId,
@@ -56,7 +56,13 @@ class ExampleConversationRepository:
             return conversation
         return None
 
-    async def list_for_user(self, user_id: UserId) -> tuple[Conversation, ...]:
+    async def list_for_user(
+        self,
+        user_id: UserId,
+        *,
+        kind: ConversationKind | None = None,
+    ) -> tuple[Conversation, ...]:
+        del kind
         conversation = make_conversation()
         if conversation.user_id == user_id:
             return (conversation,)

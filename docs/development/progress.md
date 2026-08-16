@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 7 进行中；阶段 0–6 的 Core、Agent Loop、SQLite 持久化、Context Builder 基础、受控 Workspace Tool 边界与 Local API/SSE 已完成，当前继续 Electron 最小集成。
-- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、Conversation 列表/创建（响应含可空 title，创建请求仍禁止 title）、可见 Message 查询/提交、按 Run ID 查询状态、协作取消，以及基于持久化 RunEvent 的认证 SSE 回放/实时观察。首条消息提交会在 RunStarter 同事务中生成会话标题。
+- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、按 `kind` 隔离的 Chat/Browser Conversation 列表/创建、可见 Message 查询/提交、按 Run ID 查询状态、协作取消，以及基于持久化 RunEvent 的认证 SSE 回放/实时观察。首条消息提交会在 RunStarter 同事务中生成会话标题。桌面 Browser 侧栏已接入独立的真实 Browser Conversation，不与 Chat 列表混用。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
-- 当前日期：2026-08-11
-- 当前目标：桌面 Chat 已能显示并按最近活跃排序的会话；下一项在用户确认后继续阶段 7 体验回顾与下一真实用户价值路径。
+- 当前日期：2026-08-16
+- 当前目标：Browser Conversation 真实对话与最近历史已闭环；下一项是仅为 Browser Run 注册只读 `browser.read_current_page`。
 
 ## 2. 已完成
 
@@ -3752,3 +3752,26 @@
 ### 下一步
 
 - 先实现 Browser Conversation 的类型隔离与侧栏最近会话入口：它接入既有 Agent/Run 管线，但不能出现在 Chat 列表。随后在该独立入口实现只读当前可见页的最小 Browser Tool 闭环；页面加载状态只作为该 Tool 的必要结果，不单独开发观测产品功能。本次仍不开始通用点击/输入、站点范围、审批或 Scheduler。
+
+## 2026-08-16 Browser Conversation 与 Chat 隔离
+
+### 完成
+
+- Conversation 增加稳定类型 `kind`：`chat` 或 `browser`，默认 `chat`。SQLite `conversations` 表新增带 CHECK 约束的 `kind` 列；Alembic `20260816_06` 将旧行迁移为 `chat`。
+- 既有 `/api/v1/conversations` 只处理 Chat。新增四条固定 Browser 路由，复用 Message、Run、SSE 与首条消息自动标题，跨类型访问返回 404。不持久化 `tabId`、URL 或网页正文。
+- Electron Main/Preload 增加四个具名 Browser Conversation 操作；提交后继续复用既有 Run SSE。Renderer 用独立状态驱动 Page assistant，标签绑定只存在内存中。
+- Page assistant 增加紧凑的 New conversation 与 Recent conversations 入口，不搬入 Chat 的重命名/删除交互。本任务不注册页面读取或浏览器操作 Tool。
+
+### 验证
+
+- Python 定向测试 39 passed：`test_conversation.py`、`test_in_memory_conversation_repository.py`、`test_conversation_repository.py`、`test_api_conversations.py`、`test_local_api_openapi.py`。
+- `ruff format` / `ruff check`（相关文件）与 `uv run mypy` 通过。
+- Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（80 passed）和 `npm run build` 全部通过。
+
+### 决策变化
+
+- 落实 DEC-079 的 Conversation 类型隔离；`browser.read_current_page` 仍未实现。
+
+### 下一步
+
+- 仅为 Browser Run 注册只读 `browser.read_current_page`：从当前可见 `WebContentsView` 返回限长文本。本次仍不开始点击、输入或其他浏览器操作 Tool。

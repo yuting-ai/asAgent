@@ -617,6 +617,68 @@ app.whenReady().then(async () => {
       })
   })
 
+  ipcMain.handle('desktop:list-browser-conversations', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().listBrowserConversations()
+  })
+
+  ipcMain.handle('desktop:create-browser-conversation', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().createBrowserConversation()
+  })
+
+  ipcMain.handle('desktop:list-browser-conversation-messages', (event, conversationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+
+    if (typeof conversationId !== 'string' || !conversationId.trim()) {
+      throw new Error('Conversation ID is invalid.')
+    }
+
+    return getReadyBackendLauncher().listBrowserConversationMessages(conversationId)
+  })
+
+  ipcMain.handle(
+    'desktop:submit-browser-message',
+    (event, conversationId: unknown, content: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) {
+        throw new Error('Untrusted renderer IPC request.')
+      }
+
+      assertTrustedRenderer(frame.url)
+
+      if (typeof conversationId !== 'string' || !conversationId.trim()) {
+        throw new Error('Conversation ID is invalid.')
+      }
+
+      if (typeof content !== 'string' || !content.trim()) {
+        throw new Error('Message content is invalid.')
+      }
+
+      return getReadyBackendLauncher()
+        .submitBrowserMessage(conversationId, content)
+        .then((submitted) => {
+          watchRun(event.sender, conversationId, submitted)
+          return submitted
+        })
+    }
+  )
+
   ipcMain.handle('desktop:cancel-run', async (event, runId: unknown) => {
     const frame = event.senderFrame
     if (frame === null) {

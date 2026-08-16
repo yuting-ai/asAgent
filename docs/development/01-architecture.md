@@ -77,7 +77,9 @@ asAgent/
 
 阶段 7 的后续只读接入已完成：`BackendLauncher` 以自身持有的 loopback endpoint 和仅 Main 可见的 Token 提供两个固定操作——列出 Conversation、读取指定 Conversation 的可见 Message。受来源校验的窄 Preload 只暴露这两个操作与无敏感的 Backend 状态；Renderer 没有 Token、端口、通用 HTTP、写入 API 或 SSE 能力。此前关于 Renderer 尚不能调用业务 API 的描述由此更新；提交 Message、Run 状态观察与 SSE 仍是后续独立任务。
 
-Conversation 元数据现包含可空 `title`。创建 Conversation 的请求体仍严格为空对象；首次 `POST /api/v1/conversations/{conversation_id}/messages` 时，`RunSubmissionService` 将该用户文本规范化为空格分隔的单行，并生成至多 60 个字符的确定性标题（超出时以前 59 个字符加省略号表示）。已有标题不会被后续消息覆盖。更新后的 Conversation、首条 UserMessage 与 CREATED Run 由 `RunStarter` 在同一 SQLite 事务中提交，提交响应和列表响应均返回 `title`，Electron 侧栏立即以该响应更新显示。此标题不是模型生成摘要，也不是可编辑字段。
+Conversation 元数据现包含可空 `title`。创建 Conversation 的请求体仍严格为空对象；首次 `POST /api/v1/conversations/{conversation_id}/messages` 或 `POST /api/v1/browser/conversations/{conversation_id}/messages` 时，`RunSubmissionService` 将该用户文本规范化为空格分隔的单行，并生成至多 60 个字符的确定性标题（超出时以前 59 个字符加省略号表示）。已有标题不会被后续消息覆盖。更新后的 Conversation、首条 UserMessage 与 CREATED Run 由 `RunStarter` 在同一 SQLite 事务中提交，提交响应和列表响应均返回 `title`，Electron 侧栏立即以该响应更新显示。此标题不是模型生成摘要，也不是可编辑字段。
+
+Conversation 另有稳定类型 `kind`：`chat` 或 `browser`，默认 `chat`。SQLite `conversations` 表以 `NOT NULL DEFAULT 'chat'` 和 `CHECK (kind IN ('chat', 'browser'))` 保存该字段；迁移后的历史行都是 `chat`。`GET`/`POST /api/v1/conversations` 及其 messages、标题、删除和文件相关路由只处理 `kind=chat`；对称的 `/api/v1/browser/conversations` 四条固定路由只处理 `kind=browser`。跨类型访问统一 404。两类会话复用同一 Message、Run、SSE 与自动标题规则，不把 `tabId`、URL 或网页正文写入数据库或 API。Electron Main 为 Browser 提供四个具名 IPC；浏览器标签与 Browser Conversation 的绑定只存在于 Renderer 内存，关闭标签或重启后不恢复，但会话历史仍可从 SQLite 最近列表读取。
 
 Conversation 列表按 `updated_at` 倒序、再按 `conversation_id` 倒序返回。首条或后续用户消息均会在与初始 Run 创建相同的事务中更新 Conversation 的 `updated_at`；Electron 在创建 Conversation 或提交 Message 后也按同一排序规则更新内存侧栏，无需刷新即可把最近活跃会话放在顶部。重命名只更新 `title`，不改变 `updated_at`，且 Renderer 原位替换该项，因此不会因编辑名称改变列表位置。
 
@@ -793,12 +795,16 @@ Authorization: Bearer <本次启动的 token>
 | 方法与路径 | 成功响应 | 行为与数据边界 |
 | --- | --- | --- |
 | `GET /api/v1/health` | `200 {"status":"ok"}` | 仅表示当前 ASGI 应用可响应，不表示模型、Workspace 或完整 Runtime 就绪。 |
-| `GET /api/v1/conversations` | `200 Conversation[]` | 仅列出 `local-user` 的 `conversation_id`、`created_at`、`updated_at`。 |
-| `POST /api/v1/conversations` | `201 Conversation` | 仅接受空 JSON object；服务端创建 `conv_` ID 和 UTC 时间，为 `local-user` 保存空 Conversation；未知字段为 `422`。不创建 Message、Run 或事件。 |
-| `POST /api/v1/conversations/{conversation_id}/messages` | `201 {"message": Message, "run": Run}` | 只接受含非空、非纯空白 `content` 的 JSON object；为 `local-user` 原子创建一条 USER Message 与一个 `created` Run，随后安排进程内后台执行。HTTP 不等待模型结果，因此响应中的 Run 状态仍为 `created`。不存在或不属于 `local-user` 的 Conversation 一律为 `404 {"detail":"conversation not found"}`；无效字段或内容为 `422`。 |
+| `GET /api/v1/conversations` | `200 Conversation[]` | 仅列出 `local-user` 的 `kind=chat` Conversation 的 `conversation_id`、`created_at`、`updated_at` 和可空 `title`。 |
+| `POST /api/v1/conversations` | `201 Conversation` | 仅接受空 JSON object；服务端创建 `conv_` ID 和 UTC 时间，为 `local-user` 保存空的 `kind=chat` Conversation；未知字段为 `422`。不创建 Message、Run 或事件。 |
+| `POST /api/v1/conversations/{conversation_id}/messages` | `201 {"message": Message, "run": Run}` | 只接受含非空、非纯空白 `content` 的 JSON object；为 `local-user` 的 `kind=chat` Conversation 原子创建一条 USER Message 与一个 `created` Run，随后安排进程内后台执行。HTTP 不等待模型结果，因此响应中的 Run 状态仍为 `created`。不存在、不属于 `local-user` 或 `kind` 不是 `chat` 的 Conversation 一律为 `404 {"detail":"conversation not found"}`；无效字段或内容为 `422`。 |
 | `GET /api/v1/runs/{run_id}` | `200 Run` | 返回 `run_id`、完整 `status`、`created_at` 和 `updated_at`。先通过该 Run 所属 Conversation 确认 `local-user` 归属；不存在或不属于本地用户的 Run 一律为 `404 {"detail":"run not found"}`。不返回 Conversation、Message、Event、ToolCall 或模型正文。 |
 | `POST /api/v1/runs/{run_id}/cancel` | `202 {"run_id": "...", "cancellation_requested": true}` | 仅请求进程内 Dispatcher 协作取消，不直接写入 Run 状态。不存在或不属于本地用户的 Run 为 `404 {"detail":"run not found"}`；存在但不活跃的 Run 为 `409 {"detail":"run is not active"}`。 |
-| `GET /api/v1/conversations/{conversation_id}/messages` | `200 Message[]` | 按持久化 sequence 返回可见 USER/ASSISTANT message 的 ID、角色、正文和时间；不存在或不属于 `local-user` 的 Conversation 一律为 `404 {"detail":"conversation not found"}`。 |
+| `GET /api/v1/conversations/{conversation_id}/messages` | `200 Message[]` | 按持久化 sequence 返回可见 USER/ASSISTANT message 的 ID、角色、正文和时间；不存在、不属于 `local-user` 或 `kind` 不是 `chat` 的 Conversation 一律为 `404 {"detail":"conversation not found"}`。 |
+| `GET /api/v1/browser/conversations` | `200 Conversation[]` | 仅列出 `local-user` 的 `kind=browser` Conversation 元数据；不返回 Chat 会话。 |
+| `POST /api/v1/browser/conversations` | `201 Conversation` | 与 Chat 创建相同的空 JSON object 规则，但保存 `kind=browser`。 |
+| `GET /api/v1/browser/conversations/{conversation_id}/messages` | `200 Message[]` | 与 Chat messages 查询相同的可见 Message 表面；`kind` 不是 `browser` 时为 404。 |
+| `POST /api/v1/browser/conversations/{conversation_id}/messages` | `201 {"message": Message, "run": Run}` | 与 Chat 提交相同的 Message/Run/SSE 管线，包括首条消息自动标题；`kind` 不是 `browser` 时为 404。不接受 `tabId`、URL 或网页正文。 |
 
 时间以 UTC ISO 8601 JSON 字符串表示；API 不返回 `user_id`、内部 TOOL message、Run、RunEvent、ToolCall、Secret 或 Token。`POST /conversations` 暂无幂等键和 create-only Repository 原语，生产 UUID 碰撞虽可忽略，但重试/并发创建语义不能被假定为已解决。
 

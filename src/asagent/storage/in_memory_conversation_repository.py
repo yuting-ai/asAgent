@@ -1,4 +1,4 @@
-from asagent.core.conversation import Conversation
+from asagent.core.conversation import Conversation, ConversationKind
 from asagent.core.ids import ConversationId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
 
@@ -17,11 +17,17 @@ class InMemoryConversationRepository:
     ) -> Conversation | None:
         return self._conversations.get(conversation_id)
 
-    async def list_for_user(self, user_id: UserId) -> tuple[Conversation, ...]:
+    async def list_for_user(
+        self,
+        user_id: UserId,
+        *,
+        kind: ConversationKind | None = None,
+    ) -> tuple[Conversation, ...]:
         return tuple(
             conversation
             for conversation in self._conversations.values()
             if conversation.user_id == user_id
+            and (kind is None or conversation.kind == kind)
         )
 
     async def save(self, conversation: Conversation) -> None:

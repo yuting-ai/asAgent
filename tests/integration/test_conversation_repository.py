@@ -1,7 +1,9 @@
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 
 import pytest
+import sqlalchemy as sa
 from alembic.config import Config
 
 from alembic import command
@@ -27,6 +29,7 @@ def _conversation(
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
     title: str | None = None,
+    kind: Literal["chat", "browser"] = "chat",
 ) -> Conversation:
     creation_time = created_at or datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
     return Conversation(
@@ -35,6 +38,7 @@ def _conversation(
         created_at=creation_time,
         updated_at=updated_at or creation_time,
         title=title,
+        kind=kind,
     )
 
 
@@ -234,3 +238,69 @@ async def test_messages_are_scoped_ordered_and_require_conversation(
             )
     finally:
         await repository.aclose()
+
+
+@pytest.mark.asyncio
+async def test_persists_and_filters_browser_conversations(tmp_path: Path) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    user_id = UserId("local-user")
+    chat = _conversation(ConversationId("conversation-chat"), user_id)
+    browser = _conversation(
+        ConversationId("conversation-browser"),
+        user_id,
+        updated_at=datetime(2026, 8, 9, 12, 1, tzinfo=UTC),
+        kind="browser",
+    )
+    repository = SqliteConversationRepository(database_path)
+
+    try:
+        await repository.save(chat)
+        await repository.save(browser)
+
+        assert await repository.get(browser.conversation_id) == browser
+        assert await repository.list_for_user(user_id) == (browser, chat)
+        assert await repository.list_for_user(user_id, kind="chat") == (chat,)
+        assert await repository.list_for_user(user_id, kind="browser") == (browser,)
+    finally:
+        await repository.aclose()
+
+
+@pytest.mark.asyncio
+async def test_migrated_conversations_default_to_chat_kind(tmp_path: Path) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", f"sqlite+pysqlite:///{database_path}")
+    command.upgrade(config, "20260815_05")
+
+    timestamp = "2026-08-09T12:00:00+00:00"
+    engine = sa.create_engine(f"sqlite+pysqlite:///{database_path}")
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    "INSERT INTO users (user_id, created_at) VALUES ('local-user', :time)"
+                ),
+                {"time": timestamp},
+            )
+            connection.execute(
+                sa.text(
+                    "INSERT INTO conversations "
+                    "(conversation_id, user_id, created_at, updated_at) "
+                    "VALUES ('conversation-legacy', 'local-user', :time, :time)"
+                ),
+                {"time": timestamp},
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "head")
+    repository = SqliteConversationRepository(database_path)
+    try:
+        stored = await repository.get(ConversationId("conversation-legacy"))
+    finally:
+        await repository.aclose()
+
+    assert stored is not None
+    assert stored.kind == "chat"

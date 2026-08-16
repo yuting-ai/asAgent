@@ -320,6 +320,33 @@ export class BackendLauncher {
     )
   }
 
+  async listBrowserConversations(): Promise<ConversationSummary[]> {
+    return this.requestJson('/api/v1/browser/conversations', 'GET')
+  }
+
+  async createBrowserConversation(): Promise<CreatedConversation> {
+    return this.requestJson('/api/v1/browser/conversations', 'POST', {})
+  }
+
+  async listBrowserConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
+    return this.requestJson(
+      `/api/v1/browser/conversations/${encodeURIComponent(conversationId)}/messages`,
+      'GET'
+    )
+  }
+
+  async submitBrowserMessage(conversationId: string, content: string): Promise<SubmittedMessage> {
+    if (!content.trim()) {
+      throw new Error('Message content is invalid.')
+    }
+
+    return this.requestJson<SubmittedMessage>(
+      `/api/v1/browser/conversations/${encodeURIComponent(conversationId)}/messages`,
+      'POST',
+      { content }
+    )
+  }
+
   async cancelRun(runId: string): Promise<void> {
     await this.requestJson(`/api/v1/runs/${encodeURIComponent(runId)}/cancel`, 'POST', {})
   }

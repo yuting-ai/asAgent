@@ -118,6 +118,10 @@ interface DesktopBridge {
   updateConversationTitle(conversationId: string, title: string): Promise<ConversationSummary>
   deleteConversation(conversationId: string): Promise<void>
   submitMessage(conversationId: string, content: string): Promise<SubmittedMessage>
+  listBrowserConversations(): Promise<ConversationSummary[]>
+  createBrowserConversation(): Promise<ConversationSummary>
+  listBrowserConversationMessages(conversationId: string): Promise<ConversationMessage[]>
+  submitBrowserMessage(conversationId: string, content: string): Promise<SubmittedMessage>
   cancelRun(runId: string): Promise<void>
   decideToolApproval(
     approvalId: string,

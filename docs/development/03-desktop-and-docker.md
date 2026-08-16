@@ -171,6 +171,7 @@ API 使用版本前缀：
 ```text
 /api/v1/health
 /api/v1/conversations
+/api/v1/browser/conversations
 /api/v1/runs
 /api/v1/runs/{run_id}
 /api/v1/runs/{run_id}/cancel

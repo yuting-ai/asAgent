@@ -873,7 +873,7 @@
 ### DEC-079：Browser Conversation 与 Chat 隔离，并按 Tool 逐步扩展浏览器能力
 
 - 日期：2026-08-16
-- 状态：已确认
+- 状态：已确认；Conversation 类型隔离与 Browser 侧栏真实对话已落地，`browser.read_current_page` 仍待实现
 - 背景：Browser 页面已有独立的 Agent 侧栏 UI。若直接复用普通 Chat 的 Conversation 查询和提交入口，Browser 消息会混入 Chat 列表，且模型无法明确其读取的是用户当前可见的哪个标签。未来浏览器的读取、输入和提交风险不同，预先建设通用 BrowserAction/任务模型会超出当前需求。
 - 决策：Conversation 在同一 SQLite 主数据和既有 Message/Run 管线中增加稳定类型 `chat` 或 `browser`。两类会话分别列出、创建和提交，Browser 侧栏提供自己的最近会话入口；不建立第二套表。每个浏览器标签仅在 Renderer 中临时关联一个 Browser Conversation，`tabId` 不持久化。第一项 Agent 能力是仅在 Browser Conversation 注册的只读 `browser.read_current_page`，只能读取当前关联且可见的标签，结果限为标题、已脱敏 URL 与有界正文。未来点击、输入、选择、上传、下载、提交或自动化操作都各自以独立 Browser Tool 加入。
 - 原因：类型隔离保留统一的 Conversation/Run/SSE/持久化实现，又保证两个产品入口不会混淆。把标签绑定保留为临时 UI 状态符合标签不跨应用重启的生命周期。按 Tool 扩展让每项副作用拥有自己的输入、权限、范围、审批、超时、取消和测试，而不把未确认的自动化需求固化为通用框架。
