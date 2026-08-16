@@ -362,6 +362,12 @@ asAgent 采用“每个阶段完成一个可运行闭环”的方式开发。不
 - 定时任务与当前对话上下文不互相污染。
 - Fake Channel 不修改 Agent Core 即可接入。
 
+## 独立功能：可见嵌入式浏览器基础
+
+此功能由用户在阶段 11 前单独启动，不改变 Scheduler 的验收或将浏览器自动化视为已完成。第一小步只在 Electron 中实现独立 Browser 菜单与 `WebContentsView`：用户可打开可见网页，会话使用 asAgent 专属的持久 Electron Session。它不接入 Python Agent、ToolRegistry、MCP、Gmail、文件范围或定时任务。
+
+后续独立小任务才按顺序处理导航限制与状态、页面读取、AI BrowserAction、站点范围/审批、人工接管和 Scheduler。Scheduler 只能创建隔离 Run，不能静默复用或并发读写浏览器 Profile；有副作用的后台浏览器操作必须另行定义预授权、可见性和取消规则。
+
 ## 15. 阶段 12：桌面打包与发布
 
 阶段 7 已完成本地 Sidecar 冒烟构建；本阶段处理正式发行，而不是第一次发现打包问题。

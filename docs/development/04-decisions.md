@@ -860,6 +860,16 @@
 - 影响：用户消息显示时间、复制和 Edit 操作；AssistantMessage 显示复制操作。复制成功只在本地短暂显示确认，不写入 Conversation、RunEvent 或数据库。
 - 替代方案：原地更新 Message 并重新绑定/删除旧 Run，隐式删除后续对话，或让 Renderer 直接调用 `navigator.clipboard`/Electron API；当前均不采用。
 
+### DEC-078：可见嵌入式浏览器由 Electron Main 独占会话
+
+- 日期：2026-08-16
+- 状态：已确认；首个独立桌面基础任务待实现
+- 背景：asAgent 的浏览器能力必须让用户看到 AI 正在处理的页面，并允许未来暂停或人工接管。隐藏的后端浏览器自动化虽然易于实现，却不能满足可见性要求；让 Electron 与独立 Playwright/Chromium 实例同时访问同一 Profile 又会带来 Cookie 复制、Profile 锁冲突和不清晰的凭据边界。
+- 决策：首个浏览器闭环使用 Electron Main 创建并拥有一个 asAgent 专属、持久 Session 的 `WebContentsView`；用户通过独立 Browser 菜单浏览真实网页。该 View 是未来 AI 操作和用户查看的同一个会话主人。首版只实现独立浏览与安全生命周期，不注册 Agent Tool、不读取页面给模型、不执行自动点击/输入/登录/上传/下载/提交，也不接入 Scheduler、MCP 或 Gmail。后续 AI 操作由 Python Runtime 提出高层请求，Main 的受控 Controller 在可见 View 上执行，且每项能力仍分别经过工具权限、站点范围和操作批准。
+- 原因：单一会话所有者能在不导出 Cookie 或共享 Profile 文件的条件下保持可见页面与后续自动化一致；Electron Main 已拥有窗口、菜单、导航限制和本地生命周期，适合承担该边缘能力。将 Agent 自动化延后可先验证 UI、安全隔离和失败处理，而不让浏览器实现反向耦合 Core。
+- 影响：新实现使用 `WebContentsView`，不使用已弃用的 `BrowserView`；远程页面保持 sandbox 且没有 Node、Preload、通用 IPC、Token、文件系统或会话凭据访问。Renderer 不读取网页 DOM 或会话数据。浏览器 Profile 不作为 OAuth/MCP Secret Store，外部浏览器/Playwright 不得并发读取其目录。页面读取、选择器、超时、取消、下载、审批、审计、AI Tool 与定时任务各自留待后续独立任务。
+- 替代方案：仅用隐藏 Playwright 浏览器；同时用 Playwright 和 Electron 读写同一 Profile；让 Renderer 直接嵌入并控制不受信任网页；或先实现浏览器 Agent Tool 与 Scheduler 再验证可见 UI；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：

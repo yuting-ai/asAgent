@@ -466,6 +466,14 @@ Sidecar 内存中的 Chat 会话授权，必须在引入 Gmail OAuth、Secret St
 
 阶段 2 当前的最小运行时实现为 `tools.snapshot.ToolSnapshot`：它冻结按 Registry 顺序取得的 `ToolDefinition`、内部 `tool_id` 与 Provider 名称的双向 Binding，并导出对应的 `ModelToolDefinition`。当前 OpenAI-compatible 名称规则位于 `models.tool_names`，将不兼容字符规范化并限制为最多 64 个允许字符；名称碰撞在构造 Snapshot 时明确拒绝。Snapshot 还未写入 `Run` 或数据库，阶段 3 持久化时再将同一边界保存为可回放记录。
 
+### 10.4 可见嵌入式浏览器基础
+
+可见浏览器首先是一个独立桌面能力，不是 Agent Tool 的快捷实现。Electron Main 是浏览器会话和生命周期的唯一所有者；它创建采用独立、持久 Session 的 `WebContentsView`，将真实网页显示给用户，并在关闭时清理该 View。`BrowserView` 已弃用，不作为新实现基础。Profile 数据只由 Electron Session 管理，Renderer、Python Backend、RunEvent、ToolCall、日志和模型上下文都不能读取 Cookie、密码、local storage 或其他会话凭据。
+
+首个闭环只提供浏览器菜单、空闲/加载/失败状态、用户显式导航和页面可见性；它不注册 Tool、不向模型发送页面内容、不自动点击、输入、登录、上传、下载或提交表单，也不和 Scheduler、MCP、Gmail OAuth 共用实现。远程页面运行在隔离的 WebContents 中：关闭 Node integration，保持 sandbox，禁止任意 Preload、任意 IPC、非用户发起的新窗口和未经验证的导航。
+
+以后需要 AI 操作时，Python Runtime 只提出经过 Tool Policy、站点范围和逐项 Approval 审核的高层 `BrowserAction`；Electron Main 的受控 Controller 在当前可见 WebContents 上执行并返回受限结果。这样用户看到的页面与 AI 操作的页面共享同一 Electron Session，而不是复制 Cookie 或让多个 Chromium 进程并发读写同一个 Profile 目录。页面加载、元素定位、超时、取消、下载以及人工接管具有独立生命周期和失败语义，届时才为它们建立最小可测接口。
+
 ## 11. MCP 架构
 
 阶段 8 才实现。结构为：
