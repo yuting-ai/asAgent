@@ -1659,12 +1659,13 @@ body.is-resizing-columns {
 }
 
 .chat-thread-item:hover .chat-thread-actions,
-.chat-thread-item:focus-within .chat-thread-actions {
+.chat-thread-actions:focus-within {
   opacity: 1;
   pointer-events: auto;
 }
 
-.chat-thread-item:hover .chat-thread-time {
+.chat-thread-item:hover .chat-thread-time,
+.chat-thread-item:has(.chat-thread-actions:focus-within) .chat-thread-time {
   opacity: 0;
 }
 
