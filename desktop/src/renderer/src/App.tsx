@@ -1538,6 +1538,56 @@ export default function App(): React.JSX.Element {
     }
   }
 
+  async function deleteBrowserConversation(conversationId: string): Promise<void> {
+    if (isCreatingConversation || isSubmittingMessage) {
+      return
+    }
+
+    if (!window.confirm(CONVERSATION_DELETE_CONFIRM)) {
+      return
+    }
+
+    setErrorMessage(null)
+
+    try {
+      if (activeRun?.conversationId === conversationId) {
+        await window.desktop.cancelRun(activeRun.runId)
+        setActiveRun(null)
+        setIsCancellingRun(false)
+        setRunActivity(null)
+        setActivityExpanded(false)
+      }
+
+      if (pendingApproval?.conversation_id === conversationId) {
+        setPendingApproval(null)
+        setIsDecidingApproval(false)
+      }
+
+      await window.desktop.deleteBrowserConversation(conversationId)
+
+      setBrowserConversations((items) =>
+        items.filter((conversation) => conversation.conversation_id !== conversationId)
+      )
+      setBrowserConversationByTabId((current) => {
+        const next: Record<string, string> = {}
+        for (const [tabId, boundId] of Object.entries(current)) {
+          if (boundId === conversationId) {
+            void window.desktop.setBrowserTabConversation(tabId, null).catch(() => undefined)
+            continue
+          }
+          next[tabId] = boundId
+        }
+        return next
+      })
+      if (selectedBrowserConversationId === conversationId) {
+        browserMessageLoadIdRef.current += 1
+        setBrowserMessages([])
+      }
+    } catch {
+      setErrorMessage('The conversation could not be deleted.')
+    }
+  }
+
   async function submitMessage(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
 
@@ -3044,28 +3094,56 @@ export default function App(): React.JSX.Element {
                                 const selected =
                                   conversation.conversation_id === selectedBrowserConversationId
                                 return (
-                                  <button
-                                    aria-selected={selected}
-                                    className={`browser-recent-item${selected ? ' selected' : ''}`}
+                                  <div
+                                    className={`browser-recent-row${selected ? ' selected' : ''}`}
                                     key={conversation.conversation_id}
-                                    onClick={() =>
-                                      bindBrowserConversationToActiveTab(
-                                        conversation.conversation_id
-                                      )
-                                    }
-                                    role="option"
-                                    type="button"
                                   >
-                                    <span className="browser-recent-title">
-                                      {conversationLabel(conversation.title)}
-                                    </span>
-                                    <time
-                                      className="browser-recent-time"
-                                      dateTime={conversation.updated_at}
+                                    <button
+                                      aria-selected={selected}
+                                      className="browser-recent-item"
+                                      onClick={() =>
+                                        bindBrowserConversationToActiveTab(
+                                          conversation.conversation_id
+                                        )
+                                      }
+                                      role="option"
+                                      type="button"
                                     >
-                                      {formatThreadTime(conversation.updated_at)}
-                                    </time>
-                                  </button>
+                                      <span className="browser-recent-title">
+                                        {conversationLabel(conversation.title)}
+                                      </span>
+                                      <time
+                                        className="browser-recent-time"
+                                        dateTime={conversation.updated_at}
+                                      >
+                                        {formatThreadTime(conversation.updated_at)}
+                                      </time>
+                                    </button>
+                                    <button
+                                      aria-label="Delete conversation"
+                                      className="browser-recent-delete"
+                                      disabled={isBusy}
+                                      onClick={(event) => {
+                                        event.stopPropagation()
+                                        void deleteBrowserConversation(conversation.conversation_id)
+                                      }}
+                                      title="Delete"
+                                      type="button"
+                                    >
+                                      <svg
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <path d="M3 6h18" />
+                                        <path d="M8 6V4h8v2" />
+                                        <path d="M19 6 18 20H6L5 6" />
+                                        <path d="M10 11v6" />
+                                        <path d="M14 11v6" />
+                                      </svg>
+                                    </button>
+                                  </div>
                                 )
                               })
                             )}
@@ -3123,6 +3201,33 @@ export default function App(): React.JSX.Element {
                                   message.content
                                 )}
                               </div>
+                              {message.role === 'assistant' ? (
+                                <div className="browser-agent-meta">
+                                  <time
+                                    dateTime={message.created_at}
+                                    title={new Date(message.created_at).toLocaleString()}
+                                  >
+                                    {formatMessageTime(message.created_at)}
+                                  </time>
+                                  <button
+                                    aria-label={
+                                      copiedMessageId === message.message_id
+                                        ? 'Copied'
+                                        : 'Copy message'
+                                    }
+                                    className="message-action"
+                                    onClick={() => void copyMessage(message)}
+                                    title={
+                                      copiedMessageId === message.message_id
+                                        ? 'Copied'
+                                        : 'Copy message'
+                                    }
+                                    type="button"
+                                  >
+                                    <CopyIcon copied={copiedMessageId === message.message_id} />
+                                  </button>
+                                </div>
+                              ) : null}
                             </div>
                           ))}
                           {runActivity?.conversationId === selectedBrowserConversationId ? (

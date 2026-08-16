@@ -700,6 +700,21 @@ app.whenReady().then(async () => {
     return getReadyBackendLauncher().deleteConversation(conversationId.trim())
   })
 
+  ipcMain.handle('desktop:delete-browser-conversation', (event, conversationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+
+    if (typeof conversationId !== 'string' || !conversationId.trim()) {
+      throw new Error('Conversation ID is invalid.')
+    }
+
+    return getReadyBackendLauncher().deleteBrowserConversation(conversationId.trim())
+  })
+
   ipcMain.handle('desktop:submit-message', (event, conversationId: unknown, content: unknown) => {
     const frame = event.senderFrame
     if (frame === null) {

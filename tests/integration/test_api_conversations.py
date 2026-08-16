@@ -1119,3 +1119,86 @@ async def test_submit_browser_message_creates_visible_message_and_title(
     assert stored_conversation.title == "What is on this page?"
     assert len(persisted_runs) == 1
     assert persisted_runs[0].run_id == RunId("run-browser")
+
+
+@pytest.mark.asyncio
+async def test_delete_browser_conversation_removes_only_browser_conversation(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    created_at = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    chat = Conversation(
+        conversation_id=ConversationId("conv-chat"),
+        user_id=UserId("local-user"),
+        created_at=created_at,
+        updated_at=created_at,
+        kind="chat",
+        title="Chat keep",
+    )
+    browser = Conversation(
+        conversation_id=ConversationId("conv-browser"),
+        user_id=UserId("local-user"),
+        created_at=created_at,
+        updated_at=created_at,
+        kind="browser",
+        title="Browser delete",
+    )
+    conversations = SqliteConversationRepository(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=conversations,
+        runs=_UNUSED_RUNS,
+        run_submission=_unused_run_submission(conversations),
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        await conversations.save(chat)
+        await conversations.save(browser)
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            headers = {"Authorization": "Bearer test-token"}
+            chat_delete_browser = await client.delete(
+                "/api/v1/conversations/conv-browser",
+                headers=headers,
+            )
+            browser_delete = await client.delete(
+                "/api/v1/browser/conversations/conv-browser",
+                headers=headers,
+            )
+            browser_delete_again = await client.delete(
+                "/api/v1/browser/conversations/conv-browser",
+                headers=headers,
+            )
+            browser_delete_chat = await client.delete(
+                "/api/v1/browser/conversations/conv-chat",
+                headers=headers,
+            )
+            remaining_chat = await client.get("/api/v1/conversations", headers=headers)
+            remaining_browser = await client.get(
+                "/api/v1/browser/conversations",
+                headers=headers,
+            )
+    finally:
+        await conversations.aclose()
+
+    assert chat_delete_browser.status_code == 404
+    assert browser_delete.status_code == 204
+    assert browser_delete_again.status_code == 404
+    assert browser_delete_chat.status_code == 404
+    assert remaining_chat.json() == [
+        {
+            "conversation_id": "conv-chat",
+            "created_at": "2026-08-16T12:00:00Z",
+            "updated_at": "2026-08-16T12:00:00Z",
+            "title": "Chat keep",
+        },
+    ]
+    assert remaining_browser.json() == []

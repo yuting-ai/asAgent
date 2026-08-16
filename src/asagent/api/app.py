@@ -772,6 +772,22 @@ def create_app(
         del request
         return await create_conversation_of_kind("browser")
 
+    @app.delete(
+        "/api/v1/browser/conversations/{conversation_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(authenticate)],
+    )
+    async def delete_browser_conversation(conversation_id: str) -> Response:
+        await get_local_conversation(ConversationId(conversation_id), kind="browser")
+        deleted = await conversations.delete(ConversationId(conversation_id))
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="conversation not found",
+            )
+
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     @app.get(
         "/api/v1/browser/conversations/{conversation_id}/messages",
         response_model=list[MessageResponse],

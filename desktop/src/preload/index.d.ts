@@ -134,6 +134,7 @@ interface DesktopBridge {
   submitMessage(conversationId: string, content: string): Promise<SubmittedMessage>
   listBrowserConversations(): Promise<ConversationSummary[]>
   createBrowserConversation(): Promise<ConversationSummary>
+  deleteBrowserConversation(conversationId: string): Promise<void>
   listBrowserConversationMessages(conversationId: string): Promise<ConversationMessage[]>
   submitBrowserMessage(
     conversationId: string,

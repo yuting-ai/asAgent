@@ -3836,3 +3836,18 @@
 ### 下一步
 
 - 手动验收：多标签 + 侧栏绑定 → 重启 → URL/可见/绑定恢复；删除对话后再重启 → 页在绑定空。
+
+## 2026-08-16 Browser 侧栏删除与助手消息操作
+
+### 完成
+
+- 新增 `DELETE /api/v1/browser/conversations/{id}` 与桌面 IPC；Recent 菜单每项可删除 Browser 对话，并清理标签绑定。
+- Browser 助手气泡下方增加时间与复制按钮（对齐 Chat 的 message-meta）。
+
+### 验证
+
+- `test_delete_browser_conversation_removes_only_browser_conversation`、OpenAPI contract；desktop typecheck/lint/test 通过。
+
+### 下一步
+
+- 按需继续 Browser Tool 或其它 UI 打磨。

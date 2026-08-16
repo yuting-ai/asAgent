@@ -3040,11 +3040,24 @@ body.is-resizing-columns {
   font-size: 12px;
 }
 
+.browser-recent-row {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  border-radius: 8px;
+}
+
+.browser-recent-row:hover,
+.browser-recent-row.selected {
+  background: color-mix(in srgb, var(--brass) 10%, var(--bg));
+}
+
 .browser-recent-item {
   display: flex;
+  flex: 1;
   gap: 10px;
   align-items: baseline;
-  width: 100%;
+  min-width: 0;
   padding: 8px 9px;
   border: 0;
   border-radius: 8px;
@@ -3055,9 +3068,41 @@ body.is-resizing-columns {
   cursor: pointer;
 }
 
-.browser-recent-item:hover,
-.browser-recent-item.selected {
-  background: color-mix(in srgb, var(--brass) 10%, var(--bg));
+.browser-recent-delete {
+  display: grid;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  margin-right: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  place-items: center;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.browser-recent-row:hover .browser-recent-delete,
+.browser-recent-delete:focus-visible {
+  opacity: 1;
+}
+
+.browser-recent-delete:hover:not(:disabled),
+.browser-recent-delete:focus-visible {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+}
+
+.browser-recent-delete:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.browser-recent-delete svg {
+  width: 13px;
+  height: 13px;
 }
 
 .browser-recent-title {
@@ -3075,6 +3120,21 @@ body.is-resizing-columns {
   flex-shrink: 0;
   color: var(--text-faint);
   font-size: 11px;
+}
+
+.browser-agent-meta {
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+  margin-top: 2px;
+  gap: 3px;
+  color: var(--text-faint);
+}
+
+.browser-agent-meta time {
+  margin-right: 3px;
+  font-size: 11px;
+  line-height: 1;
 }
 
 .browser-agent-error {
@@ -3149,14 +3209,16 @@ body.is-resizing-columns {
 
 .browser-agent-turn {
   display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 .browser-agent-turn.is-user {
-  justify-content: flex-end;
+  align-items: flex-end;
 }
 
 .browser-agent-turn.is-assistant {
-  justify-content: flex-start;
+  align-items: flex-start;
 }
 
 .browser-agent-bubble {

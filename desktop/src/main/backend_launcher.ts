@@ -319,6 +319,13 @@ export class BackendLauncher {
     await this.request(`/api/v1/conversations/${encodeURIComponent(conversationId)}`, 'DELETE')
   }
 
+  async deleteBrowserConversation(conversationId: string): Promise<void> {
+    await this.request(
+      `/api/v1/browser/conversations/${encodeURIComponent(conversationId)}`,
+      'DELETE'
+    )
+  }
+
   async submitMessage(conversationId: string, content: string): Promise<SubmittedMessage> {
     if (!content.trim()) {
       throw new Error('Message content is invalid.')

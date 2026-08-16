@@ -73,6 +73,7 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
         "/api/v1/conversations/{conversation_id}/messages",
         "/api/v1/conversations/{conversation_id}/file-changes",
         "/api/v1/browser/conversations",
+        "/api/v1/browser/conversations/{conversation_id}",
         "/api/v1/browser/conversations/{conversation_id}/messages",
         "/api/v1/file-changes/{change_id}/undo",
         "/api/v1/runs/{run_id}",
@@ -96,6 +97,7 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
         ),
         ("/api/v1/browser/conversations", "get", "200"),
         ("/api/v1/browser/conversations", "post", "201"),
+        ("/api/v1/browser/conversations/{conversation_id}", "delete", "204"),
         (
             "/api/v1/browser/conversations/{conversation_id}/messages",
             "get",
