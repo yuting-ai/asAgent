@@ -4,6 +4,7 @@ from typing import cast
 
 import httpx
 import pytest
+from fastapi import FastAPI
 
 from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
@@ -43,7 +44,7 @@ def _cancel_nothing(run_id: RunId) -> bool:
     return False
 
 
-def _app(tmp_path: Path):
+def _app(tmp_path: Path) -> FastAPI:
     conversations = InMemoryConversationRepository()
     return create_app(
         access_token=_TOKEN,

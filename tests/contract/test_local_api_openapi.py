@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 
 from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
@@ -84,7 +85,7 @@ def test_openapi_declares_the_current_authenticated_v1_surface() -> None:
     }
 
 
-def test_openapi_declares_agent_settings_when_configured(tmp_path) -> None:
+def test_openapi_declares_agent_settings_when_configured(tmp_path: Path) -> None:
     from asagent.bootstrap.agent_settings import AgentSettingsStore
 
     conversations = InMemoryConversationRepository()
