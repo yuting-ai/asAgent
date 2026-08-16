@@ -18,6 +18,12 @@ from asagent.agent.run_submission import (
     UnknownConversationError,
 )
 from asagent.api.auth import BearerTokenAuthenticator, LocalApiToken
+from asagent.bootstrap.agent_settings import (
+    MAX_MAX_STEPS,
+    MIN_MAX_STEPS,
+    AgentSettings,
+    AgentSettingsStore,
+)
 from asagent.bootstrap.model_settings import (
     ModelApiKeyMissingError,
     ModelSettings,
@@ -201,6 +207,7 @@ class ToolApprovalResponse(BaseModel):
     arguments: dict[str, object]
     resource_path: str | None = None
     impact_summary: str | None = None
+    allows_conversation_approval: bool = True
 
     @classmethod
     def from_request(cls, request: ToolApprovalRequest) -> "ToolApprovalResponse":
@@ -232,6 +239,9 @@ class ToolApprovalResponse(BaseModel):
             arguments=arguments,
             resource_path=resource_path,
             impact_summary=impact_summary,
+            allows_conversation_approval=(
+                request.definition.allows_conversation_approval
+            ),
         )
 
 
@@ -331,6 +341,27 @@ class UpdateModelSettingsRequest(BaseModel):
         return value
 
 
+class AgentSettingsResponse(BaseModel):
+    max_steps: int
+
+    @classmethod
+    def from_settings(cls, settings: AgentSettings) -> "AgentSettingsResponse":
+        return cls(max_steps=settings.max_steps)
+
+
+class UpdateAgentSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_steps: int = Field(ge=MIN_MAX_STEPS, le=MAX_MAX_STEPS)
+
+    @field_validator("max_steps", mode="before")
+    @classmethod
+    def max_steps_must_be_strict_int(cls, value: object) -> object:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("max_steps must be an integer")
+        return value
+
+
 class UpdateTavilySettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -392,6 +423,7 @@ def create_app(
     tool_approvals: PendingToolApprovalPolicy | None = None,
     tavily_settings: TavilySettings | None = None,
     model_settings: ModelSettings | None = None,
+    agent_settings: AgentSettingsStore | None = None,
     workspace_settings: ConversationWorkspaceSettings | None = None,
     file_changes: FileChangeRepository | None = None,
     revert_file_change: (
@@ -988,6 +1020,40 @@ def create_app(
         )
         async def delete_model_settings() -> ModelSettingsResponse:
             return ModelSettingsResponse.from_status(await model_settings.delete())
+
+    if agent_settings is not None:
+
+        @app.get(
+            "/api/v1/agent-settings",
+            response_model=AgentSettingsResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def get_agent_settings() -> AgentSettingsResponse:
+            try:
+                settings = agent_settings.get()
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="agent settings are invalid",
+                ) from error
+            return AgentSettingsResponse.from_settings(settings)
+
+        @app.put(
+            "/api/v1/agent-settings",
+            response_model=AgentSettingsResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def update_agent_settings(
+            request: UpdateAgentSettingsRequest,
+        ) -> AgentSettingsResponse:
+            try:
+                saved = agent_settings.save(AgentSettings(max_steps=request.max_steps))
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="agent settings are invalid",
+                ) from error
+            return AgentSettingsResponse.from_settings(saved)
 
     if workspace_settings is not None:
 

@@ -84,9 +84,28 @@ describe('BrowserPageBridge', () => {
       url: 'https://example.com/',
       text: 'Hello'
     }))
+    const inspectInteractive = vi.fn(async () => ({
+      url: 'https://example.com/',
+      elements: [
+        {
+          target_id: 'target_1',
+          name: 'Continue',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        }
+      ]
+    }))
+    const clickCurrentPage = vi.fn(async () => ({
+      action: 'clicked' as const,
+      url: 'https://example.com/next',
+      title: 'Next'
+    }))
 
     const bridge = new BrowserPageBridge({
       readCurrentPage,
+      inspectInteractive,
+      clickCurrentPage,
       createServer,
       randomToken: () => 'bridge-token'
     })
@@ -121,6 +140,79 @@ describe('BrowserPageBridge', () => {
       title: 'Example Domain',
       url: 'https://example.com/',
       text: 'Hello'
+    })
+
+    const clickUnauthorized = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/click-current-page',
+        {},
+        JSON.stringify({ tab_id: 'tab-1', target_id: 'target_1' })
+      ),
+      clickUnauthorized
+    )
+    await vi.waitFor(() => expect(clickUnauthorized.end).toHaveBeenCalled())
+    expect(clickUnauthorized.statusCode).toBe(401)
+    expect(clickCurrentPage).not.toHaveBeenCalled()
+
+    const clickTooLong = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/click-current-page',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1', target_id: 'x'.repeat(81) })
+      ),
+      clickTooLong
+    )
+    await vi.waitFor(() => expect(clickTooLong.end).toHaveBeenCalled())
+    expect(clickTooLong.statusCode).toBe(400)
+    expect(clickCurrentPage).not.toHaveBeenCalled()
+
+    const inspectAuthorized = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/inspect-interactive',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1' })
+      ),
+      inspectAuthorized
+    )
+    await vi.waitFor(() => expect(inspectAuthorized.end).toHaveBeenCalled())
+    expect(inspectAuthorized.statusCode).toBe(200)
+    expect(inspectInteractive).toHaveBeenCalledWith('tab-1')
+    expect(JSON.parse(inspectAuthorized.body ?? '')).toEqual({
+      url: 'https://example.com/',
+      elements: [
+        {
+          target_id: 'target_1',
+          name: 'Continue',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        }
+      ]
+    })
+
+    const clickAuthorized = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/click-current-page',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1', target_id: 'target_2' })
+      ),
+      clickAuthorized
+    )
+    await vi.waitFor(() => expect(clickAuthorized.end).toHaveBeenCalled())
+    expect(clickAuthorized.statusCode).toBe(200)
+    expect(clickCurrentPage).toHaveBeenCalledWith('tab-1', 'target_2')
+    expect(JSON.parse(clickAuthorized.body ?? '')).toEqual({
+      action: 'clicked',
+      url: 'https://example.com/next',
+      title: 'Next'
     })
 
     await bridge.stop()

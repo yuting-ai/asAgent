@@ -27,6 +27,7 @@ from asagent.tools.approval import ToolApprovalRequest
 from asagent.tools.errors import (
     ToolApprovalDeniedError,
     ToolArgumentsValidationError,
+    ToolOperationError,
     ToolPermissionDeniedError,
     ToolTimeoutError,
 )
@@ -34,6 +35,12 @@ from asagent.tools.executor import ToolExecutor
 from asagent.tools.snapshot import ToolSnapshot
 
 _TOOL_RESULT_TRUNCATION_MARKER = "\n\n[Tool result truncated]"
+
+
+@dataclass(slots=True)
+class _IdenticalCallStreak:
+    key: tuple[str, str] | None = None
+    count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +74,7 @@ class AgentLoop:
         model: ModelProvider,
         executor: ToolExecutor,
         tool_snapshot: ToolSnapshot,
-        max_steps: int = 8,
+        max_steps: int = 20,
         max_calls_per_tool_input: int | None = None,
         max_tool_result_chars: int = 4_000,
         event_publisher: EventPublisher | None = None,
@@ -78,8 +85,8 @@ class AgentLoop:
         context_builder: ContextBuilder | None = None,
         approval_id_factory: Callable[[], ApprovalId] | None = None,
     ) -> None:
-        if max_steps < 1:
-            raise ValueError("max_steps must be positive")
+        if max_steps < 1 or max_steps > 50:
+            raise ValueError("max_steps must be between 1 and 50")
         if max_calls_per_tool_input is not None and max_calls_per_tool_input < 1:
             raise ValueError("max_calls_per_tool_input must be positive")
         if max_tool_result_chars < len(_TOOL_RESULT_TRUNCATION_MARKER):
@@ -130,7 +137,7 @@ class AgentLoop:
             )
 
         history = list(messages)
-        calls_by_tool_input: dict[tuple[str, str], int] = {}
+        identical_call_streak = _IdenticalCallStreak()
         event_sequence = 0
         steps_used = 0
 
@@ -275,7 +282,7 @@ class AgentLoop:
                     )
                     execution = await self._execute_tool(
                         tool_call,
-                        calls_by_tool_input,
+                        identical_call_streak,
                         run_id=run_id,
                         conversation_id=conversation_id,
                         publish=publish,
@@ -382,7 +389,7 @@ class AgentLoop:
     async def _execute_tool(
         self,
         tool_call: ModelToolCall,
-        calls_by_tool_input: dict[tuple[str, str], int],
+        identical_call_streak: _IdenticalCallStreak,
         *,
         run_id: RunId | None,
         conversation_id: ConversationId | None,
@@ -413,18 +420,25 @@ class AgentLoop:
             )
 
         call_key = (tool_id, canonical_arguments)
-        calls = calls_by_tool_input.get(call_key, 0)
+        next_count = (
+            identical_call_streak.count + 1
+            if identical_call_streak.key == call_key
+            else 1
+        )
         if (
             self._max_calls_per_tool_input is not None
-            and calls >= self._max_calls_per_tool_input
+            and next_count > self._max_calls_per_tool_input
         ):
+            identical_call_streak.key = call_key
+            identical_call_streak.count = next_count
             return _ToolExecutionResult(
                 content="Error: repeated tool call limit reached.",
                 succeeded=False,
                 tool_id=tool_id,
             )
 
-        calls_by_tool_input[call_key] = calls + 1
+        identical_call_streak.key = call_key
+        identical_call_streak.count = next_count
 
         approval_request: ToolApprovalRequest | None = None
         definition = self._tool_snapshot.definition_for(tool_id)
@@ -488,6 +502,12 @@ class AgentLoop:
                     "Error: tool execution timed out. "
                     "Do not retry the same tool call with the same arguments."
                 ),
+                succeeded=False,
+                tool_id=tool_id,
+            )
+        except ToolOperationError as error:
+            return _ToolExecutionResult(
+                content=f"Error: {error}",
                 succeeded=False,
                 tool_id=tool_id,
             )

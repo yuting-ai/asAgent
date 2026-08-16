@@ -189,6 +189,29 @@ function parseModelSettingsInput(value: unknown): {
   }
 }
 
+function parseAgentSettingsInput(value: unknown): { maxSteps: number } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('Agent settings are invalid.')
+  }
+
+  const input = value as Record<string, unknown>
+  if (Object.keys(input).length !== 1 || !('maxSteps' in input)) {
+    throw new Error('Agent settings are invalid.')
+  }
+
+  const maxSteps = input['maxSteps']
+  if (
+    typeof maxSteps !== 'number' ||
+    !Number.isInteger(maxSteps) ||
+    maxSteps < 1 ||
+    maxSteps > 50
+  ) {
+    throw new Error('Agent settings are invalid.')
+  }
+
+  return { maxSteps }
+}
+
 function parseWorkspaceSettings(value: unknown): {
   additionalFiles: string[]
   additionalRoots: string[]
@@ -393,9 +416,21 @@ app.whenReady().then(async () => {
   browserPageBridge = new BrowserPageBridge({
     readCurrentPage: (tabId) => {
       if (visibleBrowser === undefined) {
-        throw new Error('Browser page is not available.')
+        throw new Error('current browser tab is not visible')
       }
       return visibleBrowser.readCurrentPage(tabId)
+    },
+    inspectInteractive: (tabId) => {
+      if (visibleBrowser === undefined) {
+        throw new Error('current browser tab is not visible')
+      }
+      return visibleBrowser.inspectInteractive(tabId)
+    },
+    clickCurrentPage: (tabId, targetId) => {
+      if (visibleBrowser === undefined) {
+        throw new Error('current browser tab is not visible')
+      }
+      return visibleBrowser.clickCurrentPage(tabId, targetId)
     }
   })
 
@@ -910,6 +945,26 @@ app.whenReady().then(async () => {
 
     assertTrustedRenderer(frame.url)
     return getReadyBackendLauncher().deleteModelSettings()
+  })
+
+  ipcMain.handle('desktop:get-agent-settings', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().getAgentSettings()
+  })
+
+  ipcMain.handle('desktop:save-agent-settings', (event, input: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().saveAgentSettings(parseAgentSettingsInput(input))
   })
 
   ipcMain.handle('desktop:get-conversation-file-access', (event, conversationId: unknown) => {

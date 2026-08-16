@@ -1,14 +1,20 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 
-export type BrowserPageContent = {
-  title: string
-  url: string
-  text: string
-}
+import {
+  BROWSER_OPERATION_ERRORS,
+  BROWSER_TARGET_ID_LIMIT,
+  normalizeBrowserOperationError,
+  parseBrowserTargetId,
+  type BrowserClickResult,
+  type BrowserInteractiveSnapshot,
+  type BrowserPageContent
+} from './browser_view'
 
 export type BrowserPageBridgeOptions = {
   readCurrentPage: (tabId: string) => Promise<BrowserPageContent>
+  inspectInteractive: (tabId: string) => Promise<BrowserInteractiveSnapshot>
+  clickCurrentPage: (tabId: string, targetId: string) => Promise<BrowserClickResult>
   createServer?: typeof createServer
   randomToken?: () => string
 }
@@ -59,8 +65,17 @@ function bearerMatches(header: string | undefined, expected: string): boolean {
   return timingSafeEqual(left, right)
 }
 
+function isKnownOperationError(detail: string): boolean {
+  return (BROWSER_OPERATION_ERRORS as readonly string[]).includes(detail)
+}
+
 export class BrowserPageBridge {
   private readonly readCurrentPage: (tabId: string) => Promise<BrowserPageContent>
+  private readonly inspectInteractive: (tabId: string) => Promise<BrowserInteractiveSnapshot>
+  private readonly clickCurrentPage: (
+    tabId: string,
+    targetId: string
+  ) => Promise<BrowserClickResult>
   private readonly createHttpServer: typeof createServer
   private readonly randomToken: () => string
   private server: Server | undefined
@@ -68,6 +83,8 @@ export class BrowserPageBridge {
 
   constructor(options: BrowserPageBridgeOptions) {
     this.readCurrentPage = options.readCurrentPage
+    this.inspectInteractive = options.inspectInteractive
+    this.clickCurrentPage = options.clickCurrentPage
     this.createHttpServer = options.createServer ?? createServer
     this.randomToken = options.randomToken ?? (() => randomBytes(32).toString('base64url'))
   }
@@ -131,7 +148,12 @@ export class BrowserPageBridge {
     token: string
   ): Promise<void> {
     try {
-      if (request.method !== 'POST' || request.url !== '/read-current-page') {
+      if (
+        request.method !== 'POST' ||
+        (request.url !== '/read-current-page' &&
+          request.url !== '/inspect-interactive' &&
+          request.url !== '/click-current-page')
+      ) {
         writeJson(response, 404, { detail: 'not found' })
         return
       }
@@ -155,17 +177,45 @@ export class BrowserPageBridge {
         return
       }
 
-      const tabId = (payload as Record<string, unknown>)['tab_id']
+      const record = payload as Record<string, unknown>
+      const tabId = record['tab_id']
       if (typeof tabId !== 'string' || tabId.trim() === '') {
         writeJson(response, 400, { detail: 'invalid request' })
         return
       }
 
-      const page = await this.readCurrentPage(tabId.trim())
-      writeJson(response, 200, page)
+      if (request.url === '/read-current-page') {
+        const page = await this.readCurrentPage(tabId.trim())
+        writeJson(response, 200, page)
+        return
+      }
+
+      if (request.url === '/inspect-interactive') {
+        const snapshot = await this.inspectInteractive(tabId.trim())
+        writeJson(response, 200, snapshot)
+        return
+      }
+
+      const targetValue = record['target_id']
+      if (typeof targetValue === 'string' && targetValue.length > BROWSER_TARGET_ID_LIMIT) {
+        writeJson(response, 400, { detail: 'invalid request' })
+        return
+      }
+
+      let targetId: string
+      try {
+        targetId = parseBrowserTargetId(targetValue)
+      } catch {
+        writeJson(response, 400, { detail: 'invalid request' })
+        return
+      }
+
+      const result = await this.clickCurrentPage(tabId.trim(), targetId)
+      writeJson(response, 200, result)
     } catch (error) {
+      const detail = normalizeBrowserOperationError(error)
       writeJson(response, 409, {
-        detail: error instanceof Error ? error.message : 'current browser page could not be read'
+        detail: isKnownOperationError(detail) ? detail : 'target was not found'
       })
     }
   }

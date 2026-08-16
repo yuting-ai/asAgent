@@ -58,7 +58,10 @@ class PendingToolApprovalPolicy:
             return False
 
         grant_key = _grant_key(request)
-        if grant_key in self._conversation_grants:
+        if (
+            request.definition.allows_conversation_approval
+            and grant_key in self._conversation_grants
+        ):
             return True
 
         decision = asyncio.get_running_loop().create_future()
@@ -91,6 +94,8 @@ class PendingToolApprovalPolicy:
             return False
 
         if decision is ToolApprovalDecision.ALLOW_CONVERSATION:
+            if not pending.request.definition.allows_conversation_approval:
+                return False
             self._conversation_grants.add(_grant_key(pending.request))
 
         pending.decision.set_result(decision is not ToolApprovalDecision.DENY)

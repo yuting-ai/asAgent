@@ -983,6 +983,32 @@ describe('BackendLauncher', () => {
         })
       })
     )
+
+    fetchBackend.mockResolvedValueOnce(
+      new Response(JSON.stringify({ max_steps: 20 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    )
+    fetchBackend.mockResolvedValueOnce(
+      new Response(JSON.stringify({ max_steps: 30 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    )
+
+    await expect(launcher.getAgentSettings()).resolves.toEqual({ max_steps: 20 })
+    await expect(launcher.saveAgentSettings({ maxSteps: 30 })).resolves.toEqual({ max_steps: 30 })
+    expect(fetchBackend).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:43123/api/v1/agent-settings',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ max_steps: 30 }),
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /)
+        })
+      })
+    )
   })
 
   it('lists conversation file changes and sends exact path for undo', async () => {

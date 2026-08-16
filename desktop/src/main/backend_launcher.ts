@@ -70,6 +70,7 @@ export type ToolApproval = {
   arguments: Record<string, unknown>
   resource_path: string | null
   impact_summary: string | null
+  allows_conversation_approval: boolean
 }
 
 export type FileChange = {
@@ -96,10 +97,18 @@ export type ModelSettingsStatus = {
   base_url: string | null
 }
 
+export type AgentSettingsStatus = {
+  max_steps: number
+}
+
 export type ModelSettingsInput = {
   model: string
   baseUrl: string
   apiKey?: string
+}
+
+export type AgentSettingsInput = {
+  maxSteps: number
 }
 
 export type WorkspaceSettingsStatus = {
@@ -422,6 +431,16 @@ export class BackendLauncher {
 
   async deleteModelSettings(): Promise<ModelSettingsStatus> {
     return this.requestJson('/api/v1/settings/model', 'DELETE')
+  }
+
+  async getAgentSettings(): Promise<AgentSettingsStatus> {
+    return this.requestJson('/api/v1/agent-settings', 'GET')
+  }
+
+  async saveAgentSettings(input: AgentSettingsInput): Promise<AgentSettingsStatus> {
+    return this.requestJson('/api/v1/agent-settings', 'PUT', {
+      max_steps: input.maxSteps
+    })
   }
 
   async getConversationFileAccess(conversationId: string): Promise<WorkspaceSettingsStatus> {

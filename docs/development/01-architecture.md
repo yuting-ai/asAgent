@@ -81,7 +81,7 @@ Conversation 元数据现包含可空 `title`。创建 Conversation 的请求体
 
 Conversation 另有稳定类型 `kind`：`chat` 或 `browser`，默认 `chat`。SQLite `conversations` 表以 `NOT NULL DEFAULT 'chat'` 和 `CHECK (kind IN ('chat', 'browser'))` 保存该字段；迁移后的历史行都是 `chat`。`GET`/`POST /api/v1/conversations` 及其 messages、标题、删除和文件相关路由只处理 `kind=chat`；对称的 `/api/v1/browser/conversations` 四条固定路由只处理 `kind=browser`。跨类型访问统一 404。两类会话复用同一 Message、Run、SSE 与自动标题规则，不把 `tabId`、URL 或网页正文写入数据库。打开的标签、可见标签与 `tabId → conversationId` 绑定由 Electron Main 写入 appHome 下的 `browser-session.json`，应用重启后恢复；已删除的 Browser Conversation 在恢复时仅丢弃绑定。Browser Message 请求可携带瞬时 `tab_id`：API 在 Dispatcher 前写入进程内 `run_id → tab_id` 映射，供该次 Run 构建 Tool Registry 时一次性取出。
 
-仅 Browser Run 在同时具备 `tab_id` 绑定与 Main 私有页面桥时注册只读工具 `browser.read_current_page`（权限 `browser.read`，无需审批）。工具无模型参数，只能读取提交时绑定且调用时仍为当前可见的标签，返回限长 JSON：`title`、脱敏 `url`、`text`。Chat Run 不注册该工具。页面正文经 Main 回环 bridge 进入 Python，可能进入本地 `ToolCall` 审计与 external model 上下文，但不进入 SSE 或应用日志。
+仅 Browser Run 在同时具备 `tab_id` 绑定与 Main 私有页面桥时注册 `browser.read_current_page`（权限 `browser.read`）、`browser.inspect_interactive`（权限 `browser.inspect`）与 `browser.click`（权限 `browser.click`）。读页返回限长 JSON：`title`、脱敏 `url`、`text`。交互快照返回有界 `elements`（`target_id`、`name`、`role`、`tag`、`disabled`）；内部 CSS 定位只留在 Electron Main，不进入 Python 或模型。点击只接受 `target_id`，经 Main 复用滚动、遮挡检查、Agent pointer 与真实鼠标事件。受控失败通过 `ToolOperationError` 回传固定文案（如 `target is obscured`、`page changed; inspect interactive elements again`）。`browser.submit` 等提交型操作才必须一次性批准。Chat Run 不注册这些工具。
 
 Conversation 列表按 `updated_at` 倒序、再按 `conversation_id` 倒序返回。首条或后续用户消息均会在与初始 Run 创建相同的事务中更新 Conversation 的 `updated_at`；Electron 在创建 Conversation 或提交 Message 后也按同一排序规则更新内存侧栏，无需刷新即可把最近活跃会话放在顶部。重命名只更新 `title`，不改变 `updated_at`，且 Renderer 原位替换该项，因此不会因编辑名称改变列表位置。
 
@@ -478,7 +478,7 @@ Sidecar 内存中的 Chat 会话授权，必须在引入 Gmail OAuth、Secret St
 
 浏览器侧栏使用与普通 Chat 相同的 Conversation、Message、Run 和 SQLite 主数据，但 Conversation 以稳定 `kind` 区分 `chat` 与 `browser`。Chat 和 Browser 各自只能列出、创建和提交同类会话，不能通过普通列表或路由混用；这不是第二套浏览器会话表。浏览器标签壳（稳定 `tabId`、脱敏 URL、可见标签与侧栏对话绑定）由 Main 持久化到桌面本地会话文件并在重启后恢复，仍不写入 SQLite。Browser UI 提供其自身的最近会话入口，以便切换和查看已持久化的 Browser Conversation。
 
-下一个最小闭环是只读 `browser.read_current_page`：它仅在 `browser` Conversation 的 Run 中注册，读取该会话当前绑定且用户可见的一个标签，并只返回标题、已脱敏 URL 与限长正文文本。Python 不导入 Electron；Electron Main 在固定、私有的受控桥接后从同一 `WebContentsView` 提取内容，Renderer 仍不接触网页 DOM 或会话凭据。未来的点击、输入、选择、上传、下载和提交均按各自的 Browser Tool 逐项加入，而不预建通用任务/动作模型。任何有副作用的 Browser Tool 仍须在实际加入时定义站点范围、审批、超时、取消和审计。
+Browser 侧栏工具按项扩展：`browser.read_current_page` 只读标题、脱敏 URL 与限长正文；`browser.inspect_interactive` 返回当前可见标签的有界交互元素清单（`target_id` 等）；`browser.click` 只接受 `target_id`，在 Main 内解析短期快照中的内部定位后执行可见点击（滚动、Agent pointer、`sendInputEvent`），不返回整页正文或内部 selector。`browser.submit` 等提交型操作才必须一次性批准。通用 `allows_conversation_approval` 机制保留，供未来提交、上传、下载等高风险 Browser Tool 使用。Python 不导入 Electron；Electron Main 通过固定私有 bridge 端点执行读页、inspect 与点击。Renderer 仍不接触网页 DOM 或会话凭据。未来的 `fill`、`select`、`submit`、上传、下载均按各自的 Browser Tool 与固定 bridge 端点逐项加入，而不预建通用任务/动作模型。
 
 ## 11. MCP 架构
 
@@ -595,6 +595,11 @@ CredentialStore。`ModelSettings` 经 Bearer Local API 和固定 Main/Preload IP
 Renderer 不读取或保存 API key。保存 Tavily 或模型设置后，Renderer 可通过受来源校验的固定 Main IPC 请求
 应用更新运行时：开发模式只重启自身持有的 Sidecar 后刷新现有 Renderer，避免重启 `electron-vite` 管理的
 Electron 子进程导致开发服务器丢失；打包版才执行完整 Electron relaunch。两种路径都不要求用户手动退出再打开。
+
+Chat 与 Browser 共用一份非敏感全局 `AgentSettings`：`config_dir/agent.toml` 保存 `max_steps`（默认 20，范围 1–50）。
+它不属于 Conversation、SQLite 或模型 Profile。`GET`/`PUT /api/v1/agent-settings` 与固定桌面 IPC 暴露该字段；
+Preferences 的 “Maximum agent steps per request” 保存后同样提示重启。Sidecar 启动时把同一值注入 Chat/Browser
+Runtime；运行中的 Run 不受热修改影响。
 
 MCP 的 `tools/call` 成功结果可以省略可选的 `isError` 字段；`McpClient` 将其解释为 `False`。若 Server
 显式给出非布尔值，仍按协议错误拒绝。这样兼容 Tavily 等合法的成功响应形式，同时不把损坏的错误标记静默

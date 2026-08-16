@@ -63,6 +63,7 @@ type ToolApproval = {
   arguments: Record<string, unknown>
   resource_path: string | null
   impact_summary: string | null
+  allows_conversation_approval: boolean
 }
 
 type FileChange = {
@@ -87,10 +88,18 @@ type ModelSettingsStatus = {
   base_url: string | null
 }
 
+type AgentSettingsStatus = {
+  max_steps: number
+}
+
 type ModelSettingsInput = {
   model: string
   baseUrl: string
   apiKey?: string
+}
+
+type AgentSettingsInput = {
+  maxSteps: number
 }
 
 type WorkspaceSettingsStatus = {
@@ -178,6 +187,10 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:save-model-settings', input),
   deleteModelSettings: (): Promise<ModelSettingsStatus> =>
     ipcRenderer.invoke('desktop:delete-model-settings'),
+  getAgentSettings: (): Promise<AgentSettingsStatus> =>
+    ipcRenderer.invoke('desktop:get-agent-settings'),
+  saveAgentSettings: (input: AgentSettingsInput): Promise<AgentSettingsStatus> =>
+    ipcRenderer.invoke('desktop:save-agent-settings', input),
   getConversationFileAccess: (conversationId: string): Promise<WorkspaceSettingsStatus> =>
     ipcRenderer.invoke('desktop:get-conversation-file-access', conversationId),
   chooseWorkspacePath: (): Promise<{ path: string; kind: 'directory' | 'file' } | null> =>

@@ -64,6 +64,7 @@ type ToolApproval = {
   arguments: Record<string, unknown>
   resource_path: string | null
   impact_summary: string | null
+  allows_conversation_approval: boolean
 }
 
 type FileChange = {
@@ -102,6 +103,10 @@ type ModelSettingsStatus = {
   base_url: string | null
 }
 
+type AgentSettingsStatus = {
+  max_steps: number
+}
+
 type WorkspaceSettingsStatus = {
   workspace_root: string
   additional_roots: string[]
@@ -135,12 +140,16 @@ const TAVILY_DELETE_CONFIRM = 'Remove the saved Tavily API key and disable Tavil
 const MODEL_SETTINGS_LOAD_ERROR = 'Model settings could not be loaded.'
 const MODEL_SETTINGS_UPDATE_ERROR = 'Model settings could not be updated.'
 const MODEL_SETTINGS_REQUIRED = 'Enter a model, base URL, and API key before saving.'
+const AGENT_SETTINGS_LOAD_ERROR = 'Agent settings could not be loaded.'
+const AGENT_SETTINGS_UPDATE_ERROR = 'Agent settings could not be updated.'
+const AGENT_SETTINGS_REQUIRED = 'Enter a whole number from 1 to 50.'
 const MODEL_DELETE_CONFIRM = 'Remove the saved model configuration and API key?'
 const CONVERSATION_DELETE_CONFIRM = 'Delete this conversation? This cannot be undone.'
 const BROWSER_ADDRESS_ERROR =
   'This address is not allowed. Enter a web address such as example.com.'
 const BROWSER_LOAD_ERROR = 'This page could not be opened.'
 const MAX_BROWSER_TABS = 16
+const BROWSER_AGENT_INPUT_MAX_HEIGHT = 132
 
 function browserNavigationError(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error)
@@ -171,6 +180,16 @@ function browserTabTitle(address: string): string {
     return trimmed
   }
 }
+
+function resizeBrowserAgentInput(textarea: HTMLTextAreaElement | null): void {
+  if (textarea === null) {
+    return
+  }
+
+  textarea.style.height = 'auto'
+  textarea.style.height = `${Math.min(textarea.scrollHeight, BROWSER_AGENT_INPUT_MAX_HEIGHT)}px`
+}
+
 const DEFAULT_RAIL_WIDTH = 226
 const COLLAPSED_RAIL_WIDTH = 96
 const DEFAULT_THREAD_WIDTH = 210
@@ -278,6 +297,31 @@ function fileAccessSummary(settings: WorkspaceSettingsStatus): string {
 function mcpServerNameFromToolId(toolId: string): string | null {
   const match = /^mcp:([a-z][a-z0-9-]{0,63}):[^:]+:[0-9a-f]+$/i.exec(toolId)
   return match?.[1] ?? null
+}
+
+function browserApprovalKindLabel(toolId: string, serverName: string | null): string {
+  if (toolId.startsWith('browser.')) {
+    return 'Browser'
+  }
+  return serverName === null ? 'Tool' : 'MCP'
+}
+
+function browserApprovalDetails(approval: ToolApproval, serverName: string | null): string[] {
+  const details: string[] = []
+  if (approval.impact_summary !== null) {
+    details.push(approval.impact_summary)
+  }
+  if (approval.resource_path !== null) {
+    details.push(approval.resource_path)
+  }
+  const selector = approval.arguments.selector
+  if (typeof selector === 'string' && selector.trim() !== '' && !details.includes(selector)) {
+    details.push(selector)
+  }
+  if (serverName !== null && !details.includes(serverName)) {
+    details.push(serverName)
+  }
+  return details
 }
 
 function orderConversations(conversations: ConversationSummary[]): ConversationSummary[] {
@@ -557,6 +601,12 @@ export default function App(): React.JSX.Element {
   const [modelApiKey, setModelApiKey] = useState('')
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [isModelBusy, setIsModelBusy] = useState(false)
+  const [agentSettings, setAgentSettings] = useState<AgentSettingsStatus | null>(null)
+  const [agentMaxSteps, setAgentMaxSteps] = useState('20')
+  const [agentLoadError, setAgentLoadError] = useState<string | null>(null)
+  const [agentActionError, setAgentActionError] = useState<string | null>(null)
+  const [isAgentLoading, setIsAgentLoading] = useState(true)
+  const [isAgentBusy, setIsAgentBusy] = useState(false)
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettingsStatus | null>(null)
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(true)
   const [isWorkspaceBusy, setIsWorkspaceBusy] = useState(false)
@@ -568,6 +618,7 @@ export default function App(): React.JSX.Element {
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null)
   const browserAgentMessagesEndRef = useRef<HTMLDivElement | null>(null)
+  const browserAgentInputRef = useRef<HTMLTextAreaElement | null>(null)
   const browserRecentRef = useRef<HTMLDivElement | null>(null)
   const browserSurfaceRef = useRef<HTMLDivElement | null>(null)
   const browserAddressRef = useRef<HTMLInputElement | null>(null)
@@ -924,6 +975,35 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     let cancelled = false
 
+    async function loadAgentSettings(): Promise<void> {
+      setIsAgentLoading(true)
+      try {
+        const status = await window.desktop.getAgentSettings()
+        if (!cancelled) {
+          setAgentSettings(status)
+          setAgentMaxSteps(String(status.max_steps))
+          setAgentLoadError(null)
+        }
+      } catch {
+        if (!cancelled) {
+          setAgentLoadError(AGENT_SETTINGS_LOAD_ERROR)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsAgentLoading(false)
+        }
+      }
+    }
+
+    void loadAgentSettings()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
     async function loadTavilySettings(): Promise<void> {
       setIsTavilyLoading(true)
 
@@ -1138,6 +1218,10 @@ export default function App(): React.JSX.Element {
   }, [browserMessages, selectedBrowserConversationId])
 
   useEffect(() => {
+    resizeBrowserAgentInput(browserAgentInputRef.current)
+  }, [browserDraft])
+
+  useEffect(() => {
     if (activeView !== 'browser') {
       void window.desktop.hideBrowser()
       return
@@ -1288,6 +1372,10 @@ export default function App(): React.JSX.Element {
     visibleApproval === null ? null : mcpServerNameFromToolId(visibleApproval.tool_id)
   const visibleBrowserApprovalServer =
     visibleBrowserApproval === null ? null : mcpServerNameFromToolId(visibleBrowserApproval.tool_id)
+  const visibleBrowserApprovalDetails =
+    visibleBrowserApproval === null
+      ? []
+      : browserApprovalDetails(visibleBrowserApproval, visibleBrowserApprovalServer)
   const isBusy =
     backendStatus !== 'ready' || isCreatingConversation || isSubmittingMessage || activeRun !== null
 
@@ -1899,6 +1987,31 @@ export default function App(): React.JSX.Element {
       setModelActionError(MODEL_SETTINGS_UPDATE_ERROR)
     } finally {
       setIsModelBusy(false)
+    }
+  }
+
+  async function handleSaveAgentSettings(): Promise<void> {
+    if (isAgentBusy) {
+      return
+    }
+
+    const parsed = Number(agentMaxSteps)
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50) {
+      setAgentActionError(AGENT_SETTINGS_REQUIRED)
+      return
+    }
+
+    setIsAgentBusy(true)
+    setAgentActionError(null)
+    try {
+      const status = await window.desktop.saveAgentSettings({ maxSteps: parsed })
+      setAgentSettings(status)
+      setAgentMaxSteps(String(status.max_steps))
+      setRestartRequested(true)
+    } catch {
+      setAgentActionError(AGENT_SETTINGS_UPDATE_ERROR)
+    } finally {
+      setIsAgentBusy(false)
     }
   }
 
@@ -2810,7 +2923,11 @@ export default function App(): React.JSX.Element {
                       ) : null}
                     </p>
                     <div className="tool-approval-banner-actions">
-                      {TOOL_APPROVAL_BANNER_ACTIONS.map((action) => (
+                      {TOOL_APPROVAL_BANNER_ACTIONS.filter(
+                        (action) =>
+                          action.decision !== 'allow_conversation' ||
+                          visibleApproval.allows_conversation_approval
+                      ).map((action) => (
                         <button
                           className={action.className}
                           disabled={isDecidingApproval}
@@ -3247,24 +3364,57 @@ export default function App(): React.JSX.Element {
                         className="browser-agent-approval"
                         role="region"
                       >
-                        <p className="browser-agent-approval-copy">
-                          Allow {visibleBrowserApproval.display_name}?
-                          {visibleBrowserApprovalServer !== null
-                            ? ` (${visibleBrowserApprovalServer})`
-                            : ''}
-                        </p>
-                        <div className="browser-agent-approval-actions">
-                          {TOOL_APPROVAL_BANNER_ACTIONS.map((action) => (
-                            <button
-                              className={action.className}
-                              disabled={isDecidingApproval}
-                              key={action.decision}
-                              onClick={() => void decidePendingApproval(action.decision)}
-                              type="button"
-                            >
-                              {action.label}
-                            </button>
-                          ))}
+                        <div className="browser-agent-approval-card">
+                          <div className="browser-agent-approval-header">
+                            <span className="browser-agent-approval-kind">
+                              {browserApprovalKindLabel(
+                                visibleBrowserApproval.tool_id,
+                                visibleBrowserApprovalServer
+                              )}
+                            </span>
+                            <span className="browser-agent-approval-hint">Approval needed</span>
+                          </div>
+                          <p className="browser-agent-approval-title">
+                            Allow {visibleBrowserApproval.display_name}?
+                          </p>
+                          {visibleBrowserApprovalDetails.length > 0 ? (
+                            <div className="browser-agent-approval-details">
+                              {visibleBrowserApprovalDetails.map((detail) => (
+                                <span
+                                  className="browser-agent-approval-detail"
+                                  key={detail}
+                                  title={detail}
+                                >
+                                  {detail}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                          <div
+                            className={`browser-agent-approval-actions${
+                              visibleBrowserApproval.allows_conversation_approval
+                                ? ' has-conversation'
+                                : ''
+                            }`}
+                          >
+                            {TOOL_APPROVAL_BANNER_ACTIONS.filter(
+                              (action) =>
+                                action.decision !== 'allow_conversation' ||
+                                visibleBrowserApproval.allows_conversation_approval
+                            ).map((action) => (
+                              <button
+                                className={`browser-agent-approval-btn ${action.className}`}
+                                disabled={isDecidingApproval}
+                                key={action.decision}
+                                onClick={() => void decidePendingApproval(action.decision)}
+                                type="button"
+                              >
+                                {action.decision === 'allow_conversation'
+                                  ? 'Allow for chat'
+                                  : action.label}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     ) : null}
@@ -3274,7 +3424,9 @@ export default function App(): React.JSX.Element {
                     >
                       <label className="browser-agent-input">
                         <textarea
+                          ref={browserAgentInputRef}
                           onChange={(event) => setBrowserDraft(event.target.value)}
+                          onInput={(event) => resizeBrowserAgentInput(event.currentTarget)}
                           onKeyDown={(event) => {
                             if (event.key === 'Enter' && !event.shiftKey) {
                               event.preventDefault()
@@ -3637,6 +3789,63 @@ export default function App(): React.JSX.Element {
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
+                    <div className="settings-section-eyebrow">Agent runtime</div>
+                    <div className="settings-section-title">Maximum agent steps per request</div>
+                    <p className="settings-section-copy">
+                      A step is one model decision. Higher limits can take longer and use more model
+                      tokens.
+                    </p>
+                  </div>
+                  <span className="settings-state configured">
+                    {agentSettings === null ? '—' : `${agentSettings.max_steps} steps`}
+                  </span>
+                </div>
+
+                {isAgentLoading ? (
+                  <p className="settings-section-status">Loading agent settings…</p>
+                ) : null}
+                {agentLoadError !== null ? (
+                  <p className="settings-section-error">{agentLoadError}</p>
+                ) : null}
+                {!isAgentLoading && agentLoadError === null ? (
+                  <div className="settings-key-form">
+                    <label className="settings-field-label" htmlFor="agent-max-steps">
+                      Steps (1–50)
+                    </label>
+                    <input
+                      className="settings-text-input"
+                      disabled={isAgentBusy}
+                      id="agent-max-steps"
+                      inputMode="numeric"
+                      max={50}
+                      min={1}
+                      onChange={(event) => setAgentMaxSteps(event.target.value)}
+                      step={1}
+                      type="number"
+                      value={agentMaxSteps}
+                    />
+                    <div className="settings-card-actions">
+                      <button
+                        className="settings-button settings-button-primary"
+                        disabled={isAgentBusy}
+                        onClick={() => {
+                          void handleSaveAgentSettings()
+                        }}
+                        type="button"
+                      >
+                        Save agent settings
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                {agentActionError !== null ? (
+                  <p className="settings-section-error">{agentActionError}</p>
+                ) : null}
+              </section>
+
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div>
                     <div className="settings-section-eyebrow">Connected tool</div>
                     <div className="settings-section-title">Tavily Web Search</div>
                     <p className="settings-section-copy">
@@ -3765,7 +3974,7 @@ export default function App(): React.JSX.Element {
               </section>
               <section className="settings-guide-item restart">
                 <div className="settings-guide-title">Restart required</div>
-                <p>Model and Tavily changes take effect after restarting asAgent.</p>
+                <p>Model, agent, and Tavily changes take effect after restarting asAgent.</p>
               </section>
             </div>
           </AttentionAside>

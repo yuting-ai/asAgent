@@ -7,6 +7,7 @@ import {
   parseBrowserTabId,
   parseBrowserViewBounds,
   VisibleBrowser,
+  type BrowserFrame,
   type BrowserHostWindow,
   type BrowserNavigationEvent,
   type BrowserPageView,
@@ -24,8 +25,13 @@ type FakeWebContents = BrowserPageView['webContents'] & {
   goForward: ReturnType<typeof vi.fn>
   reload: ReturnType<typeof vi.fn>
   executeJavaScript: ReturnType<typeof vi.fn>
+  sendInputEvent: ReturnType<typeof vi.fn>
   setWindowOpenHandler: ReturnType<typeof vi.fn>
   on: ReturnType<typeof vi.fn>
+  mainFrame: BrowserFrame & {
+    executeJavaScript: ReturnType<typeof vi.fn>
+    isDestroyed: ReturnType<typeof vi.fn>
+  }
 }
 
 type FakePageView = BrowserPageView & {
@@ -34,8 +40,31 @@ type FakePageView = BrowserPageView & {
   webContents: FakeWebContents
 }
 
+function createFakeFrame(
+  options: {
+    url?: string
+    frames?: BrowserFrame[]
+    executeJavaScript?: ReturnType<typeof vi.fn>
+  } = {}
+): BrowserFrame & {
+  executeJavaScript: ReturnType<typeof vi.fn>
+  isDestroyed: ReturnType<typeof vi.fn>
+} {
+  const executeJavaScript =
+    options.executeJavaScript ?? vi.fn(async () => ({ title: '', text: '', elements: [] }))
+  return {
+    url: options.url ?? 'https://example.com/',
+    frames: options.frames ?? [],
+    isDestroyed: vi.fn(() => false),
+    executeJavaScript: executeJavaScript as BrowserFrame['executeJavaScript'] &
+      ReturnType<typeof vi.fn>
+  }
+}
+
 function createFakeView(options: WebContentsViewConstructorOptions): FakePageView {
   const listeners = new Map<string, (event: BrowserNavigationEvent, url?: string) => void>()
+  const executeJavaScript = vi.fn(async () => ({ title: '', text: '', elements: [] }))
+  const mainFrame = createFakeFrame({ executeJavaScript })
   const webContents = {
     loadURL: vi.fn(async () => undefined),
     close: vi.fn(),
@@ -46,7 +75,9 @@ function createFakeView(options: WebContentsViewConstructorOptions): FakePageVie
     goBack: vi.fn(),
     goForward: vi.fn(),
     reload: vi.fn(),
-    executeJavaScript: vi.fn(async () => ({ title: '', text: '' })),
+    executeJavaScript,
+    mainFrame,
+    sendInputEvent: vi.fn(),
     setWindowOpenHandler: vi.fn(),
     on: vi.fn((event: string, listener: (event: BrowserNavigationEvent, url?: string) => void) => {
       listeners.set(event, listener)
@@ -547,5 +578,306 @@ describe('VisibleBrowser window.open', () => {
       { tabId: 'tab-1', url: 'https://one.example/a' },
       { tabId: 'tab-2', url: 'https://two.example/b' }
     ])
+  })
+
+  it('clicks the visible tab with pointer cleanup and mouse event order', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://user:secret@example.com/path')
+    view.webContents.getTitle.mockReturnValue('Example')
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_1',
+            name: 'Continue',
+            role: 'button',
+            tag: 'button',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ x: 40, y: 60 })
+      .mockResolvedValueOnce({ x: 40, y: 60 })
+      .mockResolvedValueOnce(true)
+
+    await expect(browser.inspectInteractive('tab-1')).resolves.toEqual({
+      url: 'https://example.com/path',
+      elements: [
+        {
+          target_id: 'target_1',
+          name: 'Continue',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        }
+      ]
+    })
+    const pending = browser.clickCurrentPage('tab-1', 'target_1')
+    await vi.advanceTimersByTimeAsync(150)
+    await expect(pending).resolves.toEqual({
+      action: 'clicked',
+      url: 'https://example.com/path',
+      title: 'Example'
+    })
+
+    const scripts = view.webContents.executeJavaScript.mock.calls.map((call) => String(call[0]))
+    expect(scripts[0]).toContain('data-asagent-target-id')
+    expect(JSON.stringify(scripts[0])).not.toContain('internal selector')
+    expect(scripts[1]).toContain('data-asagent-target-id')
+    expect(scripts[1]).toContain('asagent-agent-pointer')
+    expect(scripts[3]).toContain('asagent-agent-pointer')
+    expect(view.webContents.sendInputEvent.mock.calls.map((call) => call[0])).toEqual([
+      { type: 'mouseMove', x: 40, y: 60 },
+      { type: 'mouseDown', x: 40, y: 60, button: 'left', clickCount: 1 },
+      { type: 'mouseUp', x: 40, y: 60, button: 'left', clickCount: 1 }
+    ])
+    vi.useRealTimers()
+  })
+
+  it('rejects clicks for non-visible tabs and removes the pointer after failures', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_1',
+            name: 'Go',
+            role: 'button',
+            tag: 'button',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ x: 10, y: 12 })
+      .mockRejectedValueOnce(new Error('target is obscured'))
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const pending = browser.clickCurrentPage('tab-1', 'target_1')
+    const assertion = expect(pending).rejects.toThrow('obscured')
+    await vi.advanceTimersByTimeAsync(150)
+    await assertion
+    expect(view.webContents.executeJavaScript).toHaveBeenCalledTimes(4)
+    expect(view.webContents.sendInputEvent).not.toHaveBeenCalled()
+
+    await expect(browser.clickCurrentPage('tab-missing', 'target_1')).rejects.toThrow(
+      'current browser tab is not visible'
+    )
+    await expect(browser.clickCurrentPage('tab-1', 'target_99')).rejects.toThrow(
+      'page changed; inspect interactive elements again'
+    )
+    vi.useRealTimers()
+  })
+
+  it('merges interactive elements from the main frame and nested iframes', async () => {
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://example.com/outer')
+
+    const nested = createFakeFrame({ url: 'https://example.com/nested' })
+    const child = createFakeFrame({
+      url: 'https://gradio.example/app',
+      frames: [nested]
+    })
+    Object.defineProperty(view.webContents.mainFrame, 'frames', {
+      value: [child],
+      configurable: true
+    })
+
+    view.webContents.mainFrame.executeJavaScript.mockResolvedValueOnce({
+      elements: [
+        {
+          target_id: 'target_1',
+          name: 'Outer',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        }
+      ]
+    })
+    child.executeJavaScript.mockResolvedValueOnce({
+      elements: [
+        {
+          target_id: 'target_2',
+          name: 'Use sample file',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        }
+      ]
+    })
+    nested.executeJavaScript.mockResolvedValueOnce({
+      elements: [
+        {
+          target_id: 'target_3',
+          name: 'Run',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        }
+      ]
+    })
+
+    await expect(browser.inspectInteractive('tab-1')).resolves.toEqual({
+      url: 'https://example.com/outer',
+      elements: [
+        {
+          target_id: 'target_1',
+          name: 'Outer',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        },
+        {
+          target_id: 'target_2',
+          name: 'Use sample file',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        },
+        {
+          target_id: 'target_3',
+          name: 'Run',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        }
+      ]
+    })
+
+    expect(view.webContents.mainFrame.executeJavaScript).toHaveBeenCalledTimes(1)
+    expect(child.executeJavaScript).toHaveBeenCalledTimes(1)
+    expect(nested.executeJavaScript).toHaveBeenCalledTimes(1)
+    expect(String(view.webContents.mainFrame.executeJavaScript.mock.calls[0]?.[0])).toContain(
+      'FIRST_TARGET_NUMBER = 1'
+    )
+    expect(String(child.executeJavaScript.mock.calls[0]?.[0])).toContain('FIRST_TARGET_NUMBER = 2')
+    expect(String(nested.executeJavaScript.mock.calls[0]?.[0])).toContain('FIRST_TARGET_NUMBER = 3')
+  })
+
+  it('clicks iframe targets only inside the child frame', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://example.com/outer')
+    view.webContents.getTitle.mockReturnValue('Outer')
+
+    const child = createFakeFrame({ url: 'https://gradio.example/app' })
+    Object.defineProperty(view.webContents.mainFrame, 'frames', {
+      value: [child],
+      configurable: true
+    })
+
+    view.webContents.mainFrame.executeJavaScript.mockResolvedValueOnce({
+      elements: [
+        {
+          target_id: 'target_1',
+          name: 'Outer',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        }
+      ]
+    })
+    child.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_2',
+            name: 'Use sample file',
+            role: 'button',
+            tag: 'button',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ x: 12, y: 18 })
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const pending = browser.clickCurrentPage('tab-1', 'target_2')
+    await vi.advanceTimersByTimeAsync(150)
+    await expect(pending).resolves.toEqual({
+      action: 'clicked',
+      url: 'https://example.com/outer',
+      title: 'Outer'
+    })
+
+    expect(view.webContents.sendInputEvent).not.toHaveBeenCalled()
+    expect(view.webContents.mainFrame.executeJavaScript).toHaveBeenCalledTimes(1)
+    expect(child.executeJavaScript.mock.calls.map((call) => String(call[0]))).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('data-asagent-target-id'),
+        expect.stringContaining('target.click()'),
+        expect.stringContaining('asagent-agent-pointer')
+      ])
+    )
+    const childScripts = child.executeJavaScript.mock.calls.map((call) => String(call[0]))
+    expect(childScripts[1]).toContain('asagent-agent-pointer')
+    expect(childScripts[2]).toContain('target.click()')
+    vi.useRealTimers()
+  })
+
+  it('invalidates interaction targets when a child frame navigates', async () => {
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView> & {
+      emit(event: string, navigationEvent: BrowserNavigationEvent, url?: string): void
+    }
+
+    const child = createFakeFrame({ url: 'https://gradio.example/app' })
+    Object.defineProperty(view.webContents.mainFrame, 'frames', {
+      value: [child],
+      configurable: true
+    })
+
+    view.webContents.mainFrame.executeJavaScript.mockResolvedValueOnce({
+      elements: [
+        {
+          target_id: 'target_1',
+          name: 'Outer',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        }
+      ]
+    })
+    child.executeJavaScript.mockResolvedValueOnce({
+      elements: [
+        {
+          target_id: 'target_2',
+          name: 'Use sample file',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        }
+      ]
+    })
+
+    await browser.inspectInteractive('tab-1')
+    view.emit(
+      'did-frame-navigate',
+      { preventDefault: () => undefined },
+      'https://gradio.example/reloaded'
+    )
+
+    await expect(browser.clickCurrentPage('tab-1', 'target_2')).rejects.toThrow(
+      'page changed; inspect interactive elements again'
+    )
+    expect(child.executeJavaScript).toHaveBeenCalledTimes(1)
   })
 })

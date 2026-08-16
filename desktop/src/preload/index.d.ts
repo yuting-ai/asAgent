@@ -55,6 +55,7 @@ interface ToolApproval {
   arguments: Record<string, unknown>
   resource_path: string | null
   impact_summary: string | null
+  allows_conversation_approval: boolean
 }
 
 interface FileChange {
@@ -79,10 +80,18 @@ interface ModelSettingsStatus {
   base_url: string | null
 }
 
+interface AgentSettingsStatus {
+  max_steps: number
+}
+
 interface ModelSettingsInput {
   model: string
   baseUrl: string
   apiKey?: string
+}
+
+interface AgentSettingsInput {
+  maxSteps: number
 }
 
 interface WorkspaceSettingsStatus {
@@ -153,6 +162,8 @@ interface DesktopBridge {
   getModelSettings(): Promise<ModelSettingsStatus>
   saveModelSettings(input: ModelSettingsInput): Promise<ModelSettingsStatus>
   deleteModelSettings(): Promise<ModelSettingsStatus>
+  getAgentSettings(): Promise<AgentSettingsStatus>
+  saveAgentSettings(input: AgentSettingsInput): Promise<AgentSettingsStatus>
   getConversationFileAccess(conversationId: string): Promise<WorkspaceSettingsStatus>
   chooseWorkspacePath(): Promise<{ path: string; kind: 'directory' | 'file' } | null>
   saveConversationFileAccess(

@@ -124,6 +124,7 @@ async def test_local_api_reads_and_decides_a_pending_tool_approval(
             "arguments": {"left": 2, "right": 3},
             "resource_path": None,
             "impact_summary": None,
+            "allows_conversation_approval": True,
         }
         assert decided.status_code == 200
         assert decided.json() == {

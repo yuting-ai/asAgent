@@ -96,7 +96,7 @@ def _loop(
     event_numbers = count(1)
     tool_call_numbers = count(1)
 
-    return AgentLoop(
+    loop = AgentLoop(
         model=provider,
         executor=ToolExecutor(
             registry,
@@ -111,6 +111,8 @@ def _loop(
             f"tool-call-{next(tool_call_numbers)}",
         ),
     )
+    assert loop._max_steps == 20
+    return loop
 
 
 def _runtime(

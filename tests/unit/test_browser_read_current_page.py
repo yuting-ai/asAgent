@@ -8,7 +8,7 @@ from asagent.bootstrap.browser_page_bridge import (
     BrowserPageBridgeClient,
     BrowserPageContent,
 )
-from asagent.cli import _register_browser_read_tool, build_development_agent_loop
+from asagent.cli import _register_browser_tools, build_development_agent_loop
 from asagent.core.conversation import Conversation
 from asagent.core.ids import ConversationId, RunId, UserId
 from asagent.core.run_event import RunEvent
@@ -77,7 +77,8 @@ async def test_browser_read_current_page_tool_returns_bounded_json() -> None:
 
     assert tool.definition.tool_id == "browser.read_current_page"
     assert tool.definition.required_permissions == frozenset({"browser.read"})
-    assert "do not call this tool again" in tool.definition.description
+    assert "Call again after a click" in tool.definition.description
+    assert "do not retry the same call immediately" in tool.definition.description
     assert tool.definition.input_schema == {
         "type": "object",
         "properties": {},
@@ -135,7 +136,7 @@ async def test_browser_read_tool_registers_only_for_bound_browser_runs() -> None
 
     chat_registry = ToolRegistry()
     bindings.bind(RunId("run-chat"), "tab-1")
-    chat_permissions = await _register_browser_read_tool(
+    chat_permissions = await _register_browser_tools(
         registry=chat_registry,
         conversations=conversations,
         conversation_id=chat.conversation_id,
@@ -149,7 +150,7 @@ async def test_browser_read_tool_registers_only_for_bound_browser_runs() -> None
 
     browser_registry = ToolRegistry()
     bindings.bind(RunId("run-browser"), "tab-2")
-    browser_permissions = await _register_browser_read_tool(
+    browser_permissions = await _register_browser_tools(
         registry=browser_registry,
         conversations=conversations,
         conversation_id=browser.conversation_id,
@@ -157,14 +158,17 @@ async def test_browser_read_tool_registers_only_for_bound_browser_runs() -> None
         browser_run_bindings=bindings,
         browser_page_client=client,
     )
-    assert browser_permissions == frozenset({"browser.read"})
+    assert browser_permissions == frozenset(
+        {"browser.read", "browser.inspect", "browser.click"}
+    )
     assert (
         browser_registry.get("browser.read_current_page").definition.tool_id
         == "browser.read_current_page"
     )
+    assert browser_registry.get("browser.click").definition.tool_id == "browser.click"
 
     unbound_registry = ToolRegistry()
-    unbound_permissions = await _register_browser_read_tool(
+    unbound_permissions = await _register_browser_tools(
         registry=unbound_registry,
         conversations=conversations,
         conversation_id=browser.conversation_id,
@@ -188,3 +192,4 @@ def test_build_development_agent_loop_forwards_max_calls_per_tool_input() -> Non
 
     assert limited._max_calls_per_tool_input == 1
     assert unlimited._max_calls_per_tool_input is None
+    assert unlimited._max_steps == 20

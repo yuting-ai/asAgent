@@ -18,6 +18,7 @@ from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
 from asagent.api.bootstrap import read_local_api_bootstrap
 from asagent.api.server import READY_PREFIX, LocalApiServer
+from asagent.bootstrap.agent_settings import AgentSettingsStore
 from asagent.bootstrap.browser_page_bridge import BrowserPageBridgeClient
 from asagent.bootstrap.credential_secret_provider import CredentialStoreSecretProvider
 from asagent.bootstrap.environment_secret_provider import (
@@ -90,6 +91,8 @@ from asagent.storage.sqlite.run_repository import SqliteRunRepository
 from asagent.storage.sqlite.run_starter import SqliteRunStarter
 from asagent.storage.tool_call_recorder import RepositoryToolCallRecorder
 from asagent.tools.approval import PendingToolApprovalPolicy, ToolApprovalPolicy
+from asagent.tools.browser_click import BrowserClickTool
+from asagent.tools.browser_inspect_interactive import BrowserInspectInteractiveTool
 from asagent.tools.browser_read_current_page import BrowserReadCurrentPageTool
 from asagent.tools.browser_run_bindings import BrowserRunBindings
 from asagent.tools.builtin.calculator import CalculatorTool
@@ -115,6 +118,13 @@ _BUILTIN_TOOL_PERMISSIONS = frozenset({"tool.execute"})
 _FILESYSTEM_READ_PERMISSIONS = frozenset({"filesystem.read"})
 _FILESYSTEM_WRITE_PERMISSIONS = frozenset({"filesystem.write"})
 _BROWSER_READ_PERMISSIONS = frozenset({"browser.read"})
+_BROWSER_INSPECT_PERMISSIONS = frozenset({"browser.inspect"})
+_BROWSER_CLICK_PERMISSIONS = frozenset({"browser.click"})
+_BROWSER_TOOL_PERMISSIONS = (
+    _BROWSER_READ_PERMISSIONS
+    | _BROWSER_INSPECT_PERMISSIONS
+    | _BROWSER_CLICK_PERMISSIONS
+)
 _MCP_SUBPROCESS_ENVIRONMENT_NAMES = ("PATH",)
 
 
@@ -235,7 +245,7 @@ async def _registry_for_conversation(
     return registry
 
 
-async def _register_browser_read_tool(
+async def _register_browser_tools(
     *,
     registry: ToolRegistry,
     conversations: ConversationRepository,
@@ -244,7 +254,7 @@ async def _register_browser_read_tool(
     browser_run_bindings: BrowserRunBindings | None,
     browser_page_client: BrowserPageBridgeClient | None,
 ) -> frozenset[str]:
-    """Register the page-read tool only for a bound Browser Run."""
+    """Register page tools only for a bound Browser Run."""
 
     tab_id = None if browser_run_bindings is None else browser_run_bindings.take(run_id)
     if tab_id is None or browser_page_client is None or browser_run_bindings is None:
@@ -260,7 +270,19 @@ async def _register_browser_read_tool(
             tab_id=tab_id,
         ),
     )
-    return _BROWSER_READ_PERMISSIONS
+    registry.register(
+        BrowserInspectInteractiveTool(
+            client=browser_page_client,
+            tab_id=tab_id,
+        ),
+    )
+    registry.register(
+        BrowserClickTool(
+            client=browser_page_client,
+            tab_id=tab_id,
+        ),
+    )
+    return _BROWSER_TOOL_PERMISSIONS
 
 
 def _filesystem_permissions(
@@ -316,6 +338,7 @@ def build_agent_loop(
     approval_policy: ToolApprovalPolicy | None = None,
     registry: ToolRegistry | None = None,
     granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
+    max_steps: int = 20,
     max_calls_per_tool_input: int | None = None,
 ) -> AgentLoop:
     tool_registry = registry if registry is not None else _register_builtin_tools()
@@ -331,6 +354,7 @@ def build_agent_loop(
             approval_policy=approval_policy,
         ),
         tool_snapshot=snapshot,
+        max_steps=max_steps,
         max_calls_per_tool_input=max_calls_per_tool_input,
         event_publisher=event_publisher,
         event_id_factory=new_event_id,
@@ -350,6 +374,7 @@ def build_development_agent_loop(
     approval_policy: ToolApprovalPolicy | None = None,
     registry: ToolRegistry | None = None,
     granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
+    max_steps: int = 20,
     max_calls_per_tool_input: int | None = None,
 ) -> AgentLoop:
     tool_registry = registry if registry is not None else _register_builtin_tools()
@@ -365,6 +390,7 @@ def build_development_agent_loop(
             approval_policy=approval_policy,
         ),
         tool_snapshot=snapshot,
+        max_steps=max_steps,
         max_calls_per_tool_input=max_calls_per_tool_input,
         event_publisher=event_publisher,
         event_id_factory=new_event_id,
@@ -513,6 +539,7 @@ def build_persistent_agent_runtime(
     file_change_snapshots: FileChangeSnapshotStore | None = None,
     browser_run_bindings: BrowserRunBindings | None = None,
     browser_page_client: BrowserPageBridgeClient | None = None,
+    max_steps: int = 20,
 ) -> PersistentAgentRuntime:
     base_registry = registry if registry is not None else _register_builtin_tools()
 
@@ -530,7 +557,7 @@ def build_persistent_agent_runtime(
                 file_changes=file_changes,
                 file_change_snapshots=file_change_snapshots,
             )
-            browser_permissions = await _register_browser_read_tool(
+            browser_permissions = await _register_browser_tools(
                 registry=scoped_registry,
                 conversations=conversations,
                 conversation_id=conversation_id,
@@ -552,6 +579,7 @@ def build_persistent_agent_runtime(
                     )
                     | browser_permissions
                 ),
+                max_steps=max_steps,
                 max_calls_per_tool_input=(1 if browser_permissions else None),
             )
 
@@ -588,6 +616,7 @@ def build_persistent_agent_runtime(
             approval_policy=approval_policy,
             registry=base_registry,
             granted_permissions=granted_permissions,
+            max_steps=max_steps,
         ),
         now=now,
         new_message_id=new_message_id,
@@ -608,6 +637,7 @@ def build_persistent_development_runtime(
     file_change_snapshots: FileChangeSnapshotStore | None = None,
     browser_run_bindings: BrowserRunBindings | None = None,
     browser_page_client: BrowserPageBridgeClient | None = None,
+    max_steps: int = 20,
 ) -> PersistentAgentRuntime:
     base_registry = registry if registry is not None else _register_builtin_tools()
 
@@ -625,7 +655,7 @@ def build_persistent_development_runtime(
                 file_changes=file_changes,
                 file_change_snapshots=file_change_snapshots,
             )
-            browser_permissions = await _register_browser_read_tool(
+            browser_permissions = await _register_browser_tools(
                 registry=scoped_registry,
                 conversations=conversations,
                 conversation_id=conversation_id,
@@ -646,6 +676,7 @@ def build_persistent_development_runtime(
                     )
                     | browser_permissions
                 ),
+                max_steps=max_steps,
                 max_calls_per_tool_input=(1 if browser_permissions else None),
             )
 
@@ -681,6 +712,7 @@ def build_persistent_development_runtime(
             approval_policy=approval_policy,
             registry=base_registry,
             granted_permissions=granted_permissions,
+            max_steps=max_steps,
         ),
         now=now,
         new_message_id=new_message_id,
@@ -849,6 +881,8 @@ async def _run_main(args: argparse.Namespace) -> None:
             credential_store=credential_store,
             clock=now,
         )
+        agent_settings_store = AgentSettingsStore(paths.config_dir)
+        agent_settings = agent_settings_store.get()
         workspace_settings = ConversationWorkspaceSettings(
             scopes=conversation_file_scopes,
             workspace_root=paths.workspace_dir,
@@ -908,6 +942,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     file_change_snapshots=file_change_snapshots,
                     browser_run_bindings=browser_run_bindings,
                     browser_page_client=browser_page_client,
+                    max_steps=agent_settings.max_steps,
                 )
                 model_name = "development-tools"
             else:
@@ -956,6 +991,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     file_change_snapshots=file_change_snapshots,
                     browser_run_bindings=browser_run_bindings,
                     browser_page_client=browser_page_client,
+                    max_steps=agent_settings.max_steps,
                 )
                 model_name = profile.model
 
@@ -1006,6 +1042,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     tool_approvals=tool_approvals,
                     tavily_settings=tavily_settings,
                     model_settings=model_settings,
+                    agent_settings=agent_settings_store,
                     workspace_settings=workspace_settings,
                     file_changes=file_changes,
                     revert_file_change=revert_file_change,
@@ -1065,6 +1102,7 @@ async def _run_main(args: argparse.Namespace) -> None:
             scopes=conversation_file_scopes,
             workspace_root=paths.workspace_dir,
         )
+        agent_settings = AgentSettingsStore(paths.config_dir).get()
 
         try:
             conversation = await get_or_create_persistent_conversation(
@@ -1083,6 +1121,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     starter=starter,
                     finisher=finisher,
                     workspace_settings=workspace_settings,
+                    max_steps=agent_settings.max_steps,
                 )
                 model_name = "development-tools"
                 await run_persistent_agent_chat(
@@ -1122,6 +1161,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                         starter=starter,
                         finisher=finisher,
                         workspace_settings=workspace_settings,
+                        max_steps=agent_settings.max_steps,
                     ),
                     conversation_id=conversation.conversation_id,
                     model_name=profile.model,

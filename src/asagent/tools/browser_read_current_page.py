@@ -29,8 +29,10 @@ class BrowserReadCurrentPageTool:
                 "submitted. The tab must still be the user's currently visible "
                 "browser tab. Returns JSON with title, url, and text fields. "
                 "Does not click, type, navigate, or read cookies. "
-                "If reading fails or times out, do not call this tool again "
-                "in the same run; tell the user the current tab could not be read."
+                "Call again after a click or other page change when you need "
+                "the new content. If reading fails or times out, do not retry "
+                "the same call immediately; tell the user the current tab "
+                "could not be read."
             ),
             input_schema={
                 "type": "object",
