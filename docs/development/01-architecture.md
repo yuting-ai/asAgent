@@ -472,7 +472,9 @@ Sidecar 内存中的 Chat 会话授权，必须在引入 Gmail OAuth、Secret St
 
 首个闭环只提供浏览器菜单、可见标签、空闲/加载/失败状态、用户显式导航和页面可见性；它不注册 Tool、不向模型发送页面内容、不自动点击、输入、登录、上传、下载或提交表单，也不和 Scheduler、MCP、Gmail OAuth 共用实现。远程页面运行在隔离的 WebContents 中：关闭 Node integration，保持 sandbox，禁止任意 Preload、任意 IPC 和未经验证的导航。HTTP/HTTPS 的 `window.open`/`target=_blank` 请求不创建原生 Electron 子窗口，而是在同一可见浏览器中转换为数量受限的受管标签；非网页协议继续拒绝。为兼容 Basic Authentication，Main 可使用带 URL userinfo 的原始地址加载页面，但在所有 Main→Renderer 状态和 IPC 返回值中删除 username/password，且不得将原始地址写入日志、RunEvent、ToolCall 或模型上下文。
 
-以后需要 AI 操作时，Python Runtime 只提出经过 Tool Policy、站点范围和逐项 Approval 审核的高层 `BrowserAction`；Electron Main 的受控 Controller 在当前可见 WebContents 上执行并返回受限结果。这样用户看到的页面与 AI 操作的页面共享同一 Electron Session，而不是复制 Cookie 或让多个 Chromium 进程并发读写同一个 Profile 目录。页面加载、元素定位、超时、取消、下载以及人工接管具有独立生命周期和失败语义，届时才为它们建立最小可测接口。
+浏览器侧栏使用与普通 Chat 相同的 Conversation、Message、Run 和 SQLite 主数据，但 Conversation 以稳定 `kind` 区分 `chat` 与 `browser`。Chat 和 Browser 各自只能列出、创建和提交同类会话，不能通过普通列表或路由混用；这不是第二套浏览器会话表。浏览器标签 ID 是 Renderer 当前会话的临时绑定，不写入 SQLite，也不在应用重启后复原。Browser UI 提供其自身的最近会话入口，以便切换和查看已持久化的 Browser Conversation。
+
+下一个最小闭环是只读 `browser.read_current_page`：它仅在 `browser` Conversation 的 Run 中注册，读取该会话当前绑定且用户可见的一个标签，并只返回标题、已脱敏 URL 与限长正文文本。Python 不导入 Electron；Electron Main 在固定、私有的受控桥接后从同一 `WebContentsView` 提取内容，Renderer 仍不接触网页 DOM 或会话凭据。未来的点击、输入、选择、上传、下载和提交均按各自的 Browser Tool 逐项加入，而不预建通用任务/动作模型。任何有副作用的 Browser Tool 仍须在实际加入时定义站点范围、审批、超时、取消和审计。
 
 ## 11. MCP 架构
 

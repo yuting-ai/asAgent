@@ -870,6 +870,16 @@
 - 影响：新实现使用 `WebContentsView`，不使用已弃用的 `BrowserView`；远程页面保持 sandbox 且没有 Node、Preload、通用 IPC、Token、文件系统或会话凭据访问。Renderer 不读取网页 DOM 或会话数据。浏览器 Profile 不作为 OAuth/MCP Secret Store，外部浏览器/Playwright 不得并发读取其目录。页面读取、选择器、超时、取消、下载、审批、审计、AI Tool 与定时任务各自留待后续独立任务。
 - 替代方案：仅用隐藏 Playwright 浏览器；同时用 Playwright 和 Electron 读写同一 Profile；让 Renderer 直接嵌入并控制不受信任网页；或先实现浏览器 Agent Tool 与 Scheduler 再验证可见 UI；当前均不采用。
 
+### DEC-079：Browser Conversation 与 Chat 隔离，并按 Tool 逐步扩展浏览器能力
+
+- 日期：2026-08-16
+- 状态：已确认
+- 背景：Browser 页面已有独立的 Agent 侧栏 UI。若直接复用普通 Chat 的 Conversation 查询和提交入口，Browser 消息会混入 Chat 列表，且模型无法明确其读取的是用户当前可见的哪个标签。未来浏览器的读取、输入和提交风险不同，预先建设通用 BrowserAction/任务模型会超出当前需求。
+- 决策：Conversation 在同一 SQLite 主数据和既有 Message/Run 管线中增加稳定类型 `chat` 或 `browser`。两类会话分别列出、创建和提交，Browser 侧栏提供自己的最近会话入口；不建立第二套表。每个浏览器标签仅在 Renderer 中临时关联一个 Browser Conversation，`tabId` 不持久化。第一项 Agent 能力是仅在 Browser Conversation 注册的只读 `browser.read_current_page`，只能读取当前关联且可见的标签，结果限为标题、已脱敏 URL 与有界正文。未来点击、输入、选择、上传、下载、提交或自动化操作都各自以独立 Browser Tool 加入。
+- 原因：类型隔离保留统一的 Conversation/Run/SSE/持久化实现，又保证两个产品入口不会混淆。把标签绑定保留为临时 UI 状态符合标签不跨应用重启的生命周期。按 Tool 扩展让每项副作用拥有自己的输入、权限、范围、审批、超时、取消和测试，而不把未确认的自动化需求固化为通用框架。
+- 影响：Chat 路由和 UI 必须过滤/拒绝 `browser` 会话，Browser 路由和 UI 对称处理。Python 通过私有 Main 桥接读取页面，不能读取 Electron Profile、Cookie 或 DOM；Renderer 也不读取 DOM。只读页面文本可能作为 Tool 结果发送给用户选择的外部模型 Provider，沿用既有 external processing 提示。该决定不实现通用点击/输入、站点范围、审批或 Scheduler。
+- 替代方案：为 Browser 单建会话、消息和 Run 表；把所有 Conversation 显示在同一 Chat 列表；将 `tabId` 持久化为领域身份；或先设计统一 BrowserAction/任务 DSL；当前均不采用。
+
 ## 2. 技术选型
 
 阶段 0 直接相关的技术选型已由 DEC-022 锁定；后续阶段的待定项仍在对应阶段开始前确认：
