@@ -3747,7 +3747,8 @@
 ### 验证
 
 - Desktop `npm run format`、`npm run typecheck`、`npm run lint`、`npm run test`（79 passed）、`npm run build` 和 `git diff --check` 全部通过。
+- 手动桌面验收通过：普通 HTTP/HTTPS 导航、网页第三方链接的受管新标签、带 userinfo 地址在加载后的脱敏显示、`file:`/`javascript:`/`data:` 拒绝、Chat/Browser 切换后的页面保持，以及重启后的专属 Session/Profile 均符合预期。测试没有使用真实账号或密码。
 
 ### 下一步
 
-- 在真实桌面应用中手动验证普通导航、带 Basic Authentication 的地址栏脱敏、第三方新标签、切换 Chat 后恢复、重启后的 Session 持久化，以及非法协议拒绝；通过前不开始 AI BrowserAction。
+- 在用户确认后，选择下一项独立浏览器任务：优先设计页面状态观察与用户可见的加载/失败事件；本次不开始 AI BrowserAction、站点范围、审批或 Scheduler。
