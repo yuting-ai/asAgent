@@ -484,7 +484,10 @@ class AgentLoop:
             )
         except ToolTimeoutError:
             return _ToolExecutionResult(
-                content="Error: tool execution timed out.",
+                content=(
+                    "Error: tool execution timed out. "
+                    "Do not retry the same tool call with the same arguments."
+                ),
                 succeeded=False,
                 tool_id=tool_id,
             )

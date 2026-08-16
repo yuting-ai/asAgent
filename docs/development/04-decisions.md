@@ -251,11 +251,11 @@
 ### DEC-032：重复工具调用检测默认关闭并按策略启用
 
 - 日期：2026-08-09
-- 状态：已确认
+- 状态：已确认；Browser 读页 Run 已启用上限 1
 - 背景：完全相同的工具调用通常表示 Loop，但并非必然无效。时间、轮询、搜索和其他外部状态工具可以在相同参数下产生新结果；将统一的低阈值作为全局默认会破坏这些合法任务。
-- 决策：最小 `AgentLoop` 为每个 Run 按内部 `tool_id` 与规范化 JSON 参数计数。`max_calls_per_tool_input` 默认为 `None`，仅检测、不阻断；调用方显式传入正整数时才启用硬限制，达到次数后不执行工具而追加配对错误结果。最小测试使用 2，允许一次重试并阻断第三次。未来由 Tool Policy 根据工具类型设定阈值或豁免。
-- 原因：保留对确定性 Loop 的可测试防护，同时不把时间敏感或轮询工具误判为错误。
-- 影响：重复计数只在一次 `run()` 内有效；不同参数不会互相影响。正式参数校验、工具级 Policy 与审计仍未实现。
+- 决策：最小 `AgentLoop` 为每个 Run 按内部 `tool_id` 与规范化 JSON 参数计数。`max_calls_per_tool_input` 默认为 `None`，仅检测、不阻断；调用方显式传入正整数时才启用硬限制，达到次数后不执行工具而追加配对错误结果。最小测试使用 2，允许一次重试并阻断第三次。未来由 Tool Policy 根据工具类型设定阈值或豁免。当 Browser Run 成功注册 `browser.read_current_page` 时，Runtime 对该次 Loop 显式设置 `max_calls_per_tool_input=1`，避免无参数读页工具在超时后反复空转；Chat Run 与未绑定读页的 Browser Run 仍保持默认 `None`。
+- 原因：保留对确定性 Loop 的可测试防护，同时不把时间敏感或轮询工具误判为错误。Browser 读页工具无参数且超时后立刻重试通常无效，因此对该路径单独收紧。
+- 影响：重复计数只在一次 `run()` 内有效；不同参数不会互相影响。正式参数校验、工具级 Policy 与审计仍未实现。含 `browser.read` 的 Browser Run 会对同一次 Run 内所有工具的相同参数调用施加上限 1。
 - 替代方案：所有工具默认限制两次、完全不实现重复检测、或只给模型追加自然语言提示；当前均不采用。
 
 ### DEC-033：工具结果截断仅限制模型上下文副本
@@ -293,7 +293,7 @@
 - 日期：2026-08-09
 - 状态：已确认
 - 背景：工具的耗时和副作用各不相同，统一的 Loop 级超时无法表达具体限制；而工具失败不必然意味着模型无法继续完成任务。
-- 决策：`ToolExecutor` 使用每个不可变 `ToolDefinition.timeout_seconds` 通过 `asyncio.wait_for` 限制单次执行，并将超时转换为 `ToolTimeoutError`。AgentLoop 将其写为与原 `tool_call_id` 配对的 `Error: tool execution timed out.` TOOL message，再继续下一次模型调用；不因工具超时直接终止 Run。
+- 决策：`ToolExecutor` 使用每个不可变 `ToolDefinition.timeout_seconds` 通过 `asyncio.wait_for` 限制单次执行，并将超时转换为 `ToolTimeoutError`。AgentLoop 将其写为与原 `tool_call_id` 配对的 `Error: tool execution timed out. Do not retry the same tool call with the same arguments.` TOOL message，再继续下一次模型调用；不因工具超时直接终止 Run。
 - 原因：工具定义是工具级执行预算的唯一来源，避免重复配置；将失败事实交回模型，使其可改用参数、替代工具、解释限制或结束回答，同时保持模型上下文的 call/result 配对。
 - 影响：超时会向工具协程请求取消，但对已经发送给外部系统的副作用不提供回滚保证；工具实现应正确处理取消和清理资源。最后允许决策步骤的工具仍不会执行；参数校验、权限、批准、审计、Run 总 deadline 与后台长任务仍待实现。
 - 替代方案：工具超时后直接让整个 Run `FAILED`、让每个 Tool 自行实现不一致的超时、或吞掉超时而不向模型写入结果；当前均不采用。
@@ -873,11 +873,11 @@
 ### DEC-079：Browser Conversation 与 Chat 隔离，并按 Tool 逐步扩展浏览器能力
 
 - 日期：2026-08-16
-- 状态：已确认；Conversation 类型隔离与 Browser 侧栏真实对话已落地，`browser.read_current_page` 仍待实现
+- 状态：已确认；Conversation 类型隔离、Browser 侧栏真实对话，以及只读 `browser.read_current_page` 已落地
 - 背景：Browser 页面已有独立的 Agent 侧栏 UI。若直接复用普通 Chat 的 Conversation 查询和提交入口，Browser 消息会混入 Chat 列表，且模型无法明确其读取的是用户当前可见的哪个标签。未来浏览器的读取、输入和提交风险不同，预先建设通用 BrowserAction/任务模型会超出当前需求。
-- 决策：Conversation 在同一 SQLite 主数据和既有 Message/Run 管线中增加稳定类型 `chat` 或 `browser`。两类会话分别列出、创建和提交，Browser 侧栏提供自己的最近会话入口；不建立第二套表。每个浏览器标签仅在 Renderer 中临时关联一个 Browser Conversation，`tabId` 不持久化。第一项 Agent 能力是仅在 Browser Conversation 注册的只读 `browser.read_current_page`，只能读取当前关联且可见的标签，结果限为标题、已脱敏 URL 与有界正文。未来点击、输入、选择、上传、下载、提交或自动化操作都各自以独立 Browser Tool 加入。
-- 原因：类型隔离保留统一的 Conversation/Run/SSE/持久化实现，又保证两个产品入口不会混淆。把标签绑定保留为临时 UI 状态符合标签不跨应用重启的生命周期。按 Tool 扩展让每项副作用拥有自己的输入、权限、范围、审批、超时、取消和测试，而不把未确认的自动化需求固化为通用框架。
-- 影响：Chat 路由和 UI 必须过滤/拒绝 `browser` 会话，Browser 路由和 UI 对称处理。Python 通过私有 Main 桥接读取页面，不能读取 Electron Profile、Cookie 或 DOM；Renderer 也不读取 DOM。只读页面文本可能作为 Tool 结果发送给用户选择的外部模型 Provider，沿用既有 external processing 提示。该决定不实现通用点击/输入、站点范围、审批或 Scheduler。
+- 决策：Conversation 在同一 SQLite 主数据和既有 Message/Run 管线中增加稳定类型 `chat` 或 `browser`。两类会话分别列出、创建和提交，Browser 侧栏提供自己的最近会话入口；不建立第二套表。打开的标签、`visibleTabId` 与 `tabId → conversationId` 绑定由 Electron Main 写入桌面本地 `browser-session.json`（位于 appHome），重启后恢复；`tabId`、URL 与绑定仍不写入 SQLite。第一项 Agent 能力是仅在 Browser Conversation 注册的只读 `browser.read_current_page`，只能读取当前关联且可见的标签，结果限为标题、已脱敏 URL 与有界正文。未来点击、输入、选择、上传、下载、提交或自动化操作都各自以独立 Browser Tool 加入。
+- 原因：类型隔离保留统一的 Conversation/Run/SSE/持久化实现，又保证两个产品入口不会混淆。标签壳是桌面 UI 状态，应随 Electron 会话恢复，而不是进入领域主数据。按 Tool 扩展让每项副作用拥有自己的输入、权限、范围、审批、超时、取消和测试，而不把未确认的自动化需求固化为通用框架。
+- 影响：Chat 路由和 UI 必须过滤/拒绝 `browser` 会话，Browser 路由和 UI 对称处理。Python 通过私有 Main 桥接读取页面，不能读取 Electron Profile、Cookie 或 DOM；Renderer 也不读取 DOM。会话文件只存脱敏 URL 与 conversation 引用；已删除的 Browser Conversation 在恢复时丢弃绑定但保留标签。只读页面文本可能作为 Tool 结果发送给用户选择的外部模型 Provider，沿用既有 external processing 提示。该决定不实现通用点击/输入、站点范围、审批或 Scheduler。
 - 替代方案：为 Browser 单建会话、消息和 Run 表；把所有 Conversation 显示在同一 Chat 列表；将 `tabId` 持久化为领域身份；或先设计统一 BrowserAction/任务 DSL；当前均不采用。
 
 ## 2. 技术选型

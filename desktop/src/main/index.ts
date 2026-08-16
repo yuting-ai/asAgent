@@ -20,6 +20,8 @@ import {
   type SubmittedMessage,
   type ToolApproval
 } from './backend_launcher'
+import { BrowserPageBridge } from './browser_page_bridge'
+import { BROWSER_SESSION_FILE_NAME, BrowserSessionStore } from './browser_session'
 import {
   parseBrowserControlAction,
   parseBrowserTabId,
@@ -32,9 +34,28 @@ import { parseExternalWebUrl } from './external_url'
 
 let backendLauncher: BackendLauncher | undefined
 let visibleBrowser: VisibleBrowser | undefined
+let browserPageBridge: BrowserPageBridge | undefined
+let browserSessionStore: BrowserSessionStore | undefined
 let isQuitting = false
 const runWatchers = new Map<string, () => void>()
 let dataProcessingMode: 'local' | 'external' = 'local'
+
+function desktopAppHome(): string {
+  return join(app.getAppPath(), '..', '.local-data')
+}
+
+function scheduleBrowserSessionSave(): void {
+  if (browserSessionStore === undefined || visibleBrowser === undefined) {
+    return
+  }
+
+  browserSessionStore.scheduleSave(visibleBrowser)
+}
+
+function noteBrowserTabState(state: BrowserTabState): void {
+  broadcastBrowserTabState(state)
+  scheduleBrowserSessionSave()
+}
 
 function rendererUrl(): string {
   if (is.dev) {
@@ -204,16 +225,21 @@ function parseWorkspaceSettings(value: unknown): {
   }
 }
 
-function createDevelopmentBackendLauncher(): BackendLauncher {
+function createDevelopmentBackendLauncher(browserBridge?: {
+  baseUrl: string
+  token: string
+}): BackendLauncher {
   const projectRoot = join(app.getAppPath(), '..')
   const providerProfile = process.env['ASAGENT_DESKTOP_PROFILE']
   const secretEnvironmentName = process.env['ASAGENT_DESKTOP_SECRET_ENV']
+  const appHome = desktopAppHome()
 
   if (providerProfile === undefined && secretEnvironmentName === undefined) {
     dataProcessingMode = 'local'
     return new BackendLauncher({
       projectRoot,
-      appHome: join(projectRoot, '.local-data')
+      appHome,
+      browserBridge
     })
   }
 
@@ -224,10 +250,11 @@ function createDevelopmentBackendLauncher(): BackendLauncher {
   dataProcessingMode = 'external'
   return new BackendLauncher({
     projectRoot,
-    appHome: join(projectRoot, '.local-data'),
+    appHome,
     providerProfile,
     secretEnvironmentName,
-    environmentFile: join(projectRoot, '.env')
+    environmentFile: join(projectRoot, '.env'),
+    browserBridge
   })
 }
 
@@ -353,10 +380,39 @@ app.whenReady().then(async () => {
   visibleBrowser = new VisibleBrowser({
     session: session.fromPath(join(app.getPath('userData'), 'browser-profile')),
     createView: (options) => new WebContentsView(options),
-    onTabState: broadcastBrowserTabState
+    onTabState: noteBrowserTabState
   })
 
-  backendLauncher = createDevelopmentBackendLauncher()
+  browserSessionStore = new BrowserSessionStore(join(desktopAppHome(), BROWSER_SESSION_FILE_NAME))
+  try {
+    await browserSessionStore.restore(visibleBrowser)
+  } catch {
+    await browserSessionStore.ensureReady(visibleBrowser)
+  }
+
+  browserPageBridge = new BrowserPageBridge({
+    readCurrentPage: (tabId) => {
+      if (visibleBrowser === undefined) {
+        throw new Error('Browser page is not available.')
+      }
+      return visibleBrowser.readCurrentPage(tabId)
+    }
+  })
+
+  let bridgeInfo
+  try {
+    bridgeInfo = await browserPageBridge.start()
+  } catch (error) {
+    dialog.showErrorBox(
+      'asAgent browser bridge unavailable',
+      error instanceof Error ? error.message : 'Browser page bridge startup failed.'
+    )
+    await browserPageBridge.stop()
+    app.quit()
+    return
+  }
+
+  backendLauncher = createDevelopmentBackendLauncher(bridgeInfo)
 
   try {
     await backendLauncher.start()
@@ -367,6 +423,7 @@ app.whenReady().then(async () => {
       error instanceof Error ? error.message : 'Backend startup failed.'
     )
     await backendLauncher.stop()
+    await browserPageBridge.stop()
     app.quit()
     return
   }
@@ -401,6 +458,8 @@ app.whenReady().then(async () => {
       parseBrowserViewBounds(bounds),
       parseBrowserTabId(tabId)
     )
+    browserSessionStore?.noteVisibleTab(parseBrowserTabId(tabId))
+    scheduleBrowserSessionSave()
   })
 
   ipcMain.handle('desktop:hide-browser', (event) => {
@@ -424,7 +483,12 @@ app.whenReady().then(async () => {
       throw new Error('Browser window is unavailable.')
     }
 
-    return visibleBrowser.navigate(parseBrowserTabId(tabId), typeof url === 'string' ? url : '')
+    return visibleBrowser
+      .navigate(parseBrowserTabId(tabId), typeof url === 'string' ? url : '')
+      .then((displayUrl) => {
+        scheduleBrowserSessionSave()
+        return displayUrl
+      })
   })
 
   ipcMain.handle('desktop:close-browser-tab', (event, tabId: unknown) => {
@@ -434,7 +498,10 @@ app.whenReady().then(async () => {
     }
 
     assertTrustedRenderer(frame.url)
-    visibleBrowser?.closeTab(parseBrowserTabId(tabId))
+    const parsedTabId = parseBrowserTabId(tabId)
+    visibleBrowser?.closeTab(parsedTabId)
+    browserSessionStore?.forgetTab(parsedTabId)
+    scheduleBrowserSessionSave()
   })
 
   ipcMain.handle('desktop:control-browser', (event, tabId: unknown, action: unknown) => {
@@ -448,9 +515,49 @@ app.whenReady().then(async () => {
       throw new Error('Browser window is unavailable.')
     }
 
-    return visibleBrowser.control(parseBrowserTabId(tabId), parseBrowserControlAction(action))
+    return visibleBrowser
+      .control(parseBrowserTabId(tabId), parseBrowserControlAction(action))
+      .then(() => {
+        scheduleBrowserSessionSave()
+      })
   })
 
+  ipcMain.handle('desktop:get-browser-session', async (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    if (visibleBrowser === undefined || browserSessionStore === undefined) {
+      throw new Error('Browser session is unavailable.')
+    }
+
+    return browserSessionStore.ensureReady(visibleBrowser)
+  })
+
+  ipcMain.handle(
+    'desktop:set-browser-tab-conversation',
+    (event, tabId: unknown, conversationId: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) {
+        throw new Error('Untrusted renderer IPC request.')
+      }
+
+      assertTrustedRenderer(frame.url)
+      if (browserSessionStore === undefined || visibleBrowser === undefined) {
+        throw new Error('Browser session is unavailable.')
+      }
+
+      const parsedTabId = parseBrowserTabId(tabId)
+      if (conversationId !== null && typeof conversationId !== 'string') {
+        throw new Error('Conversation ID is invalid.')
+      }
+
+      browserSessionStore.setConversation(parsedTabId, conversationId)
+      scheduleBrowserSessionSave()
+    }
+  )
   ipcMain.handle('desktop:open-external-link', (event, url: unknown) => {
     const frame = event.senderFrame
     if (frame === null) {
@@ -654,7 +761,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'desktop:submit-browser-message',
-    (event, conversationId: unknown, content: unknown) => {
+    (event, conversationId: unknown, content: unknown, tabId: unknown) => {
       const frame = event.senderFrame
       if (frame === null) {
         throw new Error('Untrusted renderer IPC request.')
@@ -670,8 +777,13 @@ app.whenReady().then(async () => {
         throw new Error('Message content is invalid.')
       }
 
+      const parsedTabId = parseBrowserTabId(tabId)
+      if (visibleBrowser === undefined || !visibleBrowser.isVisibleTab(parsedTabId)) {
+        throw new Error('Browser page is not visible.')
+      }
+
       return getReadyBackendLauncher()
-        .submitBrowserMessage(conversationId, content)
+        .submitBrowserMessage(conversationId, content, parsedTabId)
         .then((submitted) => {
           watchRun(event.sender, conversationId, submitted)
           return submitted
@@ -863,10 +975,25 @@ app.on('before-quit', (event) => {
     stopRunWatcher(runId)
   }
 
-  visibleBrowser?.dispose()
+  const browser = visibleBrowser
+  const sessionStore = browserSessionStore
   visibleBrowser = undefined
+  browserSessionStore = undefined
 
-  void (backendLauncher?.stop() ?? Promise.resolve()).finally(() => {
+  void (async () => {
+    if (sessionStore !== undefined && browser !== undefined) {
+      try {
+        await sessionStore.flush(browser)
+      } catch {
+        // Best-effort persistence before teardown.
+      }
+    }
+
+    browser?.dispose()
+
+    await (browserPageBridge?.stop() ?? Promise.resolve())
+    await (backendLauncher?.stop() ?? Promise.resolve())
+  })().finally(() => {
     app.quit()
   })
 })

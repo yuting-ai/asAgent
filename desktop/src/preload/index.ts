@@ -40,6 +40,18 @@ type RunStreamError = {
   message: string
 }
 
+type BrowserSessionTab = {
+  tabId: string
+  url: string
+  conversationId: string | null
+}
+
+type BrowserSessionSnapshot = {
+  version: 1
+  visibleTabId: string
+  tabs: BrowserSessionTab[]
+}
+
 type ToolApproval = {
   approval_id: string
   run_id: string
@@ -109,6 +121,10 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:close-browser-tab', tabId),
   controlBrowser: (tabId: string, action: 'back' | 'forward' | 'reload' | 'home'): Promise<void> =>
     ipcRenderer.invoke('desktop:control-browser', tabId, action),
+  getBrowserSession: (): Promise<BrowserSessionSnapshot> =>
+    ipcRenderer.invoke('desktop:get-browser-session'),
+  setBrowserTabConversation: (tabId: string, conversationId: string | null): Promise<void> =>
+    ipcRenderer.invoke('desktop:set-browser-tab-conversation', tabId, conversationId),
   openExternalLink: (url: string): Promise<void> =>
     ipcRenderer.invoke('desktop:open-external-link', url),
   copyText: (content: string): Promise<void> => ipcRenderer.invoke('desktop:copy-text', content),
@@ -137,8 +153,12 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:create-browser-conversation'),
   listBrowserConversationMessages: (conversationId: string): Promise<ConversationMessage[]> =>
     ipcRenderer.invoke('desktop:list-browser-conversation-messages', conversationId),
-  submitBrowserMessage: (conversationId: string, content: string): Promise<SubmittedMessage> =>
-    ipcRenderer.invoke('desktop:submit-browser-message', conversationId, content),
+  submitBrowserMessage: (
+    conversationId: string,
+    content: string,
+    tabId: string
+  ): Promise<SubmittedMessage> =>
+    ipcRenderer.invoke('desktop:submit-browser-message', conversationId, content, tabId),
   cancelRun: (runId: string): Promise<void> => ipcRenderer.invoke('desktop:cancel-run', runId),
   decideToolApproval: (
     approvalId: string,

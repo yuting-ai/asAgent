@@ -16,6 +16,21 @@ export type BrowserTabState = {
   canGoForward: boolean
 }
 
+export type BrowserPageContent = {
+  title: string
+  url: string
+  text: string
+}
+
+export const BROWSER_PAGE_TITLE_LIMIT = 512
+export const BROWSER_PAGE_TEXT_LIMIT = 32 * 1024
+
+const BROWSER_PAGE_EXTRACT_SCRIPT = `(() => {
+  const title = String(document.title || '')
+  const text = String(document.body && document.body.innerText ? document.body.innerText : '')
+  return { title, text }
+})()`
+
 export type BrowserViewBounds = {
   x: number
   y: number
@@ -41,6 +56,7 @@ export type BrowserPageView = {
     goBack(): void
     goForward(): void
     reload(): void
+    executeJavaScript(code: string): Promise<unknown>
     setWindowOpenHandler(handler: (details?: { url?: string }) => { action: 'deny' }): void
     on(
       event:
@@ -136,7 +152,7 @@ function isBlankBrowserUrl(url: string): boolean {
   return url === '' || url === BROWSER_HOME_URL
 }
 
-function browserDisplayUrl(url: string): string {
+export function browserDisplayUrl(url: string): string {
   if (isBlankBrowserUrl(url)) {
     return ''
   }
@@ -149,6 +165,10 @@ function browserDisplayUrl(url: string): string {
   } catch {
     return ''
   }
+}
+
+function truncateBrowserText(value: string, limit: number): string {
+  return value.length <= limit ? value : value.slice(0, limit)
 }
 
 async function loadTabUrl(view: BrowserPageView, url: string): Promise<void> {
@@ -291,6 +311,98 @@ export class VisibleBrowser {
 
     view.webContents.close()
     this.tabs.delete(closedTabId)
+  }
+
+  isVisibleTab(tabId: string): boolean {
+    if (this.disposed) {
+      return false
+    }
+
+    return this.visibleTabId === parseBrowserTabId(tabId)
+  }
+
+  async readCurrentPage(tabId: string): Promise<BrowserPageContent> {
+    this.assertNotDisposed()
+    const id = parseBrowserTabId(tabId)
+    if (this.visibleTabId !== id) {
+      throw new Error('Browser page is not visible.')
+    }
+
+    const view = this.tabs.get(id)
+    if (view === undefined) {
+      throw new Error('Browser page is not available.')
+    }
+
+    let extracted: unknown
+    try {
+      extracted = await view.webContents.executeJavaScript(BROWSER_PAGE_EXTRACT_SCRIPT)
+    } catch {
+      throw new Error('Browser page could not be read.')
+    }
+
+    if (typeof extracted !== 'object' || extracted === null || Array.isArray(extracted)) {
+      throw new Error('Browser page could not be read.')
+    }
+
+    const record = extracted as Record<string, unknown>
+    if (typeof record.title !== 'string' || typeof record.text !== 'string') {
+      throw new Error('Browser page could not be read.')
+    }
+
+    return {
+      title: truncateBrowserText(record.title, BROWSER_PAGE_TITLE_LIMIT),
+      url: browserDisplayUrl(view.webContents.getURL()),
+      text: truncateBrowserText(record.text, BROWSER_PAGE_TEXT_LIMIT)
+    }
+  }
+
+  getVisibleTabId(): string | undefined {
+    return this.visibleTabId
+  }
+
+  listPersistedTabs(): Array<{ tabId: string; url: string }> {
+    this.assertNotDisposed()
+    return [...this.tabs.entries()].map(([tabId, view]) => ({
+      tabId,
+      url: browserDisplayUrl(view.webContents.getURL())
+    }))
+  }
+
+  async restorePersistedTabs(
+    tabs: ReadonlyArray<{ tabId: string; url: string }>,
+    visibleTabId: string
+  ): Promise<void> {
+    this.assertNotDisposed()
+    const limited = tabs.slice(0, MAX_BROWSER_TABS)
+    if (limited.length === 0) {
+      const fallbackId = parseBrowserTabId(visibleTabId)
+      this.ensureView(fallbackId)
+      this.visibleTabId = fallbackId
+      return
+    }
+
+    for (const tab of limited) {
+      const tabId = parseBrowserTabId(tab.tabId)
+      const view = this.ensureView(tabId)
+      const url = tab.url.trim()
+      if (url !== '') {
+        try {
+          await loadTabUrl(view, parseBrowserWebUrl(url))
+        } catch {
+          // Keep the restored tab shell even if the page fails to load.
+        }
+      }
+      this.publishTabState(tabId, view)
+    }
+
+    try {
+      this.visibleTabId = parseBrowserTabId(visibleTabId)
+      if (!this.tabs.has(this.visibleTabId)) {
+        this.visibleTabId = limited[0]!.tabId
+      }
+    } catch {
+      this.visibleTabId = limited[0]!.tabId
+    }
   }
 
   dispose(): void {

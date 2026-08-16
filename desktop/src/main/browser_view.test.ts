@@ -23,6 +23,7 @@ type FakeWebContents = BrowserPageView['webContents'] & {
   goBack: ReturnType<typeof vi.fn>
   goForward: ReturnType<typeof vi.fn>
   reload: ReturnType<typeof vi.fn>
+  executeJavaScript: ReturnType<typeof vi.fn>
   setWindowOpenHandler: ReturnType<typeof vi.fn>
   on: ReturnType<typeof vi.fn>
 }
@@ -45,6 +46,7 @@ function createFakeView(options: WebContentsViewConstructorOptions): FakePageVie
     goBack: vi.fn(),
     goForward: vi.fn(),
     reload: vi.fn(),
+    executeJavaScript: vi.fn(async () => ({ title: '', text: '' })),
     setWindowOpenHandler: vi.fn(),
     on: vi.fn((event: string, listener: (event: BrowserNavigationEvent, url?: string) => void) => {
       listeners.set(event, listener)
@@ -490,5 +492,60 @@ describe('VisibleBrowser window.open', () => {
     expect(openHandler({ url: 'https://b.example/xx' })).toEqual({ action: 'deny' })
     expect(createView).toHaveBeenCalledTimes(MAX_BROWSER_TABS)
     expect(current.webContents.loadURL).toHaveBeenCalledWith('https://b.example/xx')
+  })
+
+  it('reads only the currently visible tab and scrubs credentials from the URL', async () => {
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://user:secret@example.com/path')
+    view.webContents.executeJavaScript.mockResolvedValue({
+      title: 'Example Domain',
+      text: 'Hello page'
+    })
+
+    await expect(browser.readCurrentPage('tab-1')).resolves.toEqual({
+      title: 'Example Domain',
+      url: 'https://example.com/path',
+      text: 'Hello page'
+    })
+    await expect(browser.readCurrentPage('tab-missing')).rejects.toThrow('not visible')
+  })
+
+  it('rejects reads after the tab is no longer visible', async () => {
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    browser.hide()
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+
+    await expect(browser.readCurrentPage('tab-1')).rejects.toThrow('not visible')
+    expect(view.webContents.executeJavaScript).not.toHaveBeenCalled()
+  })
+
+  it('restores persisted tabs and lists scrubbed urls', async () => {
+    const { browser, createView } = createBrowser()
+    const first = createFakeView({} as WebContentsViewConstructorOptions)
+    const second = createFakeView({} as WebContentsViewConstructorOptions)
+    createView.mockReturnValueOnce(first).mockReturnValueOnce(second)
+    first.webContents.getURL.mockReturnValue('https://user:secret@one.example/a')
+    second.webContents.getURL.mockReturnValue('https://two.example/b')
+
+    await browser.restorePersistedTabs(
+      [
+        { tabId: 'tab-1', url: 'https://one.example/a' },
+        { tabId: 'tab-2', url: 'https://two.example/b' }
+      ],
+      'tab-2'
+    )
+
+    expect(browser.getVisibleTabId()).toBe('tab-2')
+    expect(first.webContents.loadURL).toHaveBeenCalledWith('https://one.example/a')
+    expect(second.webContents.loadURL).toHaveBeenCalledWith('https://two.example/b')
+    expect(browser.listPersistedTabs()).toEqual([
+      { tabId: 'tab-1', url: 'https://one.example/a' },
+      { tabId: 'tab-2', url: 'https://two.example/b' }
+    ])
   })
 })

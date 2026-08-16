@@ -125,6 +125,10 @@ type BackendLauncherOptions = {
   providerProfile?: string
   secretEnvironmentName?: string
   environmentFile?: string
+  browserBridge?: {
+    baseUrl: string
+    token: string
+  }
 }
 
 function parseReadyRecord(line: string): ServerReady | null {
@@ -230,6 +234,12 @@ export class BackendLauncher {
   private readonly providerProfile: string | undefined
   private readonly secretEnvironmentName: string | undefined
   private readonly environmentFile: string | undefined
+  private readonly browserBridge:
+    | {
+        baseUrl: string
+        token: string
+      }
+    | undefined
   private child: ChildProcess | undefined
   private ready: ServerReady | undefined
   private token: string | undefined
@@ -246,6 +256,7 @@ export class BackendLauncher {
     this.providerProfile = options.providerProfile
     this.secretEnvironmentName = options.secretEnvironmentName
     this.environmentFile = options.environmentFile
+    this.browserBridge = options.browserBridge
 
     const realProviderConfigured = this.providerProfile !== undefined
 
@@ -335,15 +346,22 @@ export class BackendLauncher {
     )
   }
 
-  async submitBrowserMessage(conversationId: string, content: string): Promise<SubmittedMessage> {
+  async submitBrowserMessage(
+    conversationId: string,
+    content: string,
+    tabId: string
+  ): Promise<SubmittedMessage> {
     if (!content.trim()) {
       throw new Error('Message content is invalid.')
+    }
+    if (!tabId.trim()) {
+      throw new Error('Browser tab is invalid.')
     }
 
     return this.requestJson<SubmittedMessage>(
       `/api/v1/browser/conversations/${encodeURIComponent(conversationId)}/messages`,
       'POST',
-      { content }
+      { content, tab_id: tabId }
     )
   }
 
@@ -549,7 +567,14 @@ export class BackendLauncher {
     this.child = child
     this.token = token
     child.stderr?.resume()
-    child.stdin.end(`${JSON.stringify({ token })}\n`)
+    const bootstrap: Record<string, unknown> = { token }
+    if (this.browserBridge !== undefined) {
+      bootstrap['browser_bridge'] = {
+        base_url: this.browserBridge.baseUrl,
+        token: this.browserBridge.token
+      }
+    }
+    child.stdin.end(`${JSON.stringify(bootstrap)}\n`)
 
     try {
       const ready = await this.waitForReady(child)

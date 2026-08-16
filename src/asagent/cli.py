@@ -16,8 +16,9 @@ from asagent.agent.persistent_runtime import PersistentAgentRuntime
 from asagent.agent.run_dispatcher import InProcessRunDispatcher
 from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
-from asagent.api.bootstrap import read_local_api_token
+from asagent.api.bootstrap import read_local_api_bootstrap
 from asagent.api.server import READY_PREFIX, LocalApiServer
+from asagent.bootstrap.browser_page_bridge import BrowserPageBridgeClient
 from asagent.bootstrap.credential_secret_provider import CredentialStoreSecretProvider
 from asagent.bootstrap.environment_secret_provider import (
     EnvironmentSecretProvider,
@@ -89,6 +90,8 @@ from asagent.storage.sqlite.run_repository import SqliteRunRepository
 from asagent.storage.sqlite.run_starter import SqliteRunStarter
 from asagent.storage.tool_call_recorder import RepositoryToolCallRecorder
 from asagent.tools.approval import PendingToolApprovalPolicy, ToolApprovalPolicy
+from asagent.tools.browser_read_current_page import BrowserReadCurrentPageTool
+from asagent.tools.browser_run_bindings import BrowserRunBindings
 from asagent.tools.builtin.calculator import CalculatorTool
 from asagent.tools.builtin.current_time import CurrentTimeTool
 from asagent.tools.builtin.echo import EchoTool
@@ -111,6 +114,7 @@ from asagent.workspace.settings import ConversationWorkspaceSettings
 _BUILTIN_TOOL_PERMISSIONS = frozenset({"tool.execute"})
 _FILESYSTEM_READ_PERMISSIONS = frozenset({"filesystem.read"})
 _FILESYSTEM_WRITE_PERMISSIONS = frozenset({"filesystem.write"})
+_BROWSER_READ_PERMISSIONS = frozenset({"browser.read"})
 _MCP_SUBPROCESS_ENVIRONMENT_NAMES = ("PATH",)
 
 
@@ -231,6 +235,45 @@ async def _registry_for_conversation(
     return registry
 
 
+async def _register_browser_read_tool(
+    *,
+    registry: ToolRegistry,
+    conversations: ConversationRepository,
+    conversation_id: ConversationId,
+    run_id: RunId,
+    browser_run_bindings: BrowserRunBindings | None,
+    browser_page_client: BrowserPageBridgeClient | None,
+) -> frozenset[str]:
+    """Register the page-read tool only for a bound Browser Run."""
+
+    tab_id = None if browser_run_bindings is None else browser_run_bindings.take(run_id)
+    if tab_id is None or browser_page_client is None or browser_run_bindings is None:
+        return frozenset()
+
+    conversation = await conversations.get(conversation_id)
+    if conversation is None or conversation.kind != "browser":
+        return frozenset()
+
+    registry.register(
+        BrowserReadCurrentPageTool(
+            client=browser_page_client,
+            tab_id=tab_id,
+        ),
+    )
+    return _BROWSER_READ_PERMISSIONS
+
+
+def _filesystem_permissions(
+    *,
+    file_changes: SqliteFileChangeRepository | None,
+    file_change_snapshots: FileChangeSnapshotStore | None,
+) -> frozenset[str]:
+    permissions = _FILESYSTEM_READ_PERMISSIONS
+    if file_changes is not None and file_change_snapshots is not None:
+        permissions = permissions | _FILESYSTEM_WRITE_PERMISSIONS
+    return permissions
+
+
 def _mcp_subprocess_environment(
     environment: Mapping[str, str],
 ) -> dict[str, str]:
@@ -273,6 +316,7 @@ def build_agent_loop(
     approval_policy: ToolApprovalPolicy | None = None,
     registry: ToolRegistry | None = None,
     granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
+    max_calls_per_tool_input: int | None = None,
 ) -> AgentLoop:
     tool_registry = registry if registry is not None else _register_builtin_tools()
     snapshot = ToolSnapshot.from_definitions(
@@ -287,6 +331,7 @@ def build_agent_loop(
             approval_policy=approval_policy,
         ),
         tool_snapshot=snapshot,
+        max_calls_per_tool_input=max_calls_per_tool_input,
         event_publisher=event_publisher,
         event_id_factory=new_event_id,
         clock=now,
@@ -305,6 +350,7 @@ def build_development_agent_loop(
     approval_policy: ToolApprovalPolicy | None = None,
     registry: ToolRegistry | None = None,
     granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
+    max_calls_per_tool_input: int | None = None,
 ) -> AgentLoop:
     tool_registry = registry if registry is not None else _register_builtin_tools()
     snapshot = ToolSnapshot.from_definitions(
@@ -319,6 +365,7 @@ def build_development_agent_loop(
             approval_policy=approval_policy,
         ),
         tool_snapshot=snapshot,
+        max_calls_per_tool_input=max_calls_per_tool_input,
         event_publisher=event_publisher,
         event_id_factory=new_event_id,
         clock=now,
@@ -464,6 +511,8 @@ def build_persistent_agent_runtime(
     workspace_settings: ConversationWorkspaceSettings | None = None,
     file_changes: SqliteFileChangeRepository | None = None,
     file_change_snapshots: FileChangeSnapshotStore | None = None,
+    browser_run_bindings: BrowserRunBindings | None = None,
+    browser_page_client: BrowserPageBridgeClient | None = None,
 ) -> PersistentAgentRuntime:
     base_registry = registry if registry is not None else _register_builtin_tools()
 
@@ -473,29 +522,37 @@ def build_persistent_agent_runtime(
             run_id: RunId,
             conversation_id: ConversationId,
         ) -> AgentLoop:
+            scoped_registry = await _registry_for_conversation(
+                base_registry=base_registry,
+                workspace_settings=workspace_settings,
+                run_id=run_id,
+                conversation_id=conversation_id,
+                file_changes=file_changes,
+                file_change_snapshots=file_change_snapshots,
+            )
+            browser_permissions = await _register_browser_read_tool(
+                registry=scoped_registry,
+                conversations=conversations,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                browser_run_bindings=browser_run_bindings,
+                browser_page_client=browser_page_client,
+            )
             return build_agent_loop(
                 model=model,
                 event_publisher=RepositoryEventPublisher(runs),
                 tool_call_recorder=RepositoryToolCallRecorder(runs),
                 approval_policy=approval_policy,
-                registry=await _registry_for_conversation(
-                    base_registry=base_registry,
-                    workspace_settings=workspace_settings,
-                    run_id=run_id,
-                    conversation_id=conversation_id,
-                    file_changes=file_changes,
-                    file_change_snapshots=file_change_snapshots,
-                ),
+                registry=scoped_registry,
                 granted_permissions=(
                     granted_permissions
-                    | _FILESYSTEM_READ_PERMISSIONS
-                    | (
-                        _FILESYSTEM_WRITE_PERMISSIONS
-                        if file_changes is not None
-                        and file_change_snapshots is not None
-                        else frozenset()
+                    | _filesystem_permissions(
+                        file_changes=file_changes,
+                        file_change_snapshots=file_change_snapshots,
                     )
+                    | browser_permissions
                 ),
+                max_calls_per_tool_input=(1 if browser_permissions else None),
             )
 
         return PersistentAgentRuntime(
@@ -549,6 +606,8 @@ def build_persistent_development_runtime(
     workspace_settings: ConversationWorkspaceSettings | None = None,
     file_changes: SqliteFileChangeRepository | None = None,
     file_change_snapshots: FileChangeSnapshotStore | None = None,
+    browser_run_bindings: BrowserRunBindings | None = None,
+    browser_page_client: BrowserPageBridgeClient | None = None,
 ) -> PersistentAgentRuntime:
     base_registry = registry if registry is not None else _register_builtin_tools()
 
@@ -566,6 +625,14 @@ def build_persistent_development_runtime(
                 file_changes=file_changes,
                 file_change_snapshots=file_change_snapshots,
             )
+            browser_permissions = await _register_browser_read_tool(
+                registry=scoped_registry,
+                conversations=conversations,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                browser_run_bindings=browser_run_bindings,
+                browser_page_client=browser_page_client,
+            )
             return build_development_agent_loop(
                 event_publisher=RepositoryEventPublisher(runs),
                 tool_call_recorder=RepositoryToolCallRecorder(runs),
@@ -573,14 +640,13 @@ def build_persistent_development_runtime(
                 registry=scoped_registry,
                 granted_permissions=(
                     granted_permissions
-                    | _FILESYSTEM_READ_PERMISSIONS
-                    | (
-                        _FILESYSTEM_WRITE_PERMISSIONS
-                        if file_changes is not None
-                        and file_change_snapshots is not None
-                        else frozenset()
+                    | _filesystem_permissions(
+                        file_changes=file_changes,
+                        file_change_snapshots=file_change_snapshots,
                     )
+                    | browser_permissions
                 ),
+                max_calls_per_tool_input=(1 if browser_permissions else None),
             )
 
         return PersistentAgentRuntime(
@@ -753,7 +819,8 @@ async def _run_main(args: argparse.Namespace) -> None:
         if not args.bootstrap_stdin:
             raise ValueError("serve requires --bootstrap-stdin")
 
-        access_token = read_local_api_token(sys.stdin.readline)
+        bootstrap = read_local_api_bootstrap(sys.stdin.readline)
+        access_token = bootstrap.token
         paths = AppPaths.from_root(args.app_home)
         paths.workspace_dir.mkdir(parents=True, exist_ok=True)
         database_path = paths.data_dir / "asagent.sqlite3"
@@ -800,10 +867,18 @@ async def _run_main(args: argparse.Namespace) -> None:
         )
 
         http_client: httpx.AsyncClient | None = None
+        browser_page_client: BrowserPageBridgeClient | None = None
+        browser_run_bindings = BrowserRunBindings()
         mcp_manager: McpServerManager | None = None
         dispatcher: InProcessRunDispatcher | None = None
 
         try:
+            if bootstrap.browser_bridge is not None:
+                browser_page_client = BrowserPageBridgeClient(
+                    base_url=bootstrap.browser_bridge.base_url,
+                    token=bootstrap.browser_bridge.token,
+                )
+
             (
                 registry,
                 mcp_manager,
@@ -831,6 +906,8 @@ async def _run_main(args: argparse.Namespace) -> None:
                     workspace_settings=workspace_settings,
                     file_changes=file_changes,
                     file_change_snapshots=file_change_snapshots,
+                    browser_run_bindings=browser_run_bindings,
+                    browser_page_client=browser_page_client,
                 )
                 model_name = "development-tools"
             else:
@@ -877,6 +954,8 @@ async def _run_main(args: argparse.Namespace) -> None:
                     workspace_settings=workspace_settings,
                     file_changes=file_changes,
                     file_change_snapshots=file_change_snapshots,
+                    browser_run_bindings=browser_run_bindings,
+                    browser_page_client=browser_page_client,
                 )
                 model_name = profile.model
 
@@ -930,6 +1009,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     workspace_settings=workspace_settings,
                     file_changes=file_changes,
                     revert_file_change=revert_file_change,
+                    browser_run_bindings=browser_run_bindings,
                 ),
                 host=args.host,
                 port=args.port,

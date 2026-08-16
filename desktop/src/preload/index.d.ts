@@ -96,6 +96,18 @@ interface WorkspaceSettingsInput {
   additionalFiles: string[]
 }
 
+interface BrowserSessionTab {
+  tabId: string
+  url: string
+  conversationId: string | null
+}
+
+interface BrowserSessionSnapshot {
+  version: 1
+  visibleTabId: string
+  tabs: BrowserSessionTab[]
+}
+
 interface DesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>
   showBrowser(
@@ -106,6 +118,8 @@ interface DesktopBridge {
   navigateBrowser(tabId: string, url: string): Promise<string>
   closeBrowserTab(tabId: string): Promise<void>
   controlBrowser(tabId: string, action: 'back' | 'forward' | 'reload' | 'home'): Promise<void>
+  getBrowserSession(): Promise<BrowserSessionSnapshot>
+  setBrowserTabConversation(tabId: string, conversationId: string | null): Promise<void>
   openExternalLink(url: string): Promise<void>
   copyText(content: string): Promise<void>
   getBackendStatus(): Promise<{ status: 'ready' | 'unavailable' }>
@@ -121,7 +135,11 @@ interface DesktopBridge {
   listBrowserConversations(): Promise<ConversationSummary[]>
   createBrowserConversation(): Promise<ConversationSummary>
   listBrowserConversationMessages(conversationId: string): Promise<ConversationMessage[]>
-  submitBrowserMessage(conversationId: string, content: string): Promise<SubmittedMessage>
+  submitBrowserMessage(
+    conversationId: string,
+    content: string,
+    tabId: string
+  ): Promise<SubmittedMessage>
   cancelRun(runId: string): Promise<void>
   decideToolApproval(
     approvalId: string,

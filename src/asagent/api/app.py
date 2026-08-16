@@ -49,6 +49,7 @@ from asagent.tools.approval import (
     ToolApprovalDecision,
     ToolApprovalRequest,
 )
+from asagent.tools.browser_run_bindings import BrowserRunBindings
 from asagent.workspace.settings import (
     ConversationWorkspaceSettings,
     WorkspaceSettingsStatus,
@@ -134,6 +135,32 @@ class CreateMessageRequest(BaseModel):
         if not value.strip():
             raise ValueError("content must not be blank")
         return value
+
+
+class CreateBrowserMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str
+    tab_id: str
+
+    @field_validator("content")
+    @classmethod
+    def content_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("content must not be blank")
+        return value
+
+    @field_validator("tab_id")
+    @classmethod
+    def tab_id_must_be_valid(cls, value: str) -> str:
+        tab_id = value.strip()
+        if not tab_id:
+            raise ValueError("tab_id must not be blank")
+        if len(tab_id) > 80 or any(
+            not character.isalnum() and character not in "-_" for character in tab_id
+        ):
+            raise ValueError("tab_id is invalid")
+        return tab_id
 
 
 class RunResponse(BaseModel):
@@ -370,6 +397,7 @@ def create_app(
     revert_file_change: (
         Callable[[FileChangeId, Path], Awaitable[FileChange]] | None
     ) = None,
+    browser_run_bindings: BrowserRunBindings | None = None,
     conversation_id_factory: Callable[[], ConversationId] | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
@@ -762,12 +790,35 @@ def create_app(
     )
     async def submit_browser_message(
         conversation_id: str,
-        request: CreateMessageRequest,
+        request: CreateBrowserMessageRequest,
     ) -> SubmitMessageResponse:
-        return await submit_message_of_kind(
-            conversation_id,
-            request,
-            kind="browser",
+        await get_local_conversation(ConversationId(conversation_id), kind="browser")
+        try:
+            submission = await run_submission.submit(
+                conversation_id=ConversationId(conversation_id),
+                content=request.content,
+                user_id=_LOCAL_USER_ID,
+            )
+        except (
+            UnknownConversationError,
+            ConversationAccessDeniedError,
+        ) as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="conversation not found",
+            ) from error
+
+        if browser_run_bindings is not None:
+            browser_run_bindings.bind(submission.run.run_id, request.tab_id)
+
+        dispatch_submitted_run(submission)
+
+        return SubmitMessageResponse(
+            message=MessageResponse.from_message(submission.user_message),
+            run=RunResponse.from_run(submission.run),
+            conversation=ConversationResponse.from_conversation(
+                submission.conversation,
+            ),
         )
 
     @app.get(

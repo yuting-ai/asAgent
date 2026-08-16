@@ -511,8 +511,57 @@ async def test_loop_appends_paired_tool_error_when_execution_times_out() -> None
     assert tool.calls == 1
     assert provider.requests[1].messages[-1] == ModelMessage(
         role=ModelMessageRole.TOOL,
-        content="Error: tool execution timed out.",
+        content=(
+            "Error: tool execution timed out. "
+            "Do not retry the same tool call with the same arguments."
+        ),
         tool_call_id="call_123",
+    )
+
+
+@pytest.mark.asyncio
+async def test_loop_blocks_the_second_identical_call_when_limit_is_one() -> None:
+    tool_call = ModelToolCall(
+        call_id="call_1",
+        name="builtin_echo",
+        arguments={"text": "hello"},
+    )
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(text=None, tool_calls=(tool_call,)),
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="call_2",
+                        name="builtin_echo",
+                        arguments={"text": "hello"},
+                    ),
+                ),
+            ),
+            ModelResponse(text="I will stop retrying.", tool_calls=()),
+        ),
+    )
+    tool = CountingEchoTool()
+
+    result = await _loop(
+        provider,
+        tool,
+        max_steps=4,
+        max_calls_per_tool_input=1,
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.steps_used == 3
+    assert tool.calls == 1
+    assert provider.requests[2].messages[-1] == ModelMessage(
+        role=ModelMessageRole.TOOL,
+        content="Error: repeated tool call limit reached.",
+        tool_call_id="call_2",
     )
 
 

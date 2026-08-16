@@ -3,10 +3,10 @@
 ## 1. 当前状态
 
 - 项目阶段：阶段 7 进行中；阶段 0–6 的 Core、Agent Loop、SQLite 持久化、Context Builder 基础、受控 Workspace Tool 边界与 Local API/SSE 已完成，当前继续 Electron 最小集成。
-- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、按 `kind` 隔离的 Chat/Browser Conversation 列表/创建、可见 Message 查询/提交、按 Run ID 查询状态、协作取消，以及基于持久化 RunEvent 的认证 SSE 回放/实时观察。首条消息提交会在 RunStarter 同事务中生成会话标题。桌面 Browser 侧栏已接入独立的真实 Browser Conversation，不与 Chat 列表混用。
+- 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、按 `kind` 隔离的 Chat/Browser Conversation 列表/创建、可见 Message 查询/提交、按 Run ID 查询状态、协作取消，以及基于持久化 RunEvent 的认证 SSE 回放/实时观察。首条消息提交会在 RunStarter 同事务中生成会话标题。桌面 Browser 侧栏已接入独立的真实 Browser Conversation；仅 Browser Run 可在有标签绑定且 Main 页面桥可用时注册只读 `browser.read_current_page`。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
 - 当前日期：2026-08-16
-- 当前目标：Browser Conversation 真实对话与最近历史已闭环；下一项是仅为 Browser Run 注册只读 `browser.read_current_page`。
+- 当前目标：Browser 只读当前可见页已闭环；下一项可按 DEC-079 再单独加入点击/输入等更高风险 Browser Tool。
 
 ## 2. 已完成
 
@@ -3775,3 +3775,64 @@
 ### 下一步
 
 - 仅为 Browser Run 注册只读 `browser.read_current_page`：从当前可见 `WebContentsView` 返回限长文本。本次仍不开始点击、输入或其他浏览器操作 Tool。
+
+## 2026-08-16 browser.read_current_page
+
+### 完成
+
+- Browser Message API 接受瞬时 `tab_id`；Main 验证其为当前可见标签后提交。Python 在 Dispatcher 前把 `run_id → tab_id` 写入进程内 `BrowserRunBindings`，构建 Tool Registry 时 `take()` 消费，不写入 SQLite。
+- Electron Main 新增回环 `BrowserPageBridge`（Bearer Token + `POST /read-current-page`），经 bootstrap 把 `browser_bridge` 交给 Python；Token 不进 ready 输出、Renderer 或日志。
+- `VisibleBrowser.readCurrentPage` 用固定 `executeJavaScript` 读取 title/`innerText`，URL 经既有脱敏，标题/正文分别限 512 字符与 32 KiB。
+- 仅 `kind=browser` 且有绑定与 bridge 的 Run 注册 `browser.read_current_page` 并授予 `browser.read`；Chat Run 无此 Tool。无 bridge 时 Browser 对话仍可普通进行。
+
+### 验证
+
+- Python：`test_api_bootstrap.py`、`test_browser_read_current_page.py`、`test_api_conversations.py`、`test_persistent_runtime.py` 共 47 passed；`ruff` 与 `mypy` 通过。
+- Desktop：`npm run format`、`typecheck`、`lint`、`test`（84 passed）、`build` 通过。
+
+### 决策变化
+
+- 落实 DEC-079 的只读页面 Tool；点击/输入等仍未实现。
+
+### 下一步
+
+- 按需单独加入更高风险的 Browser Tool（点击、输入、导航等），各自带权限、范围与审批。
+
+## 2026-08-16 Browser 读页重复调用限制
+
+### 完成
+
+- 注册 `browser.read_current_page` 的 Browser Run 将 `max_calls_per_tool_input=1`，同一 `(tool_id, 参数)` 只执行一次，避免超时后二次空转。
+- 工具超时 TOOL 文案增加 “Do not retry the same tool call with the same arguments.”；读页 Tool description 明确失败/超时后不要在同一 Run 内再次调用。
+
+### 验证
+
+- `uv run pytest tests/unit/test_agent_loop.py tests/unit/test_browser_read_current_page.py -q`：29 passed；`ruff` 通过。
+- 手动：Browser 侧栏提问当前网页主题，约 14s 返回结果，不再出现约 25s 的二次超时空转。
+
+### 决策变化
+
+- 更新 DEC-032（Browser 读页 Run 启用上限 1）、DEC-036（超时文案）。
+
+### 下一步
+
+- 按需单独排查读页桥接/ `executeJavaScript` 超时根因；更高风险 Browser Tool 仍各自独立加入。
+
+## 2026-08-16 Browser 标签会话恢复
+
+### 完成
+
+- Electron Main 将打开的标签（稳定 `tabId` + 脱敏 URL）、`visibleTabId` 与 `tabId → conversationId` 绑定写入 appHome `browser-session.json`；debounce 保存，退出前 flush；启动时 `restorePersistedTabs` 并经 IPC 灌入 Renderer。
+- 恢复时用现有 Browser Conversation 列表过滤失效绑定；损坏/缺失文件回落到单个空白标签。标签壳不进 SQLite。
+
+### 验证
+
+- `desktop`：`npm run typecheck`、`npm run lint`、`npm test`：93 passed。
+
+### 决策变化
+
+- 更新 DEC-079、`01-architecture`、`03-desktop-and-docker`：桌面本地会话文件可跨重启，仍不把标签写入 SQLite。
+
+### 下一步
+
+- 手动验收：多标签 + 侧栏绑定 → 重启 → URL/可见/绑定恢复；删除对话后再重启 → 页在绑定空。

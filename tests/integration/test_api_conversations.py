@@ -21,6 +21,7 @@ from asagent.storage.sqlite.conversation_repository import (
 )
 from asagent.storage.sqlite.run_repository import SqliteRunRepository
 from asagent.storage.sqlite.run_starter import SqliteRunStarter
+from asagent.tools.browser_run_bindings import BrowserRunBindings
 
 _UNUSED_RUNS = cast(RunRepository, object())
 
@@ -935,7 +936,7 @@ async def test_chat_and_browser_conversation_routes_are_isolated(
             browser_writes_chat = await client.post(
                 "/api/v1/browser/conversations/conv-chat/messages",
                 headers=headers,
-                json={"content": "Hello from Browser."},
+                json={"content": "Hello from Browser.", "tab_id": "tab-1"},
             )
     finally:
         await repository.aclose()
@@ -1037,6 +1038,7 @@ async def test_submit_browser_message_creates_visible_message_and_title(
     conversations = SqliteConversationRepository(database_path)
     runs = SqliteRunRepository(database_path)
     starter = SqliteRunStarter(database_path)
+    bindings = BrowserRunBindings()
     app = create_app(
         access_token=LocalApiToken("test-token"),
         conversations=conversations,
@@ -1050,6 +1052,7 @@ async def test_submit_browser_message_creates_visible_message_and_title(
         ),
         dispatch_submitted_run=_discard_submission,
         cancel_run=_cancel_nothing,
+        browser_run_bindings=bindings,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -1064,7 +1067,15 @@ async def test_submit_browser_message_creates_visible_message_and_title(
             response = await client.post(
                 "/api/v1/browser/conversations/conv-browser/messages",
                 headers=headers,
-                json={"content": "What is on this page?"},
+                json={
+                    "content": "What is on this page?",
+                    "tab_id": "tab-visible",
+                },
+            )
+            missing_tab = await client.post(
+                "/api/v1/browser/conversations/conv-browser/messages",
+                headers=headers,
+                json={"content": "Missing tab."},
             )
             messages = await client.get(
                 "/api/v1/browser/conversations/conv-browser/messages",
@@ -1091,6 +1102,8 @@ async def test_submit_browser_message_creates_visible_message_and_title(
         "updated_at": "2026-08-11T12:00:00Z",
         "title": "What is on this page?",
     }
+    assert missing_tab.status_code == 422
+    assert bindings.take(RunId("run-browser")) == "tab-visible"
     assert messages.status_code == 200
     assert messages.json() == [
         {

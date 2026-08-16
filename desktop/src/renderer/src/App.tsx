@@ -147,9 +147,9 @@ function browserNavigationError(error: unknown): string {
   return text.includes('could not be opened') ? BROWSER_LOAD_ERROR : BROWSER_ADDRESS_ERROR
 }
 
-function createBrowserTab(): BrowserTab {
+function createBrowserTab(id?: string): BrowserTab {
   return {
-    id: crypto.randomUUID(),
+    id: id ?? crypto.randomUUID(),
     title: 'New Tab',
     address: '',
     canGoBack: false,
@@ -526,10 +526,9 @@ export default function App(): React.JSX.Element {
   const [pendingApproval, setPendingApproval] = useState<ToolApproval | null>(null)
   const [isDecidingApproval, setIsDecidingApproval] = useState(false)
   const [activeView, setActiveView] = useState<AppView>('chat')
-  const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>(() => [createBrowserTab()])
-  const [activeBrowserTabId, setActiveBrowserTabId] = useState(
-    () => browserTabs[0]?.id ?? createBrowserTab().id
-  )
+  const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([])
+  const [activeBrowserTabId, setActiveBrowserTabId] = useState('')
+  const [browserSessionReady, setBrowserSessionReady] = useState(false)
   const [browserError, setBrowserError] = useState<string | null>(null)
   const [browserConversations, setBrowserConversations] = useState<ConversationSummary[]>([])
   const [browserMessages, setBrowserMessages] = useState<ConversationMessage[]>([])
@@ -626,6 +625,7 @@ export default function App(): React.JSX.Element {
       setBrowserTabs([created])
       setActiveBrowserTabId(created.id)
       setBrowserError(null)
+      void window.desktop.setBrowserTabConversation(created.id, null).catch(() => undefined)
       return
     }
 
@@ -792,26 +792,61 @@ export default function App(): React.JSX.Element {
 
     async function loadInitialData(): Promise<void> {
       try {
-        const [info, status, items, browserItems] = await Promise.all([
+        const [info, status, items, browserItems, browserSession] = await Promise.all([
           window.desktop.getAppInfo(),
           window.desktop.getBackendStatus(),
           window.desktop.listConversations(),
-          window.desktop.listBrowserConversations()
+          window.desktop.listBrowserConversations(),
+          window.desktop.getBrowserSession()
         ])
 
         if (cancelled) {
           return
         }
 
+        const orderedBrowserItems = orderConversations(browserItems)
+        const knownBrowserConversationIds = new Set(
+          orderedBrowserItems.map((conversation) => conversation.conversation_id)
+        )
+        const sessionTabs =
+          browserSession.tabs.length > 0
+            ? browserSession.tabs
+            : [{ tabId: crypto.randomUUID(), url: '', conversationId: null }]
+        const visibleTabId = sessionTabs.some((tab) => tab.tabId === browserSession.visibleTabId)
+          ? browserSession.visibleTabId
+          : sessionTabs[0]!.tabId
+        const conversationByTabId: Record<string, string> = {}
+        for (const tab of sessionTabs) {
+          if (tab.conversationId !== null && knownBrowserConversationIds.has(tab.conversationId)) {
+            conversationByTabId[tab.tabId] = tab.conversationId
+          }
+        }
+
         setAppInfo(info)
         setBackendStatus(status.status)
         setConversations(orderConversations(items))
         setSelectedConversationId(items[0]?.conversation_id ?? null)
-        setBrowserConversations(orderConversations(browserItems))
+        setBrowserConversations(orderedBrowserItems)
+        setBrowserTabs(
+          sessionTabs.map((tab) => ({
+            id: tab.tabId,
+            title: browserTabTitle(tab.url),
+            address: tab.url,
+            canGoBack: false,
+            canGoForward: false
+          }))
+        )
+        setActiveBrowserTabId(visibleTabId)
+        setBrowserConversationByTabId(conversationByTabId)
+        setBrowserSessionReady(true)
       } catch {
         if (!cancelled) {
           setBackendStatus('unavailable')
           setErrorMessage('Conversation history could not be loaded.')
+          const fallback = createBrowserTab()
+          setBrowserTabs([fallback])
+          setActiveBrowserTabId(fallback.id)
+          setBrowserSessionReady(true)
         }
       }
     }
@@ -1108,6 +1143,10 @@ export default function App(): React.JSX.Element {
       return
     }
 
+    if (!browserSessionReady || activeBrowserTabId === '') {
+      return
+    }
+
     const surface = browserSurfaceRef.current
     if (surface === null) {
       return
@@ -1136,6 +1175,7 @@ export default function App(): React.JSX.Element {
   }, [
     activeView,
     activeBrowserTabId,
+    browserSessionReady,
     desktopLayout.browserAgentPanelOpen,
     desktopLayout.browserAgentWidth
   ])
@@ -1894,6 +1934,7 @@ export default function App(): React.JSX.Element {
     setBrowserConversationByTabId((current) =>
       current[tabId] === conversationId ? current : { ...current, [tabId]: conversationId }
     )
+    void window.desktop.setBrowserTabConversation(tabId, conversationId).catch(() => undefined)
     setBrowserRecentOpen(false)
   }
 
@@ -1938,7 +1979,7 @@ export default function App(): React.JSX.Element {
         bindBrowserConversationToActiveTab(conversationId)
       }
 
-      const submitted = await window.desktop.submitBrowserMessage(conversationId, content)
+      const submitted = await window.desktop.submitBrowserMessage(conversationId, content, tabId)
       if (selectedBrowserConversationIdRef.current === conversationId) {
         browserMessageLoadIdRef.current += 1
         setBrowserMessages((current) => [...current, submitted.message])

@@ -79,7 +79,9 @@ asAgent/
 
 Conversation 元数据现包含可空 `title`。创建 Conversation 的请求体仍严格为空对象；首次 `POST /api/v1/conversations/{conversation_id}/messages` 或 `POST /api/v1/browser/conversations/{conversation_id}/messages` 时，`RunSubmissionService` 将该用户文本规范化为空格分隔的单行，并生成至多 60 个字符的确定性标题（超出时以前 59 个字符加省略号表示）。已有标题不会被后续消息覆盖。更新后的 Conversation、首条 UserMessage 与 CREATED Run 由 `RunStarter` 在同一 SQLite 事务中提交，提交响应和列表响应均返回 `title`，Electron 侧栏立即以该响应更新显示。此标题不是模型生成摘要，也不是可编辑字段。
 
-Conversation 另有稳定类型 `kind`：`chat` 或 `browser`，默认 `chat`。SQLite `conversations` 表以 `NOT NULL DEFAULT 'chat'` 和 `CHECK (kind IN ('chat', 'browser'))` 保存该字段；迁移后的历史行都是 `chat`。`GET`/`POST /api/v1/conversations` 及其 messages、标题、删除和文件相关路由只处理 `kind=chat`；对称的 `/api/v1/browser/conversations` 四条固定路由只处理 `kind=browser`。跨类型访问统一 404。两类会话复用同一 Message、Run、SSE 与自动标题规则，不把 `tabId`、URL 或网页正文写入数据库或 API。Electron Main 为 Browser 提供四个具名 IPC；浏览器标签与 Browser Conversation 的绑定只存在于 Renderer 内存，关闭标签或重启后不恢复，但会话历史仍可从 SQLite 最近列表读取。
+Conversation 另有稳定类型 `kind`：`chat` 或 `browser`，默认 `chat`。SQLite `conversations` 表以 `NOT NULL DEFAULT 'chat'` 和 `CHECK (kind IN ('chat', 'browser'))` 保存该字段；迁移后的历史行都是 `chat`。`GET`/`POST /api/v1/conversations` 及其 messages、标题、删除和文件相关路由只处理 `kind=chat`；对称的 `/api/v1/browser/conversations` 四条固定路由只处理 `kind=browser`。跨类型访问统一 404。两类会话复用同一 Message、Run、SSE 与自动标题规则，不把 `tabId`、URL 或网页正文写入数据库。打开的标签、可见标签与 `tabId → conversationId` 绑定由 Electron Main 写入 appHome 下的 `browser-session.json`，应用重启后恢复；已删除的 Browser Conversation 在恢复时仅丢弃绑定。Browser Message 请求可携带瞬时 `tab_id`：API 在 Dispatcher 前写入进程内 `run_id → tab_id` 映射，供该次 Run 构建 Tool Registry 时一次性取出。
+
+仅 Browser Run 在同时具备 `tab_id` 绑定与 Main 私有页面桥时注册只读工具 `browser.read_current_page`（权限 `browser.read`，无需审批）。工具无模型参数，只能读取提交时绑定且调用时仍为当前可见的标签，返回限长 JSON：`title`、脱敏 `url`、`text`。Chat Run 不注册该工具。页面正文经 Main 回环 bridge 进入 Python，可能进入本地 `ToolCall` 审计与 external model 上下文，但不进入 SSE 或应用日志。
 
 Conversation 列表按 `updated_at` 倒序、再按 `conversation_id` 倒序返回。首条或后续用户消息均会在与初始 Run 创建相同的事务中更新 Conversation 的 `updated_at`；Electron 在创建 Conversation 或提交 Message 后也按同一排序规则更新内存侧栏，无需刷新即可把最近活跃会话放在顶部。重命名只更新 `title`，不改变 `updated_at`，且 Renderer 原位替换该项，因此不会因编辑名称改变列表位置。
 
@@ -474,7 +476,7 @@ Sidecar 内存中的 Chat 会话授权，必须在引入 Gmail OAuth、Secret St
 
 首个闭环只提供浏览器菜单、可见标签、空闲/加载/失败状态、用户显式导航和页面可见性；它不注册 Tool、不向模型发送页面内容、不自动点击、输入、登录、上传、下载或提交表单，也不和 Scheduler、MCP、Gmail OAuth 共用实现。远程页面运行在隔离的 WebContents 中：关闭 Node integration，保持 sandbox，禁止任意 Preload、任意 IPC 和未经验证的导航。HTTP/HTTPS 的 `window.open`/`target=_blank` 请求不创建原生 Electron 子窗口，而是在同一可见浏览器中转换为数量受限的受管标签；非网页协议继续拒绝。为兼容 Basic Authentication，Main 可使用带 URL userinfo 的原始地址加载页面，但在所有 Main→Renderer 状态和 IPC 返回值中删除 username/password，且不得将原始地址写入日志、RunEvent、ToolCall 或模型上下文。
 
-浏览器侧栏使用与普通 Chat 相同的 Conversation、Message、Run 和 SQLite 主数据，但 Conversation 以稳定 `kind` 区分 `chat` 与 `browser`。Chat 和 Browser 各自只能列出、创建和提交同类会话，不能通过普通列表或路由混用；这不是第二套浏览器会话表。浏览器标签 ID 是 Renderer 当前会话的临时绑定，不写入 SQLite，也不在应用重启后复原。Browser UI 提供其自身的最近会话入口，以便切换和查看已持久化的 Browser Conversation。
+浏览器侧栏使用与普通 Chat 相同的 Conversation、Message、Run 和 SQLite 主数据，但 Conversation 以稳定 `kind` 区分 `chat` 与 `browser`。Chat 和 Browser 各自只能列出、创建和提交同类会话，不能通过普通列表或路由混用；这不是第二套浏览器会话表。浏览器标签壳（稳定 `tabId`、脱敏 URL、可见标签与侧栏对话绑定）由 Main 持久化到桌面本地会话文件并在重启后恢复，仍不写入 SQLite。Browser UI 提供其自身的最近会话入口，以便切换和查看已持久化的 Browser Conversation。
 
 下一个最小闭环是只读 `browser.read_current_page`：它仅在 `browser` Conversation 的 Run 中注册，读取该会话当前绑定且用户可见的一个标签，并只返回标题、已脱敏 URL 与限长正文文本。Python 不导入 Electron；Electron Main 在固定、私有的受控桥接后从同一 `WebContentsView` 提取内容，Renderer 仍不接触网页 DOM 或会话凭据。未来的点击、输入、选择、上传、下载和提交均按各自的 Browser Tool 逐项加入，而不预建通用任务/动作模型。任何有副作用的 Browser Tool 仍须在实际加入时定义站点范围、审批、超时、取消和审计。
 
@@ -804,7 +806,7 @@ Authorization: Bearer <本次启动的 token>
 | `GET /api/v1/browser/conversations` | `200 Conversation[]` | 仅列出 `local-user` 的 `kind=browser` Conversation 元数据；不返回 Chat 会话。 |
 | `POST /api/v1/browser/conversations` | `201 Conversation` | 与 Chat 创建相同的空 JSON object 规则，但保存 `kind=browser`。 |
 | `GET /api/v1/browser/conversations/{conversation_id}/messages` | `200 Message[]` | 与 Chat messages 查询相同的可见 Message 表面；`kind` 不是 `browser` 时为 404。 |
-| `POST /api/v1/browser/conversations/{conversation_id}/messages` | `201 {"message": Message, "run": Run}` | 与 Chat 提交相同的 Message/Run/SSE 管线，包括首条消息自动标题；`kind` 不是 `browser` 时为 404。不接受 `tabId`、URL 或网页正文。 |
+| `POST /api/v1/browser/conversations/{conversation_id}/messages` | `201 {"message": Message, "run": Run}` | 与 Chat 提交相同的 Message/Run/SSE 管线，包括首条消息自动标题；请求体另需非空 `tab_id`（仅瞬时绑定，不持久化）；`kind` 不是 `browser` 时为 404。不接受 URL 或网页正文。 |
 
 时间以 UTC ISO 8601 JSON 字符串表示；API 不返回 `user_id`、内部 TOOL message、Run、RunEvent、ToolCall、Secret 或 Token。`POST /conversations` 暂无幂等键和 create-only Repository 原语，生产 UUID 碰撞虽可忽略，但重试/并发创建语义不能被假定为已解决。
 

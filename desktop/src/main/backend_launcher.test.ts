@@ -553,7 +553,7 @@ describe('BackendLauncher', () => {
       }
     ])
     await expect(
-      launcher.submitBrowserMessage('browser-2', 'Summarize this.')
+      launcher.submitBrowserMessage('browser-2', 'Summarize this.', 'tab-1')
     ).resolves.toMatchObject({
       message: {
         message_id: 'msg-browser-2',
@@ -597,13 +597,51 @@ describe('BackendLauncher', () => {
       'http://127.0.0.1:43123/api/v1/browser/conversations/browser-2/messages',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ content: 'Summarize this.' }),
+        body: JSON.stringify({ content: 'Summarize this.', tab_id: 'tab-1' }),
         headers: expect.objectContaining({
           Authorization: expect.stringMatching(/^Bearer /),
           'Content-Type': 'application/json'
         })
       })
     )
+  })
+
+  it('includes the private browser bridge in bootstrap without exposing it in ready output', async () => {
+    const child = createChild()
+    let bootstrap = ''
+    child.stdin.on('data', (chunk) => {
+      bootstrap += chunk.toString('utf8')
+    })
+
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+    const fetchBackend = vi.fn(async () => new Response(null, { status: 200 }))
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      spawnBackend,
+      fetchBackend,
+      browserBridge: {
+        baseUrl: 'http://127.0.0.1:43124',
+        token: 'bridge-token'
+      }
+    })
+
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+    await starting
+
+    const payload = JSON.parse(bootstrap.trim()) as {
+      token: string
+      browser_bridge: { base_url: string; token: string }
+    }
+    expect(payload.token).toMatch(/^[A-Za-z0-9_-]+$/)
+    expect(payload.browser_bridge).toEqual({
+      base_url: 'http://127.0.0.1:43124',
+      token: 'bridge-token'
+    })
+    expect(bootstrap).not.toContain('ASAGENT_READY')
   })
 
   it('streams authenticated run events and requests cancellation', async () => {
