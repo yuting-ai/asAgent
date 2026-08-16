@@ -3725,7 +3725,7 @@
 
 ### 已确认
 
-- 新建独立功能分支 `codex/visible-browser-foundation`，用于可见嵌入式浏览器基础；已有未提交的会话列表 CSS 调整不属于本功能，保持原样且不会纳入本功能提交。
+- 新建独立功能分支 `visible-browser-foundation`，用于可见嵌入式浏览器基础；已有未提交的会话列表 CSS 调整不属于本功能，保持原样且不会纳入本功能提交。
 - 浏览器体验优先保证用户可见、可理解并可在未来人工接管：Electron Main 将成为 asAgent 专属持久浏览器 Session 的唯一所有者，使用 `WebContentsView`，不采用已弃用的 `BrowserView`。
 - 第一个小任务只新增独立 Browser 菜单、可见网页 View 和安全生命周期。它不连接 Python Agent、ToolRegistry、MCP、Gmail、Scheduler 或浏览器自动化操作。
 - 当前不会复制或导出 Cookie，也不允许 Playwright 或其他 Chromium 进程并发访问同一 Profile。网页的 Cookie、密码、Storage 与会话凭据不进入 Renderer、Python、日志、RunEvent、ToolCall 或模型上下文。
