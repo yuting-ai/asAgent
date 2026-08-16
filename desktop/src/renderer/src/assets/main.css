@@ -2060,9 +2060,13 @@ body.is-resizing-columns {
 }
 
 .markdown-content a {
-  color: var(--brass-dim);
+  color: var(--brass);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.markdown-content a:hover {
+  color: color-mix(in srgb, var(--brass) 72%, #000);
 }
 
 .markdown-content a::after {
