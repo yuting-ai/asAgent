@@ -27,3 +27,5 @@ dist/
 
 # macOS metadata
 .DS_Store
+
+docs/
