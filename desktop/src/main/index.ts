@@ -432,6 +432,12 @@ app.whenReady().then(async () => {
       }
       return visibleBrowser.clickCurrentPage(tabId, targetId)
     },
+    fillCurrentPage: (tabId, targetId, value) => {
+      if (visibleBrowser === undefined) {
+        throw new Error('current browser tab is not visible')
+      }
+      return visibleBrowser.fillCurrentPage(tabId, targetId, value)
+    },
     waitForCurrentPage: (tabId, seconds) => {
       if (visibleBrowser === undefined) {
         throw new Error('current browser tab is not visible')

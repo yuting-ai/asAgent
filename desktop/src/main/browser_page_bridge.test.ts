@@ -106,6 +106,11 @@ describe('BrowserPageBridge', () => {
         text: 'Results are ready'
       }
     }))
+    const fillCurrentPage = vi.fn(async () => ({
+      action: 'filled' as const,
+      url: 'https://example.com/',
+      title: 'Example'
+    }))
     const waitForCurrentPage = vi.fn(async () => ({
       changed: true,
       page: {
@@ -119,6 +124,7 @@ describe('BrowserPageBridge', () => {
       readCurrentPage,
       inspectInteractive,
       clickCurrentPage,
+      fillCurrentPage,
       waitForCurrentPage,
       createServer,
       randomToken: () => 'bridge-token'
@@ -254,6 +260,25 @@ describe('BrowserPageBridge', () => {
         url: 'https://example.com/next',
         text: 'Results are ready'
       }
+    })
+
+    const fillAuthorized = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/fill-current-page',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1', target_id: 'target_2', value: 'hello' })
+      ),
+      fillAuthorized
+    )
+    await vi.waitFor(() => expect(fillAuthorized.end).toHaveBeenCalled())
+    expect(fillAuthorized.statusCode).toBe(200)
+    expect(fillCurrentPage).toHaveBeenCalledWith('tab-1', 'target_2', 'hello')
+    expect(JSON.parse(fillAuthorized.body ?? '')).toEqual({
+      action: 'filled',
+      url: 'https://example.com/',
+      title: 'Example'
     })
 
     await bridge.stop()

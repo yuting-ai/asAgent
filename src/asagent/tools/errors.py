@@ -19,6 +19,7 @@ SAFE_BROWSER_OPERATION_ERRORS = frozenset(
         "target was not found",
         "target is not visible",
         "target is obscured",
+        "target is not editable",
         "page changed; inspect interactive elements again",
         "current browser tab is not visible",
     }

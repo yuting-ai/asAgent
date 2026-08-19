@@ -29,6 +29,12 @@ export type BrowserClickResult = {
   page?: BrowserPageContent
 }
 
+export type BrowserFillResult = {
+  action: 'filled'
+  url: string
+  title: string
+}
+
 export type BrowserWaitResult = {
   changed: boolean
   page: BrowserPageContent
@@ -58,6 +64,7 @@ export const BROWSER_TARGET_ATTR = 'data-asagent-target-id'
 export const BROWSER_CLICK_POINTER_DELAY_MS = 150
 export const BROWSER_CLICK_SETTLE_TIMEOUT_MS = 1_000
 export const BROWSER_CLICK_SETTLE_QUIET_MS = 250
+export const BROWSER_FILL_VALUE_LIMIT = 10_000
 export const BROWSER_WAIT_POLL_INTERVAL_MS = 500
 export const BROWSER_WAIT_SETTLE_QUIET_MS = 500
 
@@ -65,6 +72,7 @@ export const BROWSER_OPERATION_ERRORS = [
   'target was not found',
   'target is not visible',
   'target is obscured',
+  'target is not editable',
   'page changed; inspect interactive elements again',
   'current browser tab is not visible'
 ] as const
@@ -310,6 +318,9 @@ export function normalizeBrowserOperationError(error: unknown): BrowserOperation
   if (/obscured/i.test(message)) {
     return 'target is obscured'
   }
+  if (/not editable|readonly|read-only/i.test(message)) {
+    return 'target is not editable'
+  }
   if (/not found|not available|could not be clicked/i.test(message)) {
     return 'target was not found'
   }
@@ -430,6 +441,9 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
     if (tag === 'textarea') {
       return 'textbox';
     }
+    if (el.isContentEditable) {
+      return 'textbox';
+    }
     return 'clickable';
   }
 
@@ -456,6 +470,9 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
     if (tag === 'input') {
       const type = (el.getAttribute('type') || 'text').toLowerCase();
       return type !== 'hidden';
+    }
+    if (el.isContentEditable) {
+      return true;
     }
     const role = (el.getAttribute('role') || '').toLowerCase();
     if (
@@ -485,6 +502,7 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
     const role = (el.getAttribute('role') || '').toLowerCase();
     return (
       ['a', 'button', 'input', 'select', 'textarea', 'label'].includes(tag) ||
+      el.isContentEditable ||
       ['button', 'link', 'checkbox', 'radio', 'switch', 'menuitemcheckbox', 'menuitemradio', 'option'].includes(role)
     );
   }
@@ -656,6 +674,91 @@ function browserSemanticClickScript(selector: string): string {
       throw new Error('target is not visible');
     }
     target.click();
+    return true;
+  })()`
+}
+
+function browserFillPrepareScript(selector: string): string {
+  const encodedSelector = JSON.stringify(selector)
+  const pointerId = JSON.stringify(BROWSER_AGENT_POINTER_ID)
+  return `(() => {
+    const target = document.querySelector(${encodedSelector});
+    if (!(target instanceof HTMLElement)) {
+      throw new Error('target was not found');
+    }
+    const style = window.getComputedStyle(target);
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+      throw new Error('target is not visible');
+    }
+    const rect = target.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || style.pointerEvents === 'none') {
+      throw new Error('target is not visible');
+    }
+    target.scrollIntoView({ block: 'center', inline: 'center' });
+    const current = target.getBoundingClientRect();
+    const x = Math.round(current.left + current.width / 2);
+    const y = Math.round(current.top + current.height / 2);
+    if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) {
+      throw new Error('target is not visible');
+    }
+    const topElement = document.elementFromPoint(x, y);
+    if (topElement === null || (topElement !== target && !target.contains(topElement))) {
+      throw new Error('target is obscured');
+    }
+    const existing = document.getElementById(${pointerId});
+    if (existing) {
+      existing.remove();
+    }
+    const pointer = document.createElement('div');
+    pointer.id = ${pointerId};
+    pointer.setAttribute('aria-hidden', 'true');
+    pointer.style.cssText = [
+      'pointer-events:none', 'position:fixed', 'z-index:2147483647',
+      'left:' + (x - 10) + 'px', 'top:' + (y - 10) + 'px',
+      'width:20px', 'height:20px', 'border-radius:50%',
+      'border:2px solid #12968c', 'background:rgba(18,150,140,0.28)',
+      'box-shadow:0 0 0 6px rgba(18,150,140,0.16)',
+      'transition:opacity 120ms ease', 'opacity:0'
+    ].join(';');
+    document.documentElement.appendChild(pointer);
+    requestAnimationFrame(() => { pointer.style.opacity = '1'; });
+    return true;
+  })()`
+}
+
+function browserFillScript(selector: string, value: string): string {
+  const encodedSelector = JSON.stringify(selector)
+  const encodedValue = JSON.stringify(value)
+  return `(() => {
+    const target = document.querySelector(${encodedSelector});
+    if (!(target instanceof HTMLElement)) {
+      throw new Error('target was not found');
+    }
+    if (target instanceof HTMLInputElement) {
+      const type = (target.type || 'text').toLowerCase();
+      if (target.disabled || target.readOnly || type === 'password' ||
+          ['hidden', 'file', 'checkbox', 'radio', 'button', 'submit', 'reset', 'image'].includes(type)) {
+        throw new Error('target is not editable');
+      }
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      if (!setter) throw new Error('target is not editable');
+      target.focus();
+      setter.call(target, ${encodedValue});
+    } else if (target instanceof HTMLTextAreaElement) {
+      if (target.disabled || target.readOnly) throw new Error('target is not editable');
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      if (!setter) throw new Error('target is not editable');
+      target.focus();
+      setter.call(target, ${encodedValue});
+    } else if (target.isContentEditable) {
+      if (target.getAttribute('contenteditable') === 'false') throw new Error('target is not editable');
+      target.focus();
+      target.textContent = ${encodedValue};
+    } else {
+      throw new Error('target is not editable');
+    }
+    target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${encodedValue} }));
+    target.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
   })()`
 }
@@ -1202,6 +1305,50 @@ export class VisibleBrowser {
         } catch {
           // Best-effort pointer cleanup after navigation or script failure.
         }
+      }
+    }
+  }
+
+  async fillCurrentPage(
+    tabId: string,
+    targetId: string,
+    value: string
+  ): Promise<BrowserFillResult> {
+    this.assertNotDisposed()
+    const id = parseBrowserTabId(tabId)
+    this.assertVisibleTab(id)
+    if (value.length > BROWSER_FILL_VALUE_LIMIT) {
+      throw new Error('target is not editable')
+    }
+
+    const view = this.tabs.get(id)
+    if (view === undefined) {
+      throw new Error('current browser tab is not visible')
+    }
+    const target = this.interactionSnapshots.get(id)?.get(parseBrowserTargetId(targetId))
+    if (target === undefined || target.frame.isDestroyed()) {
+      throw new Error('page changed; inspect interactive elements again')
+    }
+
+    try {
+      await target.frame.executeJavaScript(browserFillPrepareScript(target.selector))
+      await delay(BROWSER_CLICK_POINTER_DELAY_MS)
+      await target.frame.executeJavaScript(browserFillScript(target.selector, value))
+      return {
+        action: 'filled',
+        url: browserDisplayUrl(view.webContents.getURL()),
+        title: truncateBrowserText(
+          view.webContents.getTitle().trim() || titleFromUrl(view.webContents.getURL()),
+          BROWSER_PAGE_TITLE_LIMIT
+        )
+      }
+    } catch (error) {
+      throw new Error(normalizeBrowserOperationError(error))
+    } finally {
+      try {
+        await target.frame.executeJavaScript(BROWSER_REMOVE_POINTER_SCRIPT)
+      } catch {
+        // Best-effort pointer cleanup after navigation or script failure.
       }
     }
   }

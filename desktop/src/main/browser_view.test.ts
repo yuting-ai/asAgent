@@ -750,6 +750,48 @@ describe('VisibleBrowser window.open', () => {
     vi.useRealTimers()
   })
 
+  it('fills an inspected text target without submitting the form', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://example.com/form')
+    view.webContents.getTitle.mockReturnValue('Example form')
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_1',
+            name: 'Email',
+            role: 'email',
+            tag: 'input',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const pending = browser.fillCurrentPage('tab-1', 'target_1', 'person@example.com')
+    await vi.advanceTimersByTimeAsync(150)
+    await expect(pending).resolves.toEqual({
+      action: 'filled',
+      url: 'https://example.com/form',
+      title: 'Example form'
+    })
+
+    const scripts = view.webContents.executeJavaScript.mock.calls.map((call) => String(call[0]))
+    expect(scripts[1]).toContain('asagent-agent-pointer')
+    expect(scripts[2]).toContain("type === 'password'")
+    expect(scripts[2]).toContain("new Event('change'")
+    expect(scripts[3]).toContain('asagent-agent-pointer')
+    expect(view.webContents.sendInputEvent).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
   it('waits briefly for changed page content after a click', async () => {
     vi.useFakeTimers()
     const { browser, createView } = createBrowser()

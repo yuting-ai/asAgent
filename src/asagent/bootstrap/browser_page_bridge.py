@@ -37,6 +37,13 @@ class BrowserClickResult:
 
 
 @dataclass(frozen=True, slots=True)
+class BrowserFillResult:
+    action: str
+    url: str
+    title: str
+
+
+@dataclass(frozen=True, slots=True)
 class BrowserWaitResult:
     changed: bool
     page: BrowserPageContent
@@ -100,6 +107,16 @@ class BrowserPageBridgeClient:
             timeout_seconds=float(seconds + 5),
         )
         return _wait_result_from_payload(payload)
+
+    async def fill_current_page(
+        self, tab_id: str, target_id: str, value: str
+    ) -> BrowserFillResult:
+        payload = await self._post_json(
+            "/fill-current-page",
+            {"tab_id": tab_id, "target_id": target_id, "value": value},
+            failure_message="target was not found",
+        )
+        return _fill_result_from_payload(payload)
 
     async def _post_json(
         self,
@@ -234,6 +251,18 @@ def _click_result_from_payload(payload: object) -> BrowserClickResult:
             raise BrowserPageBridgeError("target was not found") from error
 
     return BrowserClickResult(action=action, url=url, title=title, page=page)
+
+
+def _fill_result_from_payload(payload: object) -> BrowserFillResult:
+    if not isinstance(payload, dict):
+        raise BrowserPageBridgeError("target was not found")
+
+    action = payload.get("action")
+    url = payload.get("url")
+    title = payload.get("title")
+    if action != "filled" or not isinstance(url, str) or not isinstance(title, str):
+        raise BrowserPageBridgeError("target was not found")
+    return BrowserFillResult(action=action, url=url, title=title)
 
 
 def _wait_result_from_payload(payload: object) -> BrowserWaitResult:

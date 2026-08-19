@@ -7,6 +7,7 @@ import {
   normalizeBrowserOperationError,
   parseBrowserTargetId,
   type BrowserClickResult,
+  type BrowserFillResult,
   type BrowserInteractiveSnapshot,
   type BrowserPageContent,
   type BrowserWaitResult
@@ -16,6 +17,7 @@ export type BrowserPageBridgeOptions = {
   readCurrentPage: (tabId: string) => Promise<BrowserPageContent>
   inspectInteractive: (tabId: string) => Promise<BrowserInteractiveSnapshot>
   clickCurrentPage: (tabId: string, targetId: string) => Promise<BrowserClickResult>
+  fillCurrentPage: (tabId: string, targetId: string, value: string) => Promise<BrowserFillResult>
   waitForCurrentPage: (tabId: string, seconds: number) => Promise<BrowserWaitResult>
   createServer?: typeof createServer
   randomToken?: () => string
@@ -78,6 +80,11 @@ export class BrowserPageBridge {
     tabId: string,
     targetId: string
   ) => Promise<BrowserClickResult>
+  private readonly fillCurrentPage: (
+    tabId: string,
+    targetId: string,
+    value: string
+  ) => Promise<BrowserFillResult>
   private readonly waitForCurrentPage: (
     tabId: string,
     seconds: number
@@ -91,6 +98,7 @@ export class BrowserPageBridge {
     this.readCurrentPage = options.readCurrentPage
     this.inspectInteractive = options.inspectInteractive
     this.clickCurrentPage = options.clickCurrentPage
+    this.fillCurrentPage = options.fillCurrentPage
     this.waitForCurrentPage = options.waitForCurrentPage
     this.createHttpServer = options.createServer ?? createServer
     this.randomToken = options.randomToken ?? (() => randomBytes(32).toString('base64url'))
@@ -160,6 +168,7 @@ export class BrowserPageBridge {
         (request.url !== '/read-current-page' &&
           request.url !== '/inspect-interactive' &&
           request.url !== '/click-current-page' &&
+          request.url !== '/fill-current-page' &&
           request.url !== '/wait-for-current-page')
       ) {
         writeJson(response, 404, { detail: 'not found' })
@@ -231,6 +240,17 @@ export class BrowserPageBridge {
         targetId = parseBrowserTargetId(targetValue)
       } catch {
         writeJson(response, 400, { detail: 'invalid request' })
+        return
+      }
+
+      if (request.url === '/fill-current-page') {
+        const value = record['value']
+        if (typeof value !== 'string' || value.length > 10_000) {
+          writeJson(response, 400, { detail: 'invalid request' })
+          return
+        }
+        const result = await this.fillCurrentPage(tabId.trim(), targetId, value)
+        writeJson(response, 200, result)
         return
       }
 
