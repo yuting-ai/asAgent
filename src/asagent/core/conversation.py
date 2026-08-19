@@ -15,3 +15,5 @@ class Conversation:
     updated_at: datetime
     title: str | None = None
     kind: ConversationKind = "chat"
+    last_page_url: str | None = None
+    last_page_title: str | None = None

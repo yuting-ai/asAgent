@@ -27,17 +27,20 @@ class BrowserInspectInteractiveTool:
     @property
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
-            tool_id="browser.inspect_interactive",
-            display_name="Inspect interactive elements",
+            tool_id="browser.take_snapshot",
+            display_name="Take page snapshot",
             description=(
-                "Lists visible interactive elements on the browser tab that "
+                "Takes a bounded semantic snapshot of visible interactive "
+                "elements on the browser tab that "
                 "was active when this Browser conversation message was "
-                "submitted. Returns a bounded list of target_id, name, role, "
+                "submitted. Returns a bounded list of ref, name, role, "
                 "tag, and disabled. Native select elements also include a "
                 "bounded options list with value, label, and disabled. Before "
                 "clicking, filling, or selecting an unfamiliar page element, "
-                "use this tool and pass a returned target_id to browser.click, "
-                "browser.fill, or browser.select. Do not guess CSS selectors "
+                "use this tool and pass its returned ref to browser.click, "
+                "browser.fill, or browser.select. When the user asks you to "
+                "operate the visible page, take a snapshot before claiming a "
+                "browser capability is unavailable. Do not guess CSS selectors "
                 "or option values, and do not use external search to infer "
                 "page structure. Accepts no arguments."
             ),
@@ -54,7 +57,7 @@ class BrowserInspectInteractiveTool:
 
     async def execute(self, arguments: Mapping[str, object]) -> str:
         if arguments:
-            raise ValueError("browser.inspect_interactive accepts no arguments")
+            raise ValueError("browser.take_snapshot accepts no arguments")
 
         try:
             snapshot = await self._client.inspect_interactive(self._tab_id)
@@ -66,7 +69,7 @@ class BrowserInspectInteractiveTool:
         elements = []
         for item in snapshot.elements[:_MAX_ELEMENTS]:
             element: dict[str, object] = {
-                "target_id": item.target_id,
+                "ref": item.target_id,
                 "name": _bounded(item.name, _MAX_NAME_CHARS),
                 "role": _bounded(item.role, _MAX_ROLE_CHARS),
                 "tag": _bounded(item.tag, _MAX_TAG_CHARS),

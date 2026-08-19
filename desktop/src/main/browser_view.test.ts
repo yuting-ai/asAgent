@@ -257,6 +257,21 @@ describe('VisibleBrowser', () => {
     )
   })
 
+  it('returns credential-free page context for persistence', () => {
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://user:password@example.com/private?section=one')
+    view.webContents.getTitle.mockReturnValue('Private page')
+
+    expect(browser.getTabState('tab-1')).toMatchObject({
+      tabId: 'tab-1',
+      url: 'https://example.com/private?section=one',
+      title: 'Private page'
+    })
+  })
+
   it.each(['file:///tmp/test', 'javascript:alert(1)', 'mailto:user@example.com'])(
     'rejects non-web navigation: %s',
     async (url) => {
@@ -808,11 +823,58 @@ describe('VisibleBrowser window.open', () => {
     })
 
     const scripts = view.webContents.executeJavaScript.mock.calls.map((call) => String(call[0]))
-    expect(scripts[1]).toContain('asagent-agent-pointer')
-    expect(scripts[2]).toContain("type === 'password'")
-    expect(scripts[2]).toContain("new Event('change'")
-    expect(scripts[3]).toContain('asagent-agent-pointer')
+    expect(scripts[2]).toContain('asagent-agent-pointer')
+    expect(scripts[2]).not.toContain('elementFromPoint')
+    expect(scripts[3]).toContain("type === 'password'")
+    expect(scripts[3]).toContain("new Event('change'")
+    expect(scripts[4]).toContain('asagent-agent-pointer')
     expect(view.webContents.sendInputEvent).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('returns a stable page snapshot after a fill changes the URL', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://mail.example.com/compose')
+    view.webContents.getTitle.mockReturnValue('Compose')
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_1',
+            name: 'To',
+            role: 'textbox',
+            tag: 'input',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: 'Compose', text: 'New message' })
+      .mockResolvedValueOnce(true)
+      .mockImplementationOnce(async () => {
+        view.webContents.getURL.mockReturnValue('https://mail.example.com/compose?draft=123')
+        return true
+      })
+      .mockResolvedValueOnce({ title: 'Compose', text: 'New message' })
+      .mockResolvedValueOnce({ title: 'Compose', text: 'New message' })
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const pending = browser.fillCurrentPage('tab-1', 'target_1', 'person@example.com')
+    await vi.advanceTimersByTimeAsync(400)
+    await expect(pending).resolves.toEqual({
+      action: 'filled',
+      url: 'https://mail.example.com/compose?draft=123',
+      title: 'Compose',
+      page: {
+        title: 'Compose',
+        url: 'https://mail.example.com/compose?draft=123',
+        text: 'New message'
+      }
+    })
     vi.useRealTimers()
   })
 
@@ -872,6 +934,8 @@ describe('VisibleBrowser window.open', () => {
     const script = String(view.webContents.executeJavaScript.mock.calls[0]?.[0])
     expect(script).toContain('el instanceof HTMLSelectElement')
     expect(script).toContain('item.options = selectOptions(el)')
+    expect(script).toContain('[role="dialog"]')
+    expect(script).toContain('dialogElements.has(el)')
     expect(script).not.toContain('internal selector')
   })
 
@@ -1093,6 +1157,350 @@ describe('VisibleBrowser window.open', () => {
       'page changed; inspect interactive elements again'
     )
     vi.useRealTimers()
+  })
+
+  it('submits an inspected native submit button with a real mouse path', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://example.com/form')
+    view.webContents.getTitle.mockReturnValue('Form')
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_3',
+            name: 'Send',
+            role: 'button',
+            tag: 'button',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: 'Form', text: 'Ready to send' })
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce({ x: 40, y: 60, activation: 'mouse' })
+      .mockResolvedValueOnce({ x: 40, y: 60 })
+      .mockResolvedValueOnce({ title: 'Thanks', text: 'Message sent' })
+      .mockResolvedValueOnce({ title: 'Thanks', text: 'Message sent' })
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const pending = browser.submitCurrentPage('tab-1', 'target_3')
+    await vi.advanceTimersByTimeAsync(400)
+    await expect(pending).resolves.toEqual({
+      action: 'submitted',
+      url: 'https://example.com/form',
+      title: 'Form',
+      page: {
+        title: 'Thanks',
+        url: 'https://example.com/form',
+        text: 'Message sent'
+      }
+    })
+
+    const scripts = view.webContents.executeJavaScript.mock.calls.map((call) => String(call[0]))
+    expect(scripts[2]).toContain('target is not submittable')
+    expect(scripts[2]).toContain('HTMLButtonElement')
+    expect(scripts[2]).toContain('HTMLInputElement')
+    expect(scripts[2]).toContain('form == null')
+    expect(scripts[2]).toContain("type === 'submit'")
+    expect(scripts[2]).toContain("type === 'image'")
+    expect(scripts[2]).not.toContain('form.submit')
+    expect(scripts[2]).not.toContain('requestSubmit')
+    expect(scripts[3]).toContain('asagent-agent-pointer')
+    expect(scripts[3]).toContain('semanticActivation = false')
+    expect(scripts[7]).toContain('asagent-agent-pointer')
+    expect(view.webContents.sendInputEvent.mock.calls.map((call) => call[0])).toEqual([
+      { type: 'mouseMove', x: 40, y: 60 },
+      { type: 'mouseDown', x: 40, y: 60, button: 'left', clickCount: 1 },
+      { type: 'mouseUp', x: 40, y: 60, button: 'left', clickCount: 1 }
+    ])
+    vi.useRealTimers()
+  })
+
+  it('returns a page snapshot when submit changes the URL but not the text', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://example.com/form')
+    view.webContents.getTitle.mockReturnValue('Form')
+    view.webContents.sendInputEvent.mockImplementation(() => {
+      view.webContents.getURL.mockReturnValue('https://example.com/thanks')
+      view.webContents.getTitle.mockReturnValue('Thanks')
+    })
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_1',
+            name: 'Create event',
+            role: 'button',
+            tag: 'button',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: 'Form', text: 'Event details' })
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce({ x: 22, y: 28, activation: 'mouse' })
+      .mockResolvedValueOnce({ x: 22, y: 28 })
+      .mockResolvedValueOnce({ title: 'Form', text: 'Event details' })
+      .mockResolvedValueOnce({ title: 'Form', text: 'Event details' })
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const pending = browser.submitCurrentPage('tab-1', 'target_1')
+    await vi.advanceTimersByTimeAsync(400)
+    await expect(pending).resolves.toEqual({
+      action: 'submitted',
+      url: 'https://example.com/thanks',
+      title: 'Thanks',
+      page: {
+        title: 'Form',
+        url: 'https://example.com/thanks',
+        text: 'Event details'
+      }
+    })
+    vi.useRealTimers()
+  })
+
+  it('still returns submitted when the page cannot be read after submit', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://example.com/form')
+    view.webContents.getTitle.mockReturnValue('Form')
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_1',
+            name: 'Send',
+            role: 'button',
+            tag: 'button',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: 'Form', text: 'Ready' })
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce({ x: 10, y: 12, activation: 'mouse' })
+      .mockResolvedValueOnce({ x: 10, y: 12 })
+      .mockRejectedValueOnce(new Error('page gone'))
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const pending = browser.submitCurrentPage('tab-1', 'target_1')
+    await vi.advanceTimersByTimeAsync(150)
+    await expect(pending).resolves.toEqual({
+      action: 'submitted',
+      url: 'https://example.com/form',
+      title: 'Form'
+    })
+    vi.useRealTimers()
+  })
+
+  it('submits iframe native submit controls only inside the child frame', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://example.com/outer')
+    view.webContents.getTitle.mockReturnValue('Outer')
+
+    const child = createFakeFrame({ url: 'https://forms.example/app' })
+    Object.defineProperty(view.webContents.mainFrame, 'frames', {
+      value: [child],
+      configurable: true
+    })
+
+    view.webContents.mainFrame.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_1',
+            name: 'Outer',
+            role: 'button',
+            tag: 'button',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: '', text: '' })
+    child.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_2',
+            name: 'Submit',
+            role: 'button',
+            tag: 'button',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: '', text: '' })
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce({ x: 12, y: 18, activation: 'mouse' })
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const pending = browser.submitCurrentPage('tab-1', 'target_2')
+    await vi.advanceTimersByTimeAsync(150)
+    await expect(pending).resolves.toEqual({
+      action: 'submitted',
+      url: 'https://example.com/outer',
+      title: 'Outer'
+    })
+
+    expect(view.webContents.sendInputEvent).not.toHaveBeenCalled()
+    const childScripts = child.executeJavaScript.mock.calls.map((call) => String(call[0]))
+    expect(childScripts[2]).toContain('target is not submittable')
+    expect(childScripts[3]).toContain('asagent-agent-pointer')
+    expect(childScripts[4]).toContain('target.click()')
+    expect(childScripts[5]).toContain('asagent-agent-pointer')
+    vi.useRealTimers()
+  })
+
+  it('rejects non-submittable targets and stale inspect snapshots', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_1',
+            name: 'Cancel',
+            role: 'button',
+            tag: 'button',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: 'Form', text: 'Ready' })
+      .mockRejectedValueOnce(new Error('target is not submittable'))
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_2',
+            name: 'Custom',
+            role: 'button',
+            tag: 'div',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: 'Form', text: 'Ready' })
+      .mockRejectedValueOnce(new Error('target is not submittable'))
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_3',
+            name: 'Send',
+            role: 'button',
+            tag: 'button',
+            disabled: true
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: 'Form', text: 'Ready' })
+      .mockRejectedValueOnce(new Error('target is not submittable'))
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_4',
+            name: 'Toggle',
+            role: 'button',
+            tag: 'button',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: 'Form', text: 'Ready' })
+      .mockRejectedValueOnce(new Error('target is not submittable'))
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_5',
+            name: 'Orphan',
+            role: 'button',
+            tag: 'button',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: 'Form', text: 'Ready' })
+      .mockRejectedValueOnce(new Error('target is not submittable'))
+
+    await browser.inspectInteractive('tab-1')
+    await expect(browser.submitCurrentPage('tab-1', 'target_1')).rejects.toThrow(
+      'target is not submittable'
+    )
+
+    await browser.inspectInteractive('tab-1')
+    await expect(browser.submitCurrentPage('tab-1', 'target_2')).rejects.toThrow(
+      'target is not submittable'
+    )
+
+    await browser.inspectInteractive('tab-1')
+    await expect(browser.submitCurrentPage('tab-1', 'target_3')).rejects.toThrow(
+      'target is not submittable'
+    )
+
+    await browser.inspectInteractive('tab-1')
+    await expect(browser.submitCurrentPage('tab-1', 'target_4')).rejects.toThrow(
+      'target is not submittable'
+    )
+
+    await browser.inspectInteractive('tab-1')
+    await expect(browser.submitCurrentPage('tab-1', 'target_5')).rejects.toThrow(
+      'target is not submittable'
+    )
+
+    await expect(browser.submitCurrentPage('tab-1', 'target_99')).rejects.toThrow(
+      'page changed; inspect interactive elements again'
+    )
+    vi.useRealTimers()
+  })
+
+  it('invalidates submit targets after navigation', async () => {
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView> & {
+      emit(event: string, navigationEvent: BrowserNavigationEvent, url?: string): void
+    }
+
+    view.webContents.executeJavaScript.mockResolvedValueOnce({
+      elements: [
+        {
+          target_id: 'target_1',
+          name: 'Send',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        }
+      ]
+    })
+
+    await browser.inspectInteractive('tab-1')
+    view.emit('did-navigate', { preventDefault: () => undefined }, 'https://example.com/next')
+
+    await expect(browser.submitCurrentPage('tab-1', 'target_1')).rejects.toThrow(
+      'page changed; inspect interactive elements again'
+    )
   })
 
   it('waits briefly for changed page content after a click', async () => {

@@ -553,7 +553,13 @@ describe('BackendLauncher', () => {
       }
     ])
     await expect(
-      launcher.submitBrowserMessage('browser-2', 'Summarize this.', 'tab-1')
+      launcher.submitBrowserMessage(
+        'browser-2',
+        'Summarize this.',
+        'tab-1',
+        'https://example.com/article',
+        'Example article'
+      )
     ).resolves.toMatchObject({
       message: {
         message_id: 'msg-browser-2',
@@ -597,7 +603,12 @@ describe('BackendLauncher', () => {
       'http://127.0.0.1:43123/api/v1/browser/conversations/browser-2/messages',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ content: 'Summarize this.', tab_id: 'tab-1' }),
+        body: JSON.stringify({
+          content: 'Summarize this.',
+          tab_id: 'tab-1',
+          last_page_url: 'https://example.com/article',
+          last_page_title: 'Example article'
+        }),
         headers: expect.objectContaining({
           Authorization: expect.stringMatching(/^Bearer /),
           'Content-Type': 'application/json'

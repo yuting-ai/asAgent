@@ -57,6 +57,8 @@ class RunSubmissionService:
         conversation_id: ConversationId,
         content: str,
         user_id: UserId | None = None,
+        last_page_url: str | None = None,
+        last_page_title: str | None = None,
     ) -> SubmittedRun:
         conversation = await self._conversations.get(conversation_id)
         self._require_access(conversation, user_id)
@@ -67,6 +69,16 @@ class RunSubmissionService:
             conversation,
             title=conversation.title or _initial_conversation_title(content),
             updated_at=started_at,
+            last_page_url=(
+                last_page_url
+                if last_page_url is not None
+                else conversation.last_page_url
+            ),
+            last_page_title=(
+                last_page_title
+                if last_page_url is not None
+                else conversation.last_page_title
+            ),
         )
         user_message = UserMessage(
             message_id=self._new_message_id(),

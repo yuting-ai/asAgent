@@ -30,7 +30,11 @@ def test_upgrade_from_empty_database_creates_initial_schema(tmp_path: Path) -> N
 
     engine = sa.create_engine(f"sqlite+pysqlite:///{database_path}")
     try:
-        table_names = set(sa.inspect(engine).get_table_names())
+        inspector = sa.inspect(engine)
+        table_names = set(inspector.get_table_names())
+        conversation_columns = {
+            column["name"] for column in inspector.get_columns("conversations")
+        }
     finally:
         engine.dispose()
 
@@ -46,6 +50,7 @@ def test_upgrade_from_empty_database_creates_initial_schema(tmp_path: Path) -> N
         "tool_calls",
         "users",
     }
+    assert {"last_page_url", "last_page_title"} <= conversation_columns
 
 
 def test_initial_schema_enforces_foreign_keys_and_invariants(tmp_path: Path) -> None:

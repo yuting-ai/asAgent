@@ -32,6 +32,8 @@ conversations = Table(
     ),
     Column("title", String),
     Column("kind", Text, nullable=False, server_default="chat"),
+    Column("last_page_url", Text),
+    Column("last_page_title", Text),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     CheckConstraint(

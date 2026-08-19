@@ -15,6 +15,8 @@ export type ConversationSummary = {
   created_at: string
   updated_at: string
   title: string | null
+  last_page_url: string | null
+  last_page_title: string | null
 }
 
 export type ConversationMessage = {
@@ -388,7 +390,9 @@ export class BackendLauncher {
   async submitBrowserMessage(
     conversationId: string,
     content: string,
-    tabId: string
+    tabId: string,
+    lastPageUrl: string | null,
+    lastPageTitle: string | null
   ): Promise<SubmittedMessage> {
     if (!content.trim()) {
       throw new Error('Message content is invalid.')
@@ -400,7 +404,12 @@ export class BackendLauncher {
     return this.requestJson<SubmittedMessage>(
       `/api/v1/browser/conversations/${encodeURIComponent(conversationId)}/messages`,
       'POST',
-      { content, tab_id: tabId }
+      {
+        content,
+        tab_id: tabId,
+        last_page_url: lastPageUrl,
+        last_page_title: lastPageTitle
+      }
     )
   }
 

@@ -33,10 +33,18 @@ export type BrowserFillResult = {
   action: 'filled'
   url: string
   title: string
+  page?: BrowserPageContent
 }
 
 export type BrowserSelectResult = {
   action: 'selected'
+  url: string
+  title: string
+  page?: BrowserPageContent
+}
+
+export type BrowserSubmitResult = {
+  action: 'submitted'
   url: string
   title: string
   page?: BrowserPageContent
@@ -91,6 +99,7 @@ export const BROWSER_OPERATION_ERRORS = [
   'target is obscured',
   'target is not editable',
   'target is not selectable',
+  'target is not submittable',
   'option was not found',
   'option is disabled',
   'page changed; inspect interactive elements again',
@@ -344,6 +353,9 @@ export function normalizeBrowserOperationError(error: unknown): BrowserOperation
   if (/not selectable/i.test(message)) {
     return 'target is not selectable'
   }
+  if (/not submittable/i.test(message)) {
+    return 'target is not submittable'
+  }
   if (/option is disabled/i.test(message)) {
     return 'option is disabled'
   }
@@ -554,7 +566,29 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
     return options;
   }
 
-  const all = Array.from(document.querySelectorAll('body *')).slice(0, SCAN_LIMIT);
+  const all = [];
+  const dialogElements = new Set();
+  const seen = new Set();
+  function appendElements(root, prioritizeDialog) {
+    const nodes = root === document.body ? Array.from(root.querySelectorAll('*')) : [root, ...root.querySelectorAll('*')];
+    for (const node of nodes) {
+      if (!(node instanceof HTMLElement) || seen.has(node) || all.length >= SCAN_LIMIT) {
+        continue;
+      }
+      seen.add(node);
+      all.push(node);
+      if (prioritizeDialog) {
+        dialogElements.add(node);
+      }
+    }
+  }
+  const dialogRoots = Array.from(
+    document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]'),
+  ).filter((element) => element instanceof HTMLElement && isSemanticallyVisible(element));
+  for (const dialog of dialogRoots) {
+    appendElements(dialog, true);
+  }
+  appendElements(document.body, false);
   const raw = [];
   for (const el of all) {
     if (isCandidate(el)) {
@@ -570,6 +604,9 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
     ),
   );
   const priority = (el) => {
+    if (dialogElements.has(el)) {
+      return -1;
+    }
     if (isSemanticControl(el)) {
       return 0;
     }
@@ -713,6 +750,36 @@ function browserClickPrepareScript(selector: string, semanticActivation: boolean
   })()`
 }
 
+function browserSubmitValidateScript(selector: string): string {
+  const encodedSelector = JSON.stringify(selector)
+  return `(() => {
+    const target = document.querySelector(${encodedSelector});
+    if (!(target instanceof HTMLElement)) {
+      throw new Error('target was not found');
+    }
+    function isSubmittable(el) {
+      if (el.disabled) {
+        return false;
+      }
+      if (el.form == null) {
+        return false;
+      }
+      if (el instanceof HTMLButtonElement) {
+        return String(el.type || 'submit').toLowerCase() === 'submit';
+      }
+      if (el instanceof HTMLInputElement) {
+        const type = String(el.type || '').toLowerCase();
+        return type === 'submit' || type === 'image';
+      }
+      return false;
+    }
+    if (!isSubmittable(target)) {
+      throw new Error('target is not submittable');
+    }
+    return true;
+  })()`
+}
+
 function browserSemanticClickScript(selector: string): string {
   const encodedSelector = JSON.stringify(selector)
   return `(() => {
@@ -751,10 +818,6 @@ function browserFillPrepareScript(selector: string): string {
     const y = Math.round(current.top + current.height / 2);
     if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) {
       throw new Error('target is not visible');
-    }
-    const topElement = document.elementFromPoint(x, y);
-    if (topElement === null || (topElement !== target && !target.contains(topElement))) {
-      throw new Error('target is obscured');
     }
     const existing = document.getElementById(${pointerId});
     if (existing) {
@@ -1449,17 +1512,34 @@ export class VisibleBrowser {
       throw new Error('page changed; inspect interactive elements again')
     }
 
+    let pageBeforeFill: BrowserPageContent | undefined
+    try {
+      pageBeforeFill = await this.readCurrentPage(id)
+    } catch {
+      // Filling remains available when a page cannot be read for settling.
+    }
+
     try {
       await target.frame.executeJavaScript(browserFillPrepareScript(target.selector))
       await delay(BROWSER_CLICK_POINTER_DELAY_MS)
       await target.frame.executeJavaScript(browserFillScript(target.selector, value))
+      const page =
+        pageBeforeFill !== undefined && pageBeforeFill.text !== ''
+          ? await this.settleAfterPageAction(id, browserPageState(pageBeforeFill))
+          : undefined
+
+      if (page !== undefined) {
+        this.lastActionPageState.set(id, browserPageState(page))
+      }
+
       return {
         action: 'filled',
         url: browserDisplayUrl(view.webContents.getURL()),
         title: truncateBrowserText(
           view.webContents.getTitle().trim() || titleFromUrl(view.webContents.getURL()),
           BROWSER_PAGE_TITLE_LIMIT
-        )
+        ),
+        ...(page === undefined ? {} : { page })
       }
     } catch (error) {
       throw new Error(normalizeBrowserOperationError(error))
@@ -1533,8 +1613,161 @@ export class VisibleBrowser {
     }
   }
 
+  async submitCurrentPage(tabId: string, targetId: string): Promise<BrowserSubmitResult> {
+    this.assertNotDisposed()
+    const id = parseBrowserTabId(tabId)
+    this.assertVisibleTab(id)
+
+    const view = this.tabs.get(id)
+    if (view === undefined) {
+      throw new Error('current browser tab is not visible')
+    }
+
+    const snapshot = this.interactionSnapshots.get(id)
+    const safeTargetId = parseBrowserTargetId(targetId)
+    const target = snapshot?.get(safeTargetId)
+    if (target === undefined || target.frame.isDestroyed()) {
+      if (target?.frame.isDestroyed()) {
+        this.interactionSnapshots.delete(id)
+      }
+      throw new Error('page changed; inspect interactive elements again')
+    }
+
+    const safeSelector = target.selector
+    const frame = target.frame
+    const isMainFrame = frame === view.webContents.mainFrame
+    let pointerInstalled = false
+    let pageBeforeSubmit: BrowserPageContent | undefined
+
+    try {
+      pageBeforeSubmit = await this.readCurrentPage(id)
+    } catch {
+      // Submit remains available when a page cannot be read for settling.
+    }
+
+    try {
+      try {
+        await frame.executeJavaScript(browserSubmitValidateScript(safeSelector))
+      } catch (error) {
+        throw new Error(normalizeBrowserOperationError(error))
+      }
+
+      let prepared: unknown
+      try {
+        prepared = await frame.executeJavaScript(browserClickPrepareScript(safeSelector, false))
+      } catch (error) {
+        throw new Error(normalizeBrowserOperationError(error))
+      }
+
+      if (typeof prepared !== 'object' || prepared === null || Array.isArray(prepared)) {
+        throw new Error('target was not found')
+      }
+
+      const preparedPoint = prepared as Record<string, unknown>
+      if (
+        typeof preparedPoint.x !== 'number' ||
+        typeof preparedPoint.y !== 'number' ||
+        preparedPoint.activation !== 'mouse'
+      ) {
+        throw new Error('target was not found')
+      }
+
+      pointerInstalled = true
+      await delay(BROWSER_CLICK_POINTER_DELAY_MS)
+
+      if (isMainFrame) {
+        let confirmed: unknown
+        try {
+          confirmed = await frame.executeJavaScript(
+            browserClickConfirmScript(safeSelector, preparedPoint.x, preparedPoint.y)
+          )
+        } catch (error) {
+          throw new Error(normalizeBrowserOperationError(error))
+        }
+
+        if (typeof confirmed !== 'object' || confirmed === null || Array.isArray(confirmed)) {
+          throw new Error('target was not found')
+        }
+
+        const point = confirmed as Record<string, unknown>
+        if (typeof point.x !== 'number' || typeof point.y !== 'number') {
+          throw new Error('target was not found')
+        }
+
+        const x = Math.round(point.x)
+        const y = Math.round(point.y)
+        view.webContents.sendInputEvent({ type: 'mouseMove', x, y })
+        view.webContents.sendInputEvent({
+          type: 'mouseDown',
+          x,
+          y,
+          button: 'left',
+          clickCount: 1
+        })
+        view.webContents.sendInputEvent({
+          type: 'mouseUp',
+          x,
+          y,
+          button: 'left',
+          clickCount: 1
+        })
+      } else {
+        try {
+          await frame.executeJavaScript(browserIframeClickScript(safeSelector))
+        } catch (error) {
+          throw new Error(normalizeBrowserOperationError(error))
+        }
+      }
+
+      const page =
+        pageBeforeSubmit !== undefined && pageBeforeSubmit.text !== ''
+          ? await this.settleAfterPageAction(id, browserPageState(pageBeforeSubmit))
+          : undefined
+      const changedPage =
+        page !== undefined &&
+        pageBeforeSubmit !== undefined &&
+        browserPageState(page) !== browserPageState(pageBeforeSubmit)
+          ? page
+          : undefined
+
+      if (changedPage !== undefined) {
+        this.lastActionPageState.set(id, browserPageState(changedPage))
+      }
+
+      return {
+        action: 'submitted',
+        url: browserDisplayUrl(view.webContents.getURL()),
+        title: truncateBrowserText(
+          view.webContents.getTitle().trim() || titleFromUrl(view.webContents.getURL()),
+          BROWSER_PAGE_TITLE_LIMIT
+        ),
+        ...(changedPage === undefined ? {} : { page: changedPage })
+      }
+    } catch (error) {
+      throw new Error(normalizeBrowserOperationError(error))
+    } finally {
+      if (pointerInstalled) {
+        try {
+          await frame.executeJavaScript(BROWSER_REMOVE_POINTER_SCRIPT)
+        } catch {
+          // Best-effort pointer cleanup after navigation or script failure.
+        }
+      }
+    }
+  }
+
   getVisibleTabId(): string | undefined {
     return this.visibleTabId
+  }
+
+  getTabState(tabId: string): BrowserTabState {
+    this.assertNotDisposed()
+    const parsedTabId = parseBrowserTabId(tabId)
+    const view = this.tabs.get(parsedTabId)
+    if (view === undefined) {
+      throw new Error('Browser tab is unavailable.')
+    }
+    return this.snapshot(parsedTabId, view)
   }
 
   listPersistedTabs(): Array<{ tabId: string; url: string }> {

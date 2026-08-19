@@ -473,6 +473,8 @@ async def test_create_conversation_persists_an_empty_local_conversation(
         "created_at": "2026-08-11T12:00:00Z",
         "updated_at": "2026-08-11T12:00:00Z",
         "title": None,
+        "last_page_url": None,
+        "last_page_title": None,
     }
     assert stored == _conversation(
         conversation_id,
@@ -604,6 +606,8 @@ async def test_update_conversation_title_persists_for_local_user(
         "created_at": "2026-08-11T08:00:00Z",
         "updated_at": "2026-08-11T08:00:00Z",
         "title": "Renamed conversation",
+        "last_page_url": None,
+        "last_page_title": None,
     }
     assert stored is not None
     assert stored.title == "Renamed conversation"
@@ -806,6 +810,8 @@ async def test_submit_message_creates_a_visible_message_and_created_run(
             "created_at": "2026-08-11T11:00:00Z",
             "updated_at": "2026-08-11T12:00:00Z",
             "title": "Hello, asAgent.",
+            "last_page_url": None,
+            "last_page_title": None,
         },
     }
     assert messages == (
@@ -1096,6 +1102,8 @@ async def test_create_browser_conversation_persists_browser_kind(
         "created_at": "2026-08-11T12:00:00Z",
         "updated_at": "2026-08-11T12:00:00Z",
         "title": None,
+        "last_page_url": None,
+        "last_page_title": None,
     }
     assert stored == _conversation(
         conversation_id,
@@ -1158,12 +1166,23 @@ async def test_submit_browser_message_creates_visible_message_and_title(
                 json={
                     "content": "What is on this page?",
                     "tab_id": "tab-visible",
+                    "last_page_url": "https://example.com/report?year=2026",
+                    "last_page_title": "Example report",
                 },
             )
             missing_tab = await client.post(
                 "/api/v1/browser/conversations/conv-browser/messages",
                 headers=headers,
                 json={"content": "Missing tab."},
+            )
+            credentialed_page = await client.post(
+                "/api/v1/browser/conversations/conv-browser/messages",
+                headers=headers,
+                json={
+                    "content": "Unsafe page context.",
+                    "tab_id": "tab-visible",
+                    "last_page_url": "https://user:password@example.com/private",
+                },
             )
             messages = await client.get(
                 "/api/v1/browser/conversations/conv-browser/messages",
@@ -1189,8 +1208,11 @@ async def test_submit_browser_message_creates_visible_message_and_title(
         "created_at": "2026-08-11T11:00:00Z",
         "updated_at": "2026-08-11T12:00:00Z",
         "title": "What is on this page?",
+        "last_page_url": "https://example.com/report?year=2026",
+        "last_page_title": "Example report",
     }
     assert missing_tab.status_code == 422
+    assert credentialed_page.status_code == 422
     assert bindings.take(RunId("run-browser")) == "tab-visible"
     assert messages.status_code == 200
     assert messages.json() == [
@@ -1205,6 +1227,8 @@ async def test_submit_browser_message_creates_visible_message_and_title(
     assert stored_conversation is not None
     assert stored_conversation.kind == "browser"
     assert stored_conversation.title == "What is on this page?"
+    assert stored_conversation.last_page_url == "https://example.com/report?year=2026"
+    assert stored_conversation.last_page_title == "Example report"
     assert len(persisted_runs) == 1
     assert persisted_runs[0].run_id == RunId("run-browser")
 
@@ -1287,6 +1311,8 @@ async def test_delete_browser_conversation_removes_only_browser_conversation(
             "created_at": "2026-08-16T12:00:00Z",
             "updated_at": "2026-08-16T12:00:00Z",
             "title": "Chat keep",
+            "last_page_url": None,
+            "last_page_title": None,
         },
     ]
     assert remaining_browser.json() == []

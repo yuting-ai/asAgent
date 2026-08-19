@@ -53,16 +53,16 @@ async def test_browser_click_tool_schema_rejects_invalid_target_ids() -> None:
     with pytest.raises(ToolArgumentsValidationError):
         await executor.execute("browser.click", {})
     with pytest.raises(ToolArgumentsValidationError):
-        await executor.execute("browser.click", {"target_id": ""})
+        await executor.execute("browser.click", {"ref": ""})
     with pytest.raises(ToolArgumentsValidationError):
         await executor.execute(
             "browser.click",
-            {"target_id": "x" * 81},
+            {"ref": "x" * 81},
         )
     with pytest.raises(ToolArgumentsValidationError):
         await executor.execute(
             "browser.click",
-            {"target_id": "target_1", "extra": True},
+            {"ref": "target_1", "extra": True},
         )
     with pytest.raises(ToolArgumentsValidationError):
         await executor.execute(
@@ -71,12 +71,12 @@ async def test_browser_click_tool_schema_rejects_invalid_target_ids() -> None:
         )
 
     Draft202012Validator(tool.definition.input_schema).validate(
-        {"target_id": "target_2"},
+        {"ref": "target_2"},
     )
     assert tool.definition.requires_approval is False
     assert tool.definition.required_permissions == frozenset({"browser.click"})
     assert tool.definition.risk_level == "high"
-    assert "inspect_interactive" in tool.definition.description
+    assert "take_snapshot" in tool.definition.description
 
 
 @pytest.mark.asyncio
@@ -111,7 +111,7 @@ async def test_browser_click_executor_runs_without_approval_policy() -> None:
         )
         result = await executor.execute(
             "browser.click",
-            {"target_id": "target_2"},
+            {"ref": "target_2"},
         )
 
     assert json.loads(result) == {
@@ -150,7 +150,7 @@ async def test_browser_click_tool_posts_target_id_to_bridge() -> None:
             ),
             tab_id="tab-visible",
         )
-        result = await tool.execute({"target_id": "target_2"})
+        result = await tool.execute({"ref": "target_2"})
 
     assert json.loads(result) == {
         "action": "clicked",
@@ -181,7 +181,7 @@ async def test_browser_click_tool_maps_safe_bridge_failure() -> None:
             tab_id="tab-1",
         )
         with pytest.raises(ToolOperationError, match="target is obscured"):
-            await tool.execute({"target_id": "target_1"})
+            await tool.execute({"ref": "target_1"})
 
 
 @pytest.mark.asyncio
@@ -247,8 +247,8 @@ async def test_browser_click_registers_only_for_bound_browser_runs() -> None:
     )
     assert browser_registry.get("browser.click").definition.tool_id == "browser.click"
     assert (
-        browser_registry.get("browser.inspect_interactive").definition.tool_id
-        == "browser.inspect_interactive"
+        browser_registry.get("browser.take_snapshot").definition.tool_id
+        == "browser.take_snapshot"
     )
     assert (
         browser_registry.get("browser.read_current_page").definition.tool_id

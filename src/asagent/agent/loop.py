@@ -18,10 +18,9 @@ from asagent.models.contracts import (
     ModelMessage,
     ModelMessageRole,
     ModelRequest,
-    ModelResponse,
     ModelToolCall,
 )
-from asagent.models.errors import ProviderTimeoutError
+from asagent.models.errors import ProviderError, ProviderTimeoutError
 from asagent.models.provider import ModelProvider
 from asagent.tools.approval import ToolApprovalRequest
 from asagent.tools.errors import (
@@ -76,6 +75,7 @@ class AgentLoop:
         tool_snapshot: ToolSnapshot,
         max_steps: int = 20,
         max_calls_per_tool_input: int | None = None,
+        max_tool_calls_per_model_response: int | None = None,
         max_tool_result_chars: int = 4_000,
         event_publisher: EventPublisher | None = None,
         event_id_factory: Callable[[], EventId] | None = None,
@@ -89,6 +89,11 @@ class AgentLoop:
             raise ValueError("max_steps must be between 1 and 50")
         if max_calls_per_tool_input is not None and max_calls_per_tool_input < 1:
             raise ValueError("max_calls_per_tool_input must be positive")
+        if (
+            max_tool_calls_per_model_response is not None
+            and max_tool_calls_per_model_response < 1
+        ):
+            raise ValueError("max_tool_calls_per_model_response must be positive")
         if max_tool_result_chars < len(_TOOL_RESULT_TRUNCATION_MARKER):
             raise ValueError(
                 "max_tool_result_chars must fit the truncation marker",
@@ -99,6 +104,7 @@ class AgentLoop:
         self._tool_snapshot = tool_snapshot
         self._max_steps = max_steps
         self._max_calls_per_tool_input = max_calls_per_tool_input
+        self._max_tool_calls_per_model_response = max_tool_calls_per_model_response
         self._max_tool_result_chars = max_tool_result_chars
         self._event_publisher = event_publisher
         self._event_id_factory = event_id_factory
@@ -175,6 +181,9 @@ class AgentLoop:
             text: str | None,
             error: str | None = None,
         ) -> AgentLoopResult:
+            event_data: dict[str, object] = {"steps_used": steps_used}
+            if error is not None:
+                event_data["error_summary"] = error
             await publish(
                 {
                     RunStatus.COMPLETED: "run.completed",
@@ -182,7 +191,7 @@ class AgentLoop:
                     RunStatus.CANCELLED: "run.cancelled",
                     RunStatus.LIMIT_REACHED: "run.limit_reached",
                 }[status],
-                {"steps_used": steps_used},
+                event_data,
             )
             return AgentLoopResult(
                 status=status,
@@ -224,20 +233,27 @@ class AgentLoop:
                         None,
                         "model call timed out",
                     )
+                except ProviderError as error:
+                    return await result(
+                        RunStatus.FAILED,
+                        None,
+                        f"model provider failed ({type(error).__name__})",
+                    )
 
                 steps_used = next_step
+                tool_calls = response.tool_calls
                 await publish(
                     "model.completed",
                     {
                         "step": steps_used,
-                        "tool_call_count": len(response.tool_calls),
+                        "tool_call_count": len(tool_calls),
                     },
                 )
 
                 if self._is_cancelled(cancellation_token):
                     return await result(RunStatus.CANCELLED, None)
 
-                invalid_error = self._invalid_tool_calls_error(response)
+                invalid_error = self._invalid_tool_calls_error(tool_calls)
                 if invalid_error is not None:
                     return await result(
                         RunStatus.FAILED,
@@ -248,11 +264,11 @@ class AgentLoop:
                 assistant_message = ModelMessage(
                     role=ModelMessageRole.ASSISTANT,
                     content=response.text,
-                    tool_calls=response.tool_calls,
+                    tool_calls=tool_calls,
                 )
                 history.append(assistant_message)
 
-                if not response.tool_calls:
+                if not tool_calls:
                     if response.text is None:
                         return await result(
                             RunStatus.FAILED,
@@ -265,11 +281,11 @@ class AgentLoop:
                 if steps_used == self._max_steps:
                     return await result(RunStatus.LIMIT_REACHED, response.text)
 
-                for index, tool_call in enumerate(response.tool_calls):
+                for index, tool_call in enumerate(tool_calls):
                     if self._is_cancelled(cancellation_token):
                         self._append_cancelled_tool_results(
                             history,
-                            response.tool_calls[index:],
+                            tool_calls[index:],
                         )
                         return await result(RunStatus.CANCELLED, None)
 
@@ -290,13 +306,21 @@ class AgentLoop:
                     except KeyError:
                         pass
                     await publish("tool.requested", requested_data)
-                    execution = await self._execute_tool(
-                        tool_call,
-                        identical_call_streak,
-                        run_id=run_id,
-                        conversation_id=conversation_id,
-                        publish=publish,
+                    deferred = (
+                        self._max_tool_calls_per_model_response is not None
+                        and index >= self._max_tool_calls_per_model_response
                     )
+                    if deferred:
+                        execution = self._deferred_tool_call(tool_call)
+                    else:
+                        execution = await self._execute_tool(
+                            tool_call,
+                            identical_call_streak,
+                            run_id=run_id,
+                            conversation_id=conversation_id,
+                            publish=publish,
+                        )
+                    warning = execution.content == "Error: tool arguments are invalid."
                     event_data: dict[str, object] = {
                         "tool_call_id": tool_call.call_id,
                     }
@@ -306,11 +330,29 @@ class AgentLoop:
                             execution.tool_id,
                         ).display_name
                     if not execution.succeeded:
-                        event_data["error_summary"] = _tool_error_summary(
-                            execution.content,
+                        event_data["error_summary"] = (
+                            "Deferred until next action."
+                            if deferred
+                            else (
+                                "Tool arguments were invalid; replanning."
+                                if warning
+                                else _tool_error_summary(execution.content)
+                            )
                         )
                     await publish(
-                        ("tool.completed" if execution.succeeded else "tool.failed"),
+                        (
+                            "tool.deferred"
+                            if deferred
+                            else (
+                                "tool.warning"
+                                if warning
+                                else (
+                                    "tool.completed"
+                                    if execution.succeeded
+                                    else "tool.failed"
+                                )
+                            )
+                        ),
                         event_data,
                     )
                     await self._record_tool_call(
@@ -536,6 +578,23 @@ class AgentLoop:
                 tool_id=tool_id,
             )
 
+    def _deferred_tool_call(
+        self,
+        tool_call: ModelToolCall,
+    ) -> _ToolExecutionResult:
+        try:
+            tool_id = self._tool_snapshot.tool_id_for(tool_call.name)
+        except KeyError:
+            tool_id = None
+        return _ToolExecutionResult(
+            content=(
+                "Error: another tool call from this model response already ran; "
+                "review its result before requesting the next action."
+            ),
+            succeeded=False,
+            tool_id=tool_id,
+        )
+
     @staticmethod
     def _is_cancelled(
         cancellation_token: RunCancellationToken | None,
@@ -566,8 +625,10 @@ class AgentLoop:
         return result[:prefix_length] + _TOOL_RESULT_TRUNCATION_MARKER
 
     @staticmethod
-    def _invalid_tool_calls_error(response: ModelResponse) -> str | None:
-        call_ids = [tool_call.call_id for tool_call in response.tool_calls]
+    def _invalid_tool_calls_error(
+        tool_calls: tuple[ModelToolCall, ...],
+    ) -> str | None:
+        call_ids = [tool_call.call_id for tool_call in tool_calls]
 
         if any(not call_id for call_id in call_ids):
             return "model response contained an empty tool call id"

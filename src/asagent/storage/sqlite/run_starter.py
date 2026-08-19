@@ -55,6 +55,8 @@ class SqliteRunStarter:
                 )
                 .values(
                     title=conversation.title,
+                    last_page_url=conversation.last_page_url,
+                    last_page_title=conversation.last_page_title,
                     updated_at=_to_utc(conversation.updated_at),
                 ),
             )

@@ -24,6 +24,8 @@ type ConversationSummary = {
   created_at: string
   updated_at: string
   title: string | null
+  last_page_url: string | null
+  last_page_title: string | null
 }
 
 type ConversationMessage = {
@@ -41,7 +43,7 @@ type ActiveRun = {
 
 type RunActivityOutcome = 'completed' | 'failed' | 'cancelled' | 'limit'
 
-type RunActivityStepStatus = 'running' | 'completed' | 'failed' | 'waiting'
+type RunActivityStepStatus = 'running' | 'completed' | 'failed' | 'waiting' | 'deferred' | 'warning'
 
 type RunActivityStep = {
   id: string
@@ -298,6 +300,17 @@ function conversationLabel(title: string | null): string {
   return title ?? 'New conversation'
 }
 
+function browserConversationHost(url: string | null): string | null {
+  if (url === null) {
+    return null
+  }
+  try {
+    return new URL(url).hostname.replace(/^www\./u, '') || null
+  } catch {
+    return null
+  }
+}
+
 function fileAccessSummary(settings: WorkspaceSettingsStatus): string {
   const label = (path: string, kind: 'File' | 'Folder'): string => {
     const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
@@ -408,6 +421,22 @@ function runActivityOutcome(eventType: string): RunActivityOutcome | null {
   }
 }
 
+function isDeferredToolEvent(eventType: string, data: Record<string, unknown>): boolean {
+  return (
+    eventType === 'tool.deferred' ||
+    (eventType === 'tool.failed' &&
+      typeof data.error_summary === 'string' &&
+      data.error_summary.startsWith('another tool call from this model response already ran'))
+  )
+}
+
+function isWarningToolEvent(eventType: string, data: Record<string, unknown>): boolean {
+  return (
+    eventType === 'tool.warning' ||
+    (eventType === 'tool.failed' && data.error_summary === 'tool arguments are invalid.')
+  )
+}
+
 function formatElapsed(startedAt: number, endedAt: number | null): string | null {
   const end = endedAt ?? Date.now()
   const seconds = Math.max(1, Math.round((end - startedAt) / 1000))
@@ -460,13 +489,24 @@ function persistedRunActivity(history: PersistedRunHistory): RunActivity {
       const label =
         typeof event.data.display_name === 'string' ? event.data.display_name : 'Use tool'
       steps.push({ id: `tool:${callId}`, label, detail: null, status: 'completed' })
-    } else if (event.event_type === 'tool.failed') {
+    } else if (
+      event.event_type === 'tool.failed' ||
+      event.event_type === 'tool.deferred' ||
+      event.event_type === 'tool.warning'
+    ) {
       const callId = typeof event.data.tool_call_id === 'string' ? event.data.tool_call_id : ''
-      const detail =
-        typeof event.data.error_summary === 'string' ? event.data.error_summary : 'Tool failed.'
+      const deferred = isDeferredToolEvent(event.event_type, event.data)
+      const warning = isWarningToolEvent(event.event_type, event.data)
+      const detail = deferred
+        ? 'Deferred until next action.'
+        : warning
+          ? 'Tool arguments were invalid; replanning.'
+          : typeof event.data.error_summary === 'string'
+            ? event.data.error_summary
+            : 'Tool failed.'
       const step = steps.find((item) => item.id === `tool:${callId}`)
       if (step !== undefined) {
-        step.status = 'failed'
+        step.status = deferred ? 'deferred' : warning ? 'warning' : 'failed'
         step.detail = detail
       }
     }
@@ -495,11 +535,15 @@ function runHistoryByAssistantMessage(
   history: PersistedRunHistory[]
 ): Map<string, PersistedRunHistory[]> {
   const result = new Map<string, PersistedRunHistory[]>()
-  for (const run of history) {
+  for (const [index, run] of history.entries()) {
+    const nextRun = history[index + 1]
+    const nextRunStartedAt =
+      nextRun === undefined ? Number.POSITIVE_INFINITY : new Date(nextRun.run.created_at).getTime()
     const assistant = messages.find(
       (message) =>
         message.role === 'assistant' &&
-        new Date(message.created_at).getTime() >= new Date(run.run.updated_at).getTime()
+        new Date(message.created_at).getTime() >= new Date(run.run.updated_at).getTime() &&
+        new Date(message.created_at).getTime() < nextRunStartedAt
     )
     if (assistant !== undefined) {
       const entries = result.get(assistant.message_id) ?? []
@@ -564,9 +608,13 @@ function RunActivityCard({
                     ? '✓'
                     : step.status === 'failed'
                       ? '×'
-                      : step.status === 'waiting'
-                        ? '…'
-                        : '•'}
+                      : step.status === 'deferred'
+                        ? '↷'
+                        : step.status === 'warning'
+                          ? '!'
+                          : step.status === 'waiting'
+                            ? '…'
+                            : '•'}
                 </span>
                 <span>
                   {step.label}
@@ -1305,10 +1353,19 @@ export default function App(): React.JSX.Element {
       }
 
       if (update.conversationId === selectedBrowserConversationIdRef.current) {
-        void window.desktop
-          .listBrowserConversationMessages(update.conversationId)
-          .then((nextMessages) => {
-            setBrowserMessages(nextMessages)
+        const loadId = ++browserMessageLoadIdRef.current
+        void Promise.all([
+          window.desktop.listBrowserConversationMessages(update.conversationId),
+          window.desktop.listBrowserConversationRunHistory(update.conversationId)
+        ])
+          .then(([nextMessages, history]) => {
+            if (
+              loadId === browserMessageLoadIdRef.current &&
+              selectedBrowserConversationIdRef.current === update.conversationId
+            ) {
+              setBrowserMessages(nextMessages)
+              setBrowserRunHistory(history)
+            }
           })
           .catch(() => setErrorMessage('Messages could not be refreshed.'))
       }
@@ -1534,6 +1591,30 @@ export default function App(): React.JSX.Element {
   const chatRunIsActive = activeRun?.conversationId === selectedConversationId
   const browserRunIsActive = activeRun?.conversationId === selectedBrowserConversationId
 
+  const visibleBrowserRunHistory = browserRunHistory.filter(
+    (history) => history.run.run_id !== runActivity?.runId
+  )
+  const allBrowserRunHistoryByMessage = runHistoryByAssistantMessage(
+    browserMessages,
+    browserRunHistory
+  )
+  const browserRunHistoryByMessage = new Map(
+    [...allBrowserRunHistoryByMessage.entries()]
+      .map(
+        ([messageId, items]) =>
+          [messageId, items.filter((history) => history.run.run_id !== runActivity?.runId)] as const
+      )
+      .filter(([, items]) => items.length > 0)
+  )
+  const matchedBrowserRunIds = new Set(
+    [...browserRunHistoryByMessage.values()].flatMap((items) =>
+      items.map((history) => history.run.run_id)
+    )
+  )
+  const unmatchedBrowserRunHistory = visibleBrowserRunHistory.filter(
+    (history) => !matchedBrowserRunIds.has(history.run.run_id)
+  )
+
   const usesExternalModel = appInfo?.dataProcessingMode === 'external'
 
   function openAssistantLink(href: string | undefined): void {
@@ -1654,16 +1735,36 @@ export default function App(): React.JSX.Element {
           ]
         }
       }
-      if (eventType === 'tool.completed' || eventType === 'tool.failed') {
+      if (
+        eventType === 'tool.completed' ||
+        eventType === 'tool.failed' ||
+        eventType === 'tool.deferred' ||
+        eventType === 'tool.warning'
+      ) {
         const callId = typeof data.tool_call_id === 'string' ? data.tool_call_id : ''
-        const errorSummary = typeof data.error_summary === 'string' ? data.error_summary : null
+        const deferred = isDeferredToolEvent(eventType, data)
+        const warning = isWarningToolEvent(eventType, data)
+        const errorSummary = deferred
+          ? 'Deferred until next action.'
+          : warning
+            ? 'Tool arguments were invalid; replanning.'
+            : typeof data.error_summary === 'string'
+              ? data.error_summary
+              : null
         return {
           ...current,
           steps: current.steps.map((step) =>
             step.id === `tool:${callId}`
               ? {
                   ...step,
-                  status: eventType === 'tool.completed' ? 'completed' : 'failed',
+                  status:
+                    eventType === 'tool.completed'
+                      ? 'completed'
+                      : deferred
+                        ? 'deferred'
+                        : warning
+                          ? 'warning'
+                          : 'failed',
                   detail: errorSummary
                 }
               : step
@@ -2317,6 +2418,53 @@ export default function App(): React.JSX.Element {
     )
     void window.desktop.setBrowserTabConversation(tabId, conversationId).catch(() => undefined)
     setBrowserRecentOpen(false)
+  }
+
+  function openBrowserConversation(conversationId: string): void {
+    const currentTabs = browserTabsRef.current
+    const conversation = browserConversations.find(
+      (candidate) => candidate.conversation_id === conversationId
+    )
+    if (conversation === undefined) {
+      setErrorMessage('The conversation could not be opened.')
+      setBrowserRecentOpen(false)
+      return
+    }
+    const boundTab = currentTabs.find(
+      (tab) => browserConversationByTabId[tab.id] === conversationId
+    )
+    if (boundTab !== undefined) {
+      selectBrowserTab(boundTab.id)
+      return
+    }
+
+    if (currentTabs.length >= MAX_BROWSER_TABS) {
+      setErrorMessage('Close a browser tab before opening this conversation.')
+      setBrowserRecentOpen(false)
+      return
+    }
+
+    const created = createBrowserTab()
+    if (conversation.last_page_url !== null) {
+      created.address = conversation.last_page_url
+      created.title = conversation.last_page_title ?? browserTabTitle(conversation.last_page_url)
+    }
+    setBrowserTabs([...currentTabs, created])
+    setBrowserConversationByTabId((current) => ({
+      ...current,
+      [created.id]: conversationId
+    }))
+    setActiveBrowserTabId(created.id)
+    setBrowserError(null)
+    setBrowserRecentOpen(false)
+    void window.desktop
+      .setBrowserTabConversation(created.id, conversationId)
+      .catch(() => setErrorMessage('The conversation could not be opened.'))
+    if (conversation.last_page_url !== null) {
+      void window.desktop.navigateBrowser(created.id, conversation.last_page_url).catch((error) => {
+        setBrowserError(browserNavigationError(error))
+      })
+    }
   }
 
   async function createBrowserConversationForActiveTab(): Promise<void> {
@@ -3397,6 +3545,12 @@ export default function App(): React.JSX.Element {
                               browserConversations.map((conversation) => {
                                 const selected =
                                   conversation.conversation_id === selectedBrowserConversationId
+                                const open = browserTabs.some(
+                                  (tab) =>
+                                    browserConversationByTabId[tab.id] ===
+                                    conversation.conversation_id
+                                )
+                                const host = browserConversationHost(conversation.last_page_url)
                                 return (
                                   <div
                                     className={`browser-recent-row${selected ? ' selected' : ''}`}
@@ -3406,16 +3560,27 @@ export default function App(): React.JSX.Element {
                                       aria-selected={selected}
                                       className="browser-recent-item"
                                       onClick={() =>
-                                        bindBrowserConversationToActiveTab(
-                                          conversation.conversation_id
-                                        )
+                                        openBrowserConversation(conversation.conversation_id)
                                       }
                                       role="option"
                                       type="button"
                                     >
-                                      <span className="browser-recent-title">
-                                        {conversationLabel(conversation.title)}
+                                      <span className="browser-recent-copy">
+                                        <span className="browser-recent-title">
+                                          {conversationLabel(conversation.title)}
+                                        </span>
+                                        {host === null ? null : (
+                                          <span
+                                            className="browser-recent-host"
+                                            title={conversation.last_page_url ?? undefined}
+                                          >
+                                            {host}
+                                          </span>
+                                        )}
                                       </span>
+                                      {open ? (
+                                        <span className="browser-recent-open">Open</span>
+                                      ) : null}
                                       <time
                                         className="browser-recent-time"
                                         dateTime={conversation.updated_at}
@@ -3460,6 +3625,7 @@ export default function App(): React.JSX.Element {
                     ) : null}
                     <div className="browser-agent-messages">
                       {browserMessages.length === 0 &&
+                      visibleBrowserRunHistory.length === 0 &&
                       runActivity?.conversationId !== selectedBrowserConversationId ? (
                         <div className="browser-agent-empty">
                           <div aria-hidden="true" className="browser-agent-empty-icon">
@@ -3467,8 +3633,7 @@ export default function App(): React.JSX.Element {
                           </div>
                           <p className="browser-agent-empty-title">Talk with asAgent</p>
                           <p className="browser-agent-empty-copy">
-                            Messages here are a separate Browser conversation. asAgent cannot read
-                            or operate on this page yet.
+                            Start a Browser conversation to read or operate the current page.
                           </p>
                         </div>
                       ) : (
@@ -3479,29 +3644,26 @@ export default function App(): React.JSX.Element {
                               key={message.message_id}
                             >
                               {message.role === 'assistant'
-                                ? (
-                                    runHistoryByAssistantMessage(
-                                      browserMessages,
-                                      browserRunHistory
-                                    ).get(message.message_id) ?? []
-                                  ).map((history) => {
-                                    const activity = persistedRunActivity(history)
-                                    return (
-                                      <RunActivityCard
-                                        activity={activity}
-                                        expanded={expandedHistoryRunIds.has(activity.runId)}
-                                        key={activity.runId}
-                                        onExpandedChange={(expanded) =>
-                                          setExpandedHistoryRunIds((current) => {
-                                            const next = new Set(current)
-                                            if (expanded) next.add(activity.runId)
-                                            else next.delete(activity.runId)
-                                            return next
-                                          })
-                                        }
-                                      />
-                                    )
-                                  })
+                                ? (browserRunHistoryByMessage.get(message.message_id) ?? []).map(
+                                    (history) => {
+                                      const activity = persistedRunActivity(history)
+                                      return (
+                                        <RunActivityCard
+                                          activity={activity}
+                                          expanded={expandedHistoryRunIds.has(activity.runId)}
+                                          key={activity.runId}
+                                          onExpandedChange={(expanded) =>
+                                            setExpandedHistoryRunIds((current) => {
+                                              const next = new Set(current)
+                                              if (expanded) next.add(activity.runId)
+                                              else next.delete(activity.runId)
+                                              return next
+                                            })
+                                          }
+                                        />
+                                      )
+                                    }
+                                  )
                                 : null}
                               {runActivity?.conversationId === selectedBrowserConversationId &&
                               message.role === 'assistant' &&
@@ -3578,6 +3740,24 @@ export default function App(): React.JSX.Element {
                               </div>
                             </div>
                           ))}
+                          {unmatchedBrowserRunHistory.map((history) => {
+                            const activity = persistedRunActivity(history)
+                            return (
+                              <RunActivityCard
+                                activity={activity}
+                                expanded={expandedHistoryRunIds.has(activity.runId)}
+                                key={activity.runId}
+                                onExpandedChange={(expanded) =>
+                                  setExpandedHistoryRunIds((current) => {
+                                    const next = new Set(current)
+                                    if (expanded) next.add(activity.runId)
+                                    else next.delete(activity.runId)
+                                    return next
+                                  })
+                                }
+                              />
+                            )
+                          })}
                           {runActivity?.conversationId === selectedBrowserConversationId &&
                           !browserMessages.some(
                             (message) =>

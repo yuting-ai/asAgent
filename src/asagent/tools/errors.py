@@ -21,6 +21,7 @@ SAFE_BROWSER_OPERATION_ERRORS = frozenset(
         "target is obscured",
         "target is not editable",
         "target is not selectable",
+        "target is not submittable",
         "option was not found",
         "option is disabled",
         "page changed; inspect interactive elements again",

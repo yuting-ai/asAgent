@@ -27,7 +27,7 @@ from asagent.models.contracts import (
     ModelResponse,
     ModelToolCall,
 )
-from asagent.models.errors import ProviderTimeoutError
+from asagent.models.errors import ProviderRequestError, ProviderTimeoutError
 from asagent.models.fake_provider import FakeModelProvider
 from asagent.models.provider import ModelProvider
 from asagent.models.tool_names import openai_compatible_tool_name
@@ -95,6 +95,15 @@ class TimeoutModelProvider:
     async def complete(self, request: ModelRequest) -> ModelResponse:
         self.requests.append(request)
         raise ProviderTimeoutError("model provider request timed out")
+
+    def stream(self, request: ModelRequest) -> AsyncIterator[ModelEvent]:
+        raise AssertionError("stream is not used by AgentLoop")
+
+
+class RejectedModelProvider:
+    async def complete(self, request: ModelRequest) -> ModelResponse:
+        del request
+        raise ProviderRequestError("provider rejected the request")
 
     def stream(self, request: ModelRequest) -> AsyncIterator[ModelEvent]:
         raise AssertionError("stream is not used by AgentLoop")
@@ -172,6 +181,7 @@ def _loop(
     *,
     max_steps: int = 8,
     max_calls_per_tool_input: int | None = None,
+    max_tool_calls_per_model_response: int | None = None,
     max_tool_result_chars: int = 4_000,
     granted_permissions: frozenset[str] = frozenset(),
     approval_policy: ToolApprovalPolicy | None = None,
@@ -195,6 +205,7 @@ def _loop(
         tool_snapshot=_snapshot(tool),
         max_steps=max_steps,
         max_calls_per_tool_input=max_calls_per_tool_input,
+        max_tool_calls_per_model_response=max_tool_calls_per_model_response,
         max_tool_result_chars=max_tool_result_chars,
         event_publisher=event_publisher,
         event_id_factory=event_id_factory,
@@ -295,6 +306,79 @@ async def test_loop_executes_tool_then_returns_final_text() -> None:
         tool_call_id="call_123",
     )
     assert provider.requests[1].tools == _snapshot(tool).model_tools
+
+
+@pytest.mark.asyncio
+async def test_loop_limits_one_tool_call_per_model_response() -> None:
+    first_call = ModelToolCall(
+        call_id="call_1",
+        name="builtin_echo",
+        arguments={"text": "hello"},
+    )
+    second_call = ModelToolCall(
+        call_id="call_2",
+        name="builtin_echo",
+        arguments={"text": "hello"},
+    )
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(text=None, tool_calls=(first_call, second_call)),
+            ModelResponse(text="Done.", tool_calls=()),
+        ),
+    )
+    tool = CountingEchoTool()
+    publisher = CollectingEventPublisher()
+    event_ids = iter(EventId(f"evt_{index}") for index in range(1, 11))
+    now = datetime(2026, 8, 19, 12, 0, tzinfo=UTC)
+
+    result = await _loop(
+        provider,
+        tool,
+        max_tool_calls_per_model_response=1,
+        event_publisher=publisher,
+        event_id_factory=lambda: next(event_ids),
+        clock=lambda: now,
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+        run_id=RunId("run_123"),
+        conversation_id=ConversationId("conv_123"),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert tool.calls == 1
+    assert provider.requests[1].messages[-3] == ModelMessage(
+        role=ModelMessageRole.ASSISTANT,
+        content=None,
+        tool_calls=(first_call, second_call),
+    )
+    assert provider.requests[1].messages[-2] == ModelMessage(
+        role=ModelMessageRole.TOOL,
+        content="Echo: hello",
+        tool_call_id="call_1",
+    )
+    assert provider.requests[1].messages[-1] == ModelMessage(
+        role=ModelMessageRole.TOOL,
+        content=(
+            "Error: another tool call from this model response already ran; "
+            "review its result before requesting the next action."
+        ),
+        tool_call_id="call_2",
+    )
+    assert [event.event_type for event in publisher.events] == [
+        "run.started",
+        "model.requested",
+        "model.completed",
+        "tool.requested",
+        "tool.completed",
+        "tool.requested",
+        "tool.deferred",
+        "model.requested",
+        "model.completed",
+        "run.completed",
+    ]
+    assert publisher.events[6].data["error_summary"] == "Deferred until next action."
 
 
 @pytest.mark.asyncio
@@ -407,11 +491,22 @@ async def test_loop_appends_paired_tool_error_for_invalid_arguments() -> None:
         ),
     )
     tool = CountingEchoTool()
+    publisher = CollectingEventPublisher()
+    event_ids = iter(EventId(f"evt_{index}") for index in range(1, 9))
+    now = datetime(2026, 8, 19, 12, 0, tzinfo=UTC)
 
-    result = await _loop(provider, tool).run(
+    result = await _loop(
+        provider,
+        tool,
+        event_publisher=publisher,
+        event_id_factory=lambda: next(event_ids),
+        clock=lambda: now,
+    ).run(
         model_name="fake-model",
         system_prompt="Be helpful.",
         messages=(_user_message(),),
+        run_id=RunId("run_123"),
+        conversation_id=ConversationId("conv_123"),
     )
 
     assert result.status is RunStatus.COMPLETED
@@ -421,6 +516,19 @@ async def test_loop_appends_paired_tool_error_for_invalid_arguments() -> None:
         role=ModelMessageRole.TOOL,
         content="Error: tool arguments are invalid.",
         tool_call_id="call_123",
+    )
+    assert [event.event_type for event in publisher.events] == [
+        "run.started",
+        "model.requested",
+        "model.completed",
+        "tool.requested",
+        "tool.warning",
+        "model.requested",
+        "model.completed",
+        "run.completed",
+    ]
+    assert publisher.events[4].data["error_summary"] == (
+        "Tool arguments were invalid; replanning."
     )
 
 
@@ -804,6 +912,39 @@ async def test_loop_fails_when_model_provider_times_out() -> None:
 
 
 @pytest.mark.asyncio
+async def test_loop_records_sanitized_model_provider_failure() -> None:
+    publisher = CollectingEventPublisher()
+    event_ids = iter(EventId(f"evt_{index}") for index in range(1, 4))
+    now = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+
+    result = await _loop(
+        RejectedModelProvider(),
+        CountingEchoTool(),
+        event_publisher=publisher,
+        event_id_factory=lambda: next(event_ids),
+        clock=lambda: now,
+    ).run(
+        model_name="fake-model",
+        system_prompt="Be helpful.",
+        messages=(_user_message(),),
+        run_id=RunId("run_123"),
+        conversation_id=ConversationId("conv_123"),
+    )
+
+    assert result.status is RunStatus.FAILED
+    assert result.error == "model provider failed (ProviderRequestError)"
+    assert [event.event_type for event in publisher.events] == [
+        "run.started",
+        "model.requested",
+        "run.failed",
+    ]
+    assert publisher.events[-1].data == {
+        "steps_used": 0,
+        "error_summary": "model provider failed (ProviderRequestError)",
+    }
+
+
+@pytest.mark.asyncio
 async def test_loop_closes_pending_tool_calls_when_cancelled() -> None:
     provider = FakeModelProvider(
         responses=(
@@ -937,7 +1078,10 @@ async def test_loop_publishes_failed_terminal_event_for_model_timeout() -> None:
         "model.requested",
         "run.failed",
     ]
-    assert publisher.events[-1].data == {"steps_used": 0}
+    assert publisher.events[-1].data == {
+        "steps_used": 0,
+        "error_summary": "model call timed out",
+    }
 
 
 @pytest.mark.asyncio

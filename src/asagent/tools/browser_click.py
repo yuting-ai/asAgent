@@ -29,8 +29,8 @@ class BrowserClickTool:
                 "Clicks one interactive element on the browser tab that was "
                 "active when this Browser conversation message was submitted. "
                 "The tab must still be the user's currently visible browser "
-                "tab. Accepts only a target_id returned by "
-                "browser.inspect_interactive. Do not guess CSS selectors or "
+                "tab. Accepts only a ref returned by browser.take_snapshot. "
+                "Do not guess CSS selectors or "
                 "use external search to infer page structure. Does not type, "
                 "fill, select, or submit forms. The result may include a "
                 "bounded page snapshot captured after the click settles. Use "
@@ -41,13 +41,13 @@ class BrowserClickTool:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "target_id": {
+                    "ref": {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": _MAX_TARGET_ID_CHARS,
                     },
                 },
-                "required": ["target_id"],
+                "required": ["ref"],
                 "additionalProperties": False,
             },
             risk_level="high",
@@ -81,18 +81,18 @@ class BrowserClickTool:
 
 
 def _require_target_id(arguments: Mapping[str, object]) -> str:
-    if set(arguments) != {"target_id"}:
-        raise ValueError("browser.click accepts only a target_id argument")
+    if set(arguments) != {"ref"}:
+        raise ValueError("browser.click accepts only a ref argument")
 
-    value = arguments["target_id"]
+    value = arguments["ref"]
     if not isinstance(value, str):
-        raise ValueError("browser.click target_id must be a string")
+        raise ValueError("browser.click ref must be a string")
 
     target_id = value.strip()
     if target_id == "":
-        raise ValueError("browser.click target_id must not be blank")
+        raise ValueError("browser.click ref must not be blank")
     if len(target_id) > _MAX_TARGET_ID_CHARS:
-        raise ValueError("browser.click target_id is too long")
+        raise ValueError("browser.click ref is too long")
 
     return target_id
 

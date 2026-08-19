@@ -444,6 +444,12 @@ app.whenReady().then(async () => {
       }
       return visibleBrowser.selectCurrentPage(tabId, targetId, value)
     },
+    submitCurrentPage: (tabId, targetId) => {
+      if (visibleBrowser === undefined) {
+        throw new Error('current browser tab is not visible')
+      }
+      return visibleBrowser.submitCurrentPage(tabId, targetId)
+    },
     waitForCurrentPage: (tabId, seconds) => {
       if (visibleBrowser === undefined) {
         throw new Error('current browser tab is not visible')
@@ -873,8 +879,13 @@ app.whenReady().then(async () => {
         throw new Error('Browser page is not visible.')
       }
 
+      const page = visibleBrowser.getTabState(parsedTabId)
+      const pageUrl = page.url.trim()
+      const lastPageUrl = pageUrl !== '' && pageUrl.length <= 2048 ? pageUrl : null
+      const lastPageTitle = lastPageUrl === null ? null : page.title.trim() || null
+
       return getReadyBackendLauncher()
-        .submitBrowserMessage(conversationId, content, parsedTabId)
+        .submitBrowserMessage(conversationId, content, parsedTabId, lastPageUrl, lastPageTitle)
         .then((submitted) => {
           watchRun(event.sender, conversationId, submitted)
           return submitted

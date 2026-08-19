@@ -5,6 +5,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Final, Literal
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
@@ -94,6 +95,8 @@ class ConversationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     title: str | None
+    last_page_url: str | None
+    last_page_title: str | None
 
     @classmethod
     def from_conversation(cls, conversation: Conversation) -> "ConversationResponse":
@@ -102,6 +105,8 @@ class ConversationResponse(BaseModel):
             created_at=conversation.created_at,
             updated_at=conversation.updated_at,
             title=conversation.title,
+            last_page_url=conversation.last_page_url,
+            last_page_title=conversation.last_page_title,
         )
 
 
@@ -148,6 +153,8 @@ class CreateBrowserMessageRequest(BaseModel):
 
     content: str
     tab_id: str
+    last_page_url: str | None = None
+    last_page_title: str | None = None
 
     @field_validator("content")
     @classmethod
@@ -167,6 +174,40 @@ class CreateBrowserMessageRequest(BaseModel):
         ):
             raise ValueError("tab_id is invalid")
         return tab_id
+
+    @field_validator("last_page_url")
+    @classmethod
+    def last_page_url_must_be_safe(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if len(normalized) > 2048:
+            raise ValueError("last_page_url is too long")
+        try:
+            parsed = urlsplit(normalized)
+            hostname = parsed.hostname
+        except ValueError as error:
+            raise ValueError("last_page_url is invalid") from error
+        if (
+            parsed.scheme not in {"http", "https"}
+            or hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise ValueError("last_page_url is invalid")
+        return normalized
+
+    @field_validator("last_page_title")
+    @classmethod
+    def last_page_title_must_be_bounded(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = " ".join(value.split())
+        if not normalized:
+            return None
+        return normalized[:200]
 
 
 class RunResponse(BaseModel):
@@ -907,6 +948,8 @@ def create_app(
                 conversation_id=ConversationId(conversation_id),
                 content=request.content,
                 user_id=_LOCAL_USER_ID,
+                last_page_url=request.last_page_url,
+                last_page_title=request.last_page_title,
             )
         except (
             UnknownConversationError,

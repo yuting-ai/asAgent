@@ -26,8 +26,8 @@ class BrowserSelectTool:
             display_name="Select page option",
             description=(
                 "Chooses one option on an inspected native HTML select control "
-                "on the visible browser tab. Accepts only a target_id returned "
-                "by browser.inspect_interactive and an option value from that "
+                "on the visible browser tab. Accepts only a ref returned by "
+                "browser.take_snapshot and an option value from that "
                 "element's options list. It does not submit the form. Custom "
                 "searchable dropdowns and comboboxes are not supported; use "
                 "browser.click and browser.fill for those controls."
@@ -35,14 +35,14 @@ class BrowserSelectTool:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "target_id": {
+                    "ref": {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": _MAX_TARGET_ID_CHARS,
                     },
                     "value": {"type": "string", "maxLength": _MAX_VALUE_CHARS},
                 },
-                "required": ["target_id", "value"],
+                "required": ["ref", "value"],
                 "additionalProperties": False,
             },
             risk_level="high",
@@ -83,14 +83,14 @@ class BrowserSelectTool:
 
 
 def _require_arguments(arguments: Mapping[str, object]) -> tuple[str, str]:
-    if set(arguments) != {"target_id", "value"}:
-        raise ValueError("browser.select accepts only target_id and value arguments")
-    target_id = arguments["target_id"]
+    if set(arguments) != {"ref", "value"}:
+        raise ValueError("browser.select accepts only ref and value arguments")
+    target_id = arguments["ref"]
     value = arguments["value"]
     if not isinstance(target_id, str) or target_id.strip() == "":
-        raise ValueError("browser.select target_id must not be blank")
+        raise ValueError("browser.select ref must not be blank")
     if len(target_id.strip()) > _MAX_TARGET_ID_CHARS:
-        raise ValueError("browser.select target_id is too long")
+        raise ValueError("browser.select ref is too long")
     if not isinstance(value, str):
         raise ValueError("browser.select value must be a string")
     if len(value) > _MAX_VALUE_CHARS:

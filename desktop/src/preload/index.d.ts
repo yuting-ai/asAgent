@@ -9,6 +9,8 @@ interface ConversationSummary {
   created_at: string
   updated_at: string
   title: string | null
+  last_page_url: string | null
+  last_page_title: string | null
 }
 
 interface ConversationMessage {

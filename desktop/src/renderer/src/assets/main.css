@@ -2223,6 +2223,15 @@ body.is-resizing-columns {
   color: var(--amber);
 }
 
+.activity-item.is-deferred .activity-item-dot {
+  color: var(--text-faint);
+}
+
+.activity-item.is-warning .activity-item-dot,
+.activity-item.is-warning .activity-item-detail {
+  color: var(--amber);
+}
+
 .activity-item.is-failed .activity-item-dot,
 .activity-item.is-failed .activity-item-detail {
   color: var(--red);
@@ -3073,7 +3082,7 @@ body.is-resizing-columns {
   display: flex;
   flex: 1;
   gap: 10px;
-  align-items: baseline;
+  align-items: center;
   min-width: 0;
   padding: 8px 9px;
   border: 0;
@@ -3083,6 +3092,13 @@ body.is-resizing-columns {
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.browser-recent-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .browser-recent-delete {
@@ -3123,7 +3139,6 @@ body.is-resizing-columns {
 }
 
 .browser-recent-title {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   color: var(--text);
@@ -3131,6 +3146,26 @@ body.is-resizing-columns {
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.browser-recent-host {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-recent-open {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--green);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .browser-recent-time {

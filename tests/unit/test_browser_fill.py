@@ -32,6 +32,11 @@ async def test_browser_fill_validates_arguments_and_posts_only_target_and_value(
             "action": "filled",
             "url": "https://example.com/form",
             "title": "Example form",
+            "page": {
+                "title": "Example form",
+                "url": "https://example.com/form?draft=123",
+                "text": "Draft saved",
+            },
         },
     )
     async with httpx.AsyncClient(transport=transport) as client:
@@ -50,19 +55,22 @@ async def test_browser_fill_validates_arguments_and_posts_only_target_and_value(
         )
 
         with pytest.raises(ToolArgumentsValidationError):
-            await executor.execute("browser.fill", {"target_id": "target_1"})
+            await executor.execute("browser.fill", {"ref": "target_1"})
         with pytest.raises(ToolArgumentsValidationError):
-            await executor.execute(
-                "browser.fill", {"target_id": "target_1", "value": 1}
-            )
+            await executor.execute("browser.fill", {"ref": "target_1", "value": 1})
         result = await executor.execute(
-            "browser.fill", {"target_id": "target_1", "value": "person@example.com"}
+            "browser.fill", {"ref": "target_1", "value": "person@example.com"}
         )
 
     assert json.loads(result) == {
         "action": "filled",
         "url": "https://example.com/form",
         "title": "Example form",
+        "page": {
+            "title": "Example form",
+            "url": "https://example.com/form?draft=123",
+            "text": "Draft saved",
+        },
     }
     assert json.loads(transport.requests[0].content.decode()) == {
         "tab_id": "tab-1",
@@ -70,7 +78,7 @@ async def test_browser_fill_validates_arguments_and_posts_only_target_and_value(
         "value": "person@example.com",
     }
     Draft202012Validator(tool.definition.input_schema).validate(
-        {"target_id": "target_1", "value": ""}
+        {"ref": "target_1", "value": ""}
     )
     assert tool.definition.required_permissions == frozenset({"browser.fill"})
     assert tool.definition.requires_approval is False
@@ -91,4 +99,4 @@ async def test_browser_fill_returns_safe_not_editable_failure() -> None:
             tab_id="tab-1",
         )
         with pytest.raises(ToolOperationError, match="target is not editable"):
-            await tool.execute({"target_id": "target_1", "value": "secret"})
+            await tool.execute({"ref": "target_1", "value": "secret"})

@@ -314,6 +314,31 @@ async def _register_browser_tools(
     )
 
 
+async def _system_prompt_for_conversation(
+    *,
+    workspace_settings: ConversationWorkspaceSettings,
+    conversations: ConversationRepository,
+    conversation_id: ConversationId,
+) -> str:
+    """Add the visible-browser operating contract only to Browser conversations."""
+
+    workspace_context = await workspace_settings.model_context(conversation_id)
+    conversation = await conversations.get(conversation_id)
+    if conversation is None or conversation.kind != "browser":
+        return workspace_context
+
+    browser_context = (
+        "You are operating the user's visible browser tab. Use the browser "
+        "tools listed for this run to perform requested page operations. Take "
+        "a browser.take_snapshot before acting on unfamiliar page elements, "
+        "then use only its returned refs. Do not claim browser capability is "
+        "unavailable without taking a snapshot first. Browser tools act only "
+        "on the visible tab and cannot read credentials; ask the user to enter "
+        "passwords directly."
+    )
+    return "\n\n".join(part for part in (workspace_context, browser_context) if part)
+
+
 def _filesystem_permissions(
     *,
     file_changes: SqliteFileChangeRepository | None,
@@ -369,6 +394,7 @@ def build_agent_loop(
     granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
     max_steps: int = 20,
     max_calls_per_tool_input: int | None = None,
+    max_tool_calls_per_model_response: int | None = None,
 ) -> AgentLoop:
     tool_registry = registry if registry is not None else _register_builtin_tools()
     snapshot = ToolSnapshot.from_definitions(
@@ -385,6 +411,7 @@ def build_agent_loop(
         tool_snapshot=snapshot,
         max_steps=max_steps,
         max_calls_per_tool_input=max_calls_per_tool_input,
+        max_tool_calls_per_model_response=max_tool_calls_per_model_response,
         event_publisher=event_publisher,
         event_id_factory=new_event_id,
         clock=now,
@@ -405,6 +432,7 @@ def build_development_agent_loop(
     granted_permissions: frozenset[str] = _BUILTIN_TOOL_PERMISSIONS,
     max_steps: int = 20,
     max_calls_per_tool_input: int | None = None,
+    max_tool_calls_per_model_response: int | None = None,
 ) -> AgentLoop:
     tool_registry = registry if registry is not None else _register_builtin_tools()
     snapshot = ToolSnapshot.from_definitions(
@@ -421,6 +449,7 @@ def build_development_agent_loop(
         tool_snapshot=snapshot,
         max_steps=max_steps,
         max_calls_per_tool_input=max_calls_per_tool_input,
+        max_tool_calls_per_model_response=max_tool_calls_per_model_response,
         event_publisher=event_publisher,
         event_id_factory=new_event_id,
         clock=now,
@@ -609,6 +638,7 @@ def build_persistent_agent_runtime(
                     | browser_permissions
                 ),
                 max_steps=max_steps,
+                max_tool_calls_per_model_response=(1 if browser_permissions else None),
             )
 
         return PersistentAgentRuntime(
@@ -622,7 +652,13 @@ def build_persistent_agent_runtime(
             ),
             run_finisher=finisher,
             loop_for_conversation=loop_for_conversation,
-            system_prompt_for_conversation=workspace_settings.model_context,
+            system_prompt_for_conversation=lambda conversation_id: (
+                _system_prompt_for_conversation(
+                    workspace_settings=workspace_settings,
+                    conversations=conversations,
+                    conversation_id=conversation_id,
+                )
+            ),
             now=now,
             new_message_id=new_message_id,
         )
@@ -705,6 +741,7 @@ def build_persistent_development_runtime(
                     | browser_permissions
                 ),
                 max_steps=max_steps,
+                max_tool_calls_per_model_response=(1 if browser_permissions else None),
             )
 
         return PersistentAgentRuntime(
@@ -718,7 +755,13 @@ def build_persistent_development_runtime(
             ),
             run_finisher=finisher,
             loop_for_conversation=loop_for_conversation,
-            system_prompt_for_conversation=workspace_settings.model_context,
+            system_prompt_for_conversation=lambda conversation_id: (
+                _system_prompt_for_conversation(
+                    workspace_settings=workspace_settings,
+                    conversations=conversations,
+                    conversation_id=conversation_id,
+                )
+            ),
             now=now,
             new_message_id=new_message_id,
         )

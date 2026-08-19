@@ -12,6 +12,7 @@ import {
   type BrowserInteractiveSnapshot,
   type BrowserPageContent,
   type BrowserSelectResult,
+  type BrowserSubmitResult,
   type BrowserWaitResult
 } from './browser_view'
 
@@ -25,6 +26,7 @@ export type BrowserPageBridgeOptions = {
     targetId: string,
     value: string
   ) => Promise<BrowserSelectResult>
+  submitCurrentPage: (tabId: string, targetId: string) => Promise<BrowserSubmitResult>
   waitForCurrentPage: (tabId: string, seconds: number) => Promise<BrowserWaitResult>
   createServer?: typeof createServer
   randomToken?: () => string
@@ -97,6 +99,10 @@ export class BrowserPageBridge {
     targetId: string,
     value: string
   ) => Promise<BrowserSelectResult>
+  private readonly submitCurrentPage: (
+    tabId: string,
+    targetId: string
+  ) => Promise<BrowserSubmitResult>
   private readonly waitForCurrentPage: (
     tabId: string,
     seconds: number
@@ -112,6 +118,7 @@ export class BrowserPageBridge {
     this.clickCurrentPage = options.clickCurrentPage
     this.fillCurrentPage = options.fillCurrentPage
     this.selectCurrentPage = options.selectCurrentPage
+    this.submitCurrentPage = options.submitCurrentPage
     this.waitForCurrentPage = options.waitForCurrentPage
     this.createHttpServer = options.createServer ?? createServer
     this.randomToken = options.randomToken ?? (() => randomBytes(32).toString('base64url'))
@@ -183,6 +190,7 @@ export class BrowserPageBridge {
           request.url !== '/click-current-page' &&
           request.url !== '/fill-current-page' &&
           request.url !== '/select-current-page' &&
+          request.url !== '/submit-current-page' &&
           request.url !== '/wait-for-current-page')
       ) {
         writeJson(response, 404, { detail: 'not found' })
@@ -275,6 +283,12 @@ export class BrowserPageBridge {
           return
         }
         const result = await this.selectCurrentPage(tabId.trim(), targetId, value)
+        writeJson(response, 200, result)
+        return
+      }
+
+      if (request.url === '/submit-current-page') {
+        const result = await this.submitCurrentPage(tabId.trim(), targetId)
         writeJson(response, 200, result)
         return
       }

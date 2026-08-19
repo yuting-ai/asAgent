@@ -109,12 +109,27 @@ describe('BrowserPageBridge', () => {
     const fillCurrentPage = vi.fn(async () => ({
       action: 'filled' as const,
       url: 'https://example.com/',
-      title: 'Example'
+      title: 'Example',
+      page: {
+        title: 'Example',
+        url: 'https://example.com/?draft=123',
+        text: 'Draft saved'
+      }
     }))
     const selectCurrentPage = vi.fn(async () => ({
       action: 'selected' as const,
       url: 'https://example.com/form',
       title: 'Country'
+    }))
+    const submitCurrentPage = vi.fn(async () => ({
+      action: 'submitted' as const,
+      url: 'https://example.com/thanks',
+      title: 'Thanks',
+      page: {
+        title: 'Thanks',
+        url: 'https://example.com/thanks',
+        text: 'Message sent'
+      }
     }))
     const waitForCurrentPage = vi.fn(async () => ({
       changed: true,
@@ -131,6 +146,7 @@ describe('BrowserPageBridge', () => {
       clickCurrentPage,
       fillCurrentPage,
       selectCurrentPage,
+      submitCurrentPage,
       waitForCurrentPage,
       createServer,
       randomToken: () => 'bridge-token'
@@ -284,7 +300,12 @@ describe('BrowserPageBridge', () => {
     expect(JSON.parse(fillAuthorized.body ?? '')).toEqual({
       action: 'filled',
       url: 'https://example.com/',
-      title: 'Example'
+      title: 'Example',
+      page: {
+        title: 'Example',
+        url: 'https://example.com/?draft=123',
+        text: 'Draft saved'
+      }
     })
 
     const selectUnauthorized = createFakeResponse()
@@ -332,6 +353,58 @@ describe('BrowserPageBridge', () => {
       action: 'selected',
       url: 'https://example.com/form',
       title: 'Country'
+    })
+
+    const submitUnauthorized = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/submit-current-page',
+        {},
+        JSON.stringify({ tab_id: 'tab-1', target_id: 'target_3' })
+      ),
+      submitUnauthorized
+    )
+    await vi.waitFor(() => expect(submitUnauthorized.end).toHaveBeenCalled())
+    expect(submitUnauthorized.statusCode).toBe(401)
+    expect(submitCurrentPage).not.toHaveBeenCalled()
+
+    const submitMissingTarget = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/submit-current-page',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1' })
+      ),
+      submitMissingTarget
+    )
+    await vi.waitFor(() => expect(submitMissingTarget.end).toHaveBeenCalled())
+    expect(submitMissingTarget.statusCode).toBe(400)
+    expect(submitCurrentPage).not.toHaveBeenCalled()
+
+    const submitAuthorized = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/submit-current-page',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1', target_id: 'target_3' })
+      ),
+      submitAuthorized
+    )
+    await vi.waitFor(() => expect(submitAuthorized.end).toHaveBeenCalled())
+    expect(submitAuthorized.statusCode).toBe(200)
+    expect(submitCurrentPage).toHaveBeenCalledWith('tab-1', 'target_3')
+    expect(JSON.parse(submitAuthorized.body ?? '')).toEqual({
+      action: 'submitted',
+      url: 'https://example.com/thanks',
+      title: 'Thanks',
+      page: {
+        title: 'Thanks',
+        url: 'https://example.com/thanks',
+        text: 'Message sent'
+      }
     })
 
     await bridge.stop()

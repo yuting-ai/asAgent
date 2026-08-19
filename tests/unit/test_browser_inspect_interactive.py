@@ -52,14 +52,14 @@ async def test_browser_inspect_interactive_rejects_arguments() -> None:
 
     with pytest.raises(ToolArgumentsValidationError):
         await executor.execute(
-            "browser.inspect_interactive",
+            "browser.take_snapshot",
             {"extra": True},
         )
 
     Draft202012Validator(tool.definition.input_schema).validate({})
-    assert tool.definition.tool_id == "browser.inspect_interactive"
+    assert tool.definition.tool_id == "browser.take_snapshot"
     assert tool.definition.required_permissions == frozenset({"browser.inspect"})
-    assert "target_id" in tool.definition.description
+    assert "ref" in tool.definition.description
 
 
 @pytest.mark.asyncio
@@ -101,14 +101,14 @@ async def test_browser_inspect_interactive_returns_bounded_elements() -> None:
         "url": "https://mofs.dev/",
         "elements": [
             {
-                "target_id": "target_1",
+                "ref": "target_1",
                 "name": "Upload File",
                 "role": "clickable",
                 "tag": "div",
                 "disabled": False,
             },
             {
-                "target_id": "target_2",
+                "ref": "target_2",
                 "name": "Use Sample",
                 "role": "clickable",
                 "tag": "div",
@@ -157,7 +157,7 @@ async def test_browser_inspect_interactive_returns_native_select_options() -> No
         "url": "https://example.com/form",
         "elements": [
             {
-                "target_id": "target_4",
+                "ref": "target_4",
                 "name": "Country",
                 "role": "combobox",
                 "tag": "select",
@@ -224,6 +224,6 @@ async def test_browser_inspect_registers_only_for_bound_browser_runs() -> None:
     )
     assert "browser.inspect" in permissions
     assert (
-        registry.get("browser.inspect_interactive").definition.tool_id
-        == "browser.inspect_interactive"
+        registry.get("browser.take_snapshot").definition.tool_id
+        == "browser.take_snapshot"
     )

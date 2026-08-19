@@ -63,13 +63,11 @@ async def test_browser_select_validates_arguments_and_posts_only_target_and_valu
         )
 
         with pytest.raises(ToolArgumentsValidationError):
-            await executor.execute("browser.select", {"target_id": "target_4"})
+            await executor.execute("browser.select", {"ref": "target_4"})
         with pytest.raises(ToolArgumentsValidationError):
-            await executor.execute(
-                "browser.select", {"target_id": "target_4", "value": 1}
-            )
+            await executor.execute("browser.select", {"ref": "target_4", "value": 1})
         result = await executor.execute(
-            "browser.select", {"target_id": "target_4", "value": "au"}
+            "browser.select", {"ref": "target_4", "value": "au"}
         )
 
     assert json.loads(result) == {
@@ -88,7 +86,7 @@ async def test_browser_select_validates_arguments_and_posts_only_target_and_valu
         "value": "au",
     }
     Draft202012Validator(tool.definition.input_schema).validate(
-        {"target_id": "target_4", "value": ""}
+        {"ref": "target_4", "value": ""}
     )
     assert tool.definition.required_permissions == frozenset({"browser.select"})
     assert tool.definition.requires_approval is False
@@ -118,7 +116,7 @@ async def test_browser_select_maps_fixed_operation_errors(detail: str) -> None:
             tab_id="tab-1",
         )
         with pytest.raises(ToolOperationError, match=detail):
-            await tool.execute({"target_id": "target_4", "value": "au"})
+            await tool.execute({"ref": "target_4", "value": "au"})
 
 
 @pytest.mark.asyncio

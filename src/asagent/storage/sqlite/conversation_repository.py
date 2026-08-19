@@ -82,6 +82,8 @@ class SqliteConversationRepository:
                     user_id=str(conversation.user_id),
                     title=conversation.title,
                     kind=conversation.kind,
+                    last_page_url=conversation.last_page_url,
+                    last_page_title=conversation.last_page_title,
                     created_at=_to_utc(conversation.created_at),
                     updated_at=_to_utc(conversation.updated_at),
                 )
@@ -91,6 +93,8 @@ class SqliteConversationRepository:
                         "user_id": str(conversation.user_id),
                         "title": conversation.title,
                         "kind": conversation.kind,
+                        "last_page_url": conversation.last_page_url,
+                        "last_page_title": conversation.last_page_title,
                         "created_at": _to_utc(conversation.created_at),
                         "updated_at": _to_utc(conversation.updated_at),
                     },
@@ -200,6 +204,8 @@ def _to_conversation(row: Mapping[str, object]) -> Conversation:
         updated_at=_required_datetime(row, "updated_at"),
         title=_optional_str(row, "title"),
         kind=_required_kind(row, "kind"),
+        last_page_url=_optional_str(row, "last_page_url"),
+        last_page_title=_optional_str(row, "last_page_title"),
     )
 
 

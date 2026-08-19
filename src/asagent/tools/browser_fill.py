@@ -26,22 +26,24 @@ class BrowserFillTool:
             display_name="Fill page field",
             description=(
                 "Replaces the value of one inspected editable text field on the "
-                "visible browser tab. Accepts only a target_id returned by "
-                "browser.inspect_interactive and a text value. It does not submit "
+                "visible browser tab. Accepts only a ref returned by "
+                "browser.take_snapshot and a text value. It does not submit "
                 "the form. Password and file fields are not supported; ask the user "
-                "to enter sensitive credentials directly in the visible browser."
+                "to enter sensitive credentials directly in the visible browser. If "
+                "the page changes afterward, the result includes its latest page "
+                "snapshot; inspect again before using another target."
             ),
             input_schema={
                 "type": "object",
                 "properties": {
-                    "target_id": {
+                    "ref": {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": _MAX_TARGET_ID_CHARS,
                     },
                     "value": {"type": "string", "maxLength": _MAX_VALUE_CHARS},
                 },
-                "required": ["target_id", "value"],
+                "required": ["ref", "value"],
                 "additionalProperties": False,
             },
             risk_level="high",
@@ -63,22 +65,33 @@ class BrowserFillTool:
             if message in SAFE_BROWSER_OPERATION_ERRORS:
                 raise ToolOperationError(message) from error
             raise ToolOperationError("target was not found") from error
+        payload: dict[str, object] = {
+            "action": result.action,
+            "url": result.url,
+            "title": result.title,
+        }
+        if result.page is not None:
+            payload["page"] = {
+                "title": result.page.title,
+                "url": result.page.url,
+                "text": result.page.text,
+            }
         return json.dumps(
-            {"action": result.action, "url": result.url, "title": result.title},
+            payload,
             ensure_ascii=False,
             separators=(",", ":"),
         )
 
 
 def _require_arguments(arguments: Mapping[str, object]) -> tuple[str, str]:
-    if set(arguments) != {"target_id", "value"}:
-        raise ValueError("browser.fill accepts only target_id and value arguments")
-    target_id = arguments["target_id"]
+    if set(arguments) != {"ref", "value"}:
+        raise ValueError("browser.fill accepts only ref and value arguments")
+    target_id = arguments["ref"]
     value = arguments["value"]
     if not isinstance(target_id, str) or target_id.strip() == "":
-        raise ValueError("browser.fill target_id must not be blank")
+        raise ValueError("browser.fill ref must not be blank")
     if len(target_id.strip()) > _MAX_TARGET_ID_CHARS:
-        raise ValueError("browser.fill target_id is too long")
+        raise ValueError("browser.fill ref is too long")
     if not isinstance(value, str):
         raise ValueError("browser.fill value must be a string")
     if len(value) > _MAX_VALUE_CHARS:

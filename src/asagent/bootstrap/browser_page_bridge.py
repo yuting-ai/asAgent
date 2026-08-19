@@ -49,10 +49,19 @@ class BrowserFillResult:
     action: str
     url: str
     title: str
+    page: BrowserPageContent | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class BrowserSelectResult:
+    action: str
+    url: str
+    title: str
+    page: BrowserPageContent | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserSubmitResult:
     action: str
     url: str
     title: str
@@ -143,6 +152,18 @@ class BrowserPageBridgeClient:
             failure_message="target was not found",
         )
         return _select_result_from_payload(payload)
+
+    async def submit_current_page(
+        self,
+        tab_id: str,
+        target_id: str,
+    ) -> BrowserSubmitResult:
+        payload = await self._post_json(
+            "/submit-current-page",
+            {"tab_id": tab_id, "target_id": target_id},
+            failure_message="target was not found",
+        )
+        return _submit_result_from_payload(payload)
 
     async def _post_json(
         self,
@@ -292,7 +313,16 @@ def _fill_result_from_payload(payload: object) -> BrowserFillResult:
     title = payload.get("title")
     if action != "filled" or not isinstance(url, str) or not isinstance(title, str):
         raise BrowserPageBridgeError("target was not found")
-    return BrowserFillResult(action=action, url=url, title=title)
+
+    page_payload = payload.get("page")
+    page = None
+    if page_payload is not None:
+        try:
+            page = _page_content_from_payload(page_payload)
+        except BrowserPageBridgeError as error:
+            raise BrowserPageBridgeError("target was not found") from error
+
+    return BrowserFillResult(action=action, url=url, title=title, page=page)
 
 
 def _select_result_from_payload(payload: object) -> BrowserSelectResult:
@@ -314,6 +344,27 @@ def _select_result_from_payload(payload: object) -> BrowserSelectResult:
             raise BrowserPageBridgeError("target was not found") from error
 
     return BrowserSelectResult(action=action, url=url, title=title, page=page)
+
+
+def _submit_result_from_payload(payload: object) -> BrowserSubmitResult:
+    if not isinstance(payload, dict):
+        raise BrowserPageBridgeError("target was not found")
+
+    action = payload.get("action")
+    url = payload.get("url")
+    title = payload.get("title")
+    if action != "submitted" or not isinstance(url, str) or not isinstance(title, str):
+        raise BrowserPageBridgeError("target was not found")
+
+    page_payload = payload.get("page")
+    page = None
+    if page_payload is not None:
+        try:
+            page = _page_content_from_payload(page_payload)
+        except BrowserPageBridgeError as error:
+            raise BrowserPageBridgeError("target was not found") from error
+
+    return BrowserSubmitResult(action=action, url=url, title=title, page=page)
 
 
 def _select_options_from_payload(
