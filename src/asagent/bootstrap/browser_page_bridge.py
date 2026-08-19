@@ -14,12 +14,20 @@ class BrowserPageContent:
 
 
 @dataclass(frozen=True, slots=True)
+class BrowserSelectOption:
+    value: str
+    label: str
+    disabled: bool
+
+
+@dataclass(frozen=True, slots=True)
 class BrowserInteractiveElement:
     target_id: str
     name: str
     role: str
     tag: str
     disabled: bool
+    options: tuple[BrowserSelectOption, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +49,14 @@ class BrowserFillResult:
     action: str
     url: str
     title: str
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserSelectResult:
+    action: str
+    url: str
+    title: str
+    page: BrowserPageContent | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +133,16 @@ class BrowserPageBridgeClient:
             failure_message="target was not found",
         )
         return _fill_result_from_payload(payload)
+
+    async def select_current_page(
+        self, tab_id: str, target_id: str, value: str
+    ) -> BrowserSelectResult:
+        payload = await self._post_json(
+            "/select-current-page",
+            {"tab_id": tab_id, "target_id": target_id, "value": value},
+            failure_message="target was not found",
+        )
+        return _select_result_from_payload(payload)
 
     async def _post_json(
         self,
@@ -215,6 +241,9 @@ def _interactive_snapshot_from_payload(payload: object) -> BrowserInteractiveSna
             or not isinstance(disabled, bool)
         ):
             continue
+        options = None
+        if tag == "select":
+            options = _select_options_from_payload(item.get("options"))
         elements.append(
             BrowserInteractiveElement(
                 target_id=target_id,
@@ -222,6 +251,7 @@ def _interactive_snapshot_from_payload(payload: object) -> BrowserInteractiveSna
                 role=role,
                 tag=tag,
                 disabled=disabled,
+                options=options,
             )
         )
 
@@ -263,6 +293,52 @@ def _fill_result_from_payload(payload: object) -> BrowserFillResult:
     if action != "filled" or not isinstance(url, str) or not isinstance(title, str):
         raise BrowserPageBridgeError("target was not found")
     return BrowserFillResult(action=action, url=url, title=title)
+
+
+def _select_result_from_payload(payload: object) -> BrowserSelectResult:
+    if not isinstance(payload, dict):
+        raise BrowserPageBridgeError("target was not found")
+
+    action = payload.get("action")
+    url = payload.get("url")
+    title = payload.get("title")
+    if action != "selected" or not isinstance(url, str) or not isinstance(title, str):
+        raise BrowserPageBridgeError("target was not found")
+
+    page_payload = payload.get("page")
+    page = None
+    if page_payload is not None:
+        try:
+            page = _page_content_from_payload(page_payload)
+        except BrowserPageBridgeError as error:
+            raise BrowserPageBridgeError("target was not found") from error
+
+    return BrowserSelectResult(action=action, url=url, title=title, page=page)
+
+
+def _select_options_from_payload(
+    payload: object,
+) -> tuple[BrowserSelectOption, ...] | None:
+    if not isinstance(payload, list):
+        return None
+
+    options: list[BrowserSelectOption] = []
+    for item in payload:
+        if len(options) >= 50:
+            break
+        if not isinstance(item, dict):
+            continue
+        value = item.get("value")
+        label = item.get("label")
+        disabled = item.get("disabled")
+        if (
+            not isinstance(value, str)
+            or not isinstance(label, str)
+            or not isinstance(disabled, bool)
+        ):
+            continue
+        options.append(BrowserSelectOption(value=value, label=label, disabled=disabled))
+    return tuple(options)
 
 
 def _wait_result_from_payload(payload: object) -> BrowserWaitResult:

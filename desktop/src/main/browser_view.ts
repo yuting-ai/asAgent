@@ -35,9 +35,22 @@ export type BrowserFillResult = {
   title: string
 }
 
+export type BrowserSelectResult = {
+  action: 'selected'
+  url: string
+  title: string
+  page?: BrowserPageContent
+}
+
 export type BrowserWaitResult = {
   changed: boolean
   page: BrowserPageContent
+}
+
+export type BrowserSelectOption = {
+  value: string
+  label: string
+  disabled: boolean
 }
 
 export type BrowserInteractiveElement = {
@@ -46,6 +59,7 @@ export type BrowserInteractiveElement = {
   role: string
   tag: string
   disabled: boolean
+  options?: BrowserSelectOption[]
 }
 
 export type BrowserInteractiveSnapshot = {
@@ -65,6 +79,9 @@ export const BROWSER_CLICK_POINTER_DELAY_MS = 150
 export const BROWSER_CLICK_SETTLE_TIMEOUT_MS = 1_000
 export const BROWSER_CLICK_SETTLE_QUIET_MS = 250
 export const BROWSER_FILL_VALUE_LIMIT = 10_000
+export const BROWSER_SELECT_VALUE_LIMIT = 512
+export const BROWSER_SELECT_OPTION_LIMIT = 50
+export const BROWSER_SELECT_OPTION_TEXT_LIMIT = 120
 export const BROWSER_WAIT_POLL_INTERVAL_MS = 500
 export const BROWSER_WAIT_SETTLE_QUIET_MS = 500
 
@@ -73,6 +90,9 @@ export const BROWSER_OPERATION_ERRORS = [
   'target is not visible',
   'target is obscured',
   'target is not editable',
+  'target is not selectable',
+  'option was not found',
+  'option is disabled',
   'page changed; inspect interactive elements again',
   'current browser tab is not visible'
 ] as const
@@ -321,6 +341,15 @@ export function normalizeBrowserOperationError(error: unknown): BrowserOperation
   if (/not editable|readonly|read-only/i.test(message)) {
     return 'target is not editable'
   }
+  if (/not selectable/i.test(message)) {
+    return 'target is not selectable'
+  }
+  if (/option is disabled/i.test(message)) {
+    return 'option is disabled'
+  }
+  if (/option was not found/i.test(message)) {
+    return 'option was not found'
+  }
   if (/not found|not available|could not be clicked/i.test(message)) {
     return 'target was not found'
   }
@@ -507,6 +536,24 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
     );
   }
 
+  function selectOptions(el) {
+    if (!(el instanceof HTMLSelectElement)) {
+      return undefined;
+    }
+    const OPTION_LIMIT = ${BROWSER_SELECT_OPTION_LIMIT};
+    const TEXT_LIMIT = ${BROWSER_SELECT_OPTION_TEXT_LIMIT};
+    const options = [];
+    for (let i = 0; i < el.options.length && options.length < OPTION_LIMIT; i += 1) {
+      const option = el.options[i];
+      options.push({
+        value: String(option.value || '').slice(0, TEXT_LIMIT),
+        label: String(option.label || option.text || '').slice(0, TEXT_LIMIT),
+        disabled: Boolean(option.disabled),
+      });
+    }
+    return options;
+  }
+
   const all = Array.from(document.querySelectorAll('body *')).slice(0, SCAN_LIMIT);
   const raw = [];
   for (const el of all) {
@@ -538,7 +585,7 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
     const el = candidates[index];
     const targetId = 'target_' + (FIRST_TARGET_NUMBER + elements.length);
     el.setAttribute(ATTR, targetId);
-    elements.push({
+    const item = {
       target_id: targetId,
       name: elementName(el),
       role: elementRole(el),
@@ -548,7 +595,11 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
           el.getAttribute('aria-disabled') === 'true' ||
           el.getAttribute('disabled') !== null,
       ),
-    });
+    };
+    if (el instanceof HTMLSelectElement) {
+      item.options = selectOptions(el);
+    }
+    elements.push(item);
   }
   return { elements };
 })()`
@@ -763,6 +814,62 @@ function browserFillScript(selector: string, value: string): string {
   })()`
 }
 
+function browserSelectScript(selector: string, value: string): string {
+  const encodedSelector = JSON.stringify(selector)
+  const encodedValue = JSON.stringify(value)
+  return `(() => {
+    const target = document.querySelector(${encodedSelector});
+    if (!(target instanceof HTMLSelectElement) || target.disabled) {
+      throw new Error('target is not selectable');
+    }
+    const option = Array.from(target.options).find((item) => item.value === ${encodedValue});
+    if (!option) {
+      throw new Error('option was not found');
+    }
+    if (option.disabled) {
+      throw new Error('option is disabled');
+    }
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+    if (!setter) {
+      throw new Error('target is not selectable');
+    }
+    setter.call(target, ${encodedValue});
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    target.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  })()`
+}
+
+function parseSelectOptions(value: unknown): BrowserSelectOption[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  const options: BrowserSelectOption[] = []
+  for (const item of value) {
+    if (options.length >= BROWSER_SELECT_OPTION_LIMIT) {
+      break
+    }
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      continue
+    }
+    const entry = item as Record<string, unknown>
+    if (
+      typeof entry.value !== 'string' ||
+      typeof entry.label !== 'string' ||
+      typeof entry.disabled !== 'boolean'
+    ) {
+      continue
+    }
+    options.push({
+      value: truncateBrowserText(entry.value, BROWSER_SELECT_OPTION_TEXT_LIMIT),
+      label: truncateBrowserText(entry.label, BROWSER_SELECT_OPTION_TEXT_LIMIT),
+      disabled: entry.disabled
+    })
+  }
+  return options
+}
+
 function browserClickConfirmScript(selector: string, x: number, y: number): string {
   const encodedSelector = JSON.stringify(selector)
   return `(() => {
@@ -814,6 +921,10 @@ export function browserDisplayUrl(url: string): string {
   }
 }
 
+function browserPageState(page: BrowserPageContent): string {
+  return `${page.url}\u0000${page.title}\u0000${page.text}`
+}
+
 function truncateBrowserText(value: string, limit: number): string {
   return value.length <= limit ? value : value.slice(0, limit)
 }
@@ -858,7 +969,7 @@ export class VisibleBrowser {
   private readonly onTabState: ((state: BrowserTabState) => void) | undefined
   private readonly tabs = new Map<string, BrowserPageView>()
   private readonly interactionSnapshots = new Map<string, Map<string, InteractionTargetRecord>>()
-  private readonly lastActionPageText = new Map<string, string>()
+  private readonly lastActionPageState = new Map<string, string>()
   private hostWindow: BrowserHostWindow | undefined
   private lastBounds: BrowserViewBounds | undefined
   private visibleTabId: string | undefined
@@ -961,7 +1072,7 @@ export class VisibleBrowser {
     view.webContents.close()
     this.tabs.delete(closedTabId)
     this.interactionSnapshots.delete(closedTabId)
-    this.lastActionPageText.delete(closedTabId)
+    this.lastActionPageState.delete(closedTabId)
   }
 
   isVisibleTab(tabId: string): boolean {
@@ -1044,10 +1155,10 @@ export class VisibleBrowser {
 
     const deadline = Date.now() + seconds * 1_000
     let latestPage = await this.readCurrentPage(id)
-    let observedText = this.lastActionPageText.get(id) ?? latestPage.text
-    let changed = latestPage.text !== observedText
+    let observedState = this.lastActionPageState.get(id) ?? browserPageState(latestPage)
+    let changed = browserPageState(latestPage) !== observedState
     let lastChangeAt = changed ? Date.now() : undefined
-    observedText = latestPage.text
+    observedState = browserPageState(latestPage)
 
     while (Date.now() < deadline) {
       const remaining = deadline - Date.now()
@@ -1061,8 +1172,9 @@ export class VisibleBrowser {
       }
 
       const now = Date.now()
-      if (latestPage.text !== observedText) {
-        observedText = latestPage.text
+      const latestState = browserPageState(latestPage)
+      if (latestState !== observedState) {
+        observedState = latestState
         changed = true
         lastChangeAt = now
       } else if (
@@ -1074,7 +1186,7 @@ export class VisibleBrowser {
       }
     }
 
-    this.lastActionPageText.set(id, latestPage.text)
+    this.lastActionPageState.set(id, browserPageState(latestPage))
     return { changed, page: latestPage }
   }
 
@@ -1151,13 +1263,20 @@ export class VisibleBrowser {
           role: truncateBrowserText(entry.role, 40),
           tag: truncateBrowserText(entry.tag, 40)
         })
-        elements.push({
+        const element: BrowserInteractiveElement = {
           target_id: targetId,
           name: truncateBrowserText(entry.name, 120),
           role: truncateBrowserText(entry.role, 40),
           tag: truncateBrowserText(entry.tag, 40),
           disabled: entry.disabled
-        })
+        }
+        if (element.tag === 'select') {
+          const options = parseSelectOptions(entry.options)
+          if (options !== undefined) {
+            element.options = options
+          }
+        }
+        elements.push(element)
       }
     }
 
@@ -1196,10 +1315,10 @@ export class VisibleBrowser {
     const frame = target.frame
     const isMainFrame = frame === view.webContents.mainFrame
     let pointerInstalled = false
-    let textBeforeClick: string | undefined
+    let pageBeforeClick: BrowserPageContent | undefined
 
     try {
-      textBeforeClick = (await this.readCurrentPage(id)).text
+      pageBeforeClick = await this.readCurrentPage(id)
     } catch {
       // Click remains available when a page cannot be read for settling.
     }
@@ -1281,12 +1400,12 @@ export class VisibleBrowser {
       }
 
       const page =
-        textBeforeClick !== undefined && textBeforeClick !== ''
-          ? await this.settleAfterClick(id, textBeforeClick)
+        pageBeforeClick !== undefined && pageBeforeClick.text !== ''
+          ? await this.settleAfterPageAction(id, browserPageState(pageBeforeClick))
           : undefined
 
       if (page !== undefined) {
-        this.lastActionPageText.set(id, page.text)
+        this.lastActionPageState.set(id, browserPageState(page))
       }
 
       return {
@@ -1341,6 +1460,67 @@ export class VisibleBrowser {
           view.webContents.getTitle().trim() || titleFromUrl(view.webContents.getURL()),
           BROWSER_PAGE_TITLE_LIMIT
         )
+      }
+    } catch (error) {
+      throw new Error(normalizeBrowserOperationError(error))
+    } finally {
+      try {
+        await target.frame.executeJavaScript(BROWSER_REMOVE_POINTER_SCRIPT)
+      } catch {
+        // Best-effort pointer cleanup after navigation or script failure.
+      }
+    }
+  }
+
+  async selectCurrentPage(
+    tabId: string,
+    targetId: string,
+    value: string
+  ): Promise<BrowserSelectResult> {
+    this.assertNotDisposed()
+    const id = parseBrowserTabId(tabId)
+    this.assertVisibleTab(id)
+    if (value.length > BROWSER_SELECT_VALUE_LIMIT) {
+      throw new Error('option was not found')
+    }
+
+    const view = this.tabs.get(id)
+    if (view === undefined) {
+      throw new Error('current browser tab is not visible')
+    }
+    const target = this.interactionSnapshots.get(id)?.get(parseBrowserTargetId(targetId))
+    if (target === undefined || target.frame.isDestroyed()) {
+      throw new Error('page changed; inspect interactive elements again')
+    }
+
+    let pageBeforeSelect: BrowserPageContent | undefined
+    try {
+      pageBeforeSelect = await this.readCurrentPage(id)
+    } catch {
+      // Selecting remains available when a page cannot be read for settling.
+    }
+
+    try {
+      await target.frame.executeJavaScript(browserFillPrepareScript(target.selector))
+      await delay(BROWSER_CLICK_POINTER_DELAY_MS)
+      await target.frame.executeJavaScript(browserSelectScript(target.selector, value))
+      const page =
+        pageBeforeSelect !== undefined && pageBeforeSelect.text !== ''
+          ? await this.settleAfterPageAction(id, browserPageState(pageBeforeSelect))
+          : undefined
+
+      if (page !== undefined) {
+        this.lastActionPageState.set(id, browserPageState(page))
+      }
+
+      return {
+        action: 'selected',
+        url: browserDisplayUrl(view.webContents.getURL()),
+        title: truncateBrowserText(
+          view.webContents.getTitle().trim() || titleFromUrl(view.webContents.getURL()),
+          BROWSER_PAGE_TITLE_LIMIT
+        ),
+        ...(page === undefined ? {} : { page })
       }
     } catch (error) {
       throw new Error(normalizeBrowserOperationError(error))
@@ -1417,7 +1597,7 @@ export class VisibleBrowser {
 
     this.tabs.clear()
     this.interactionSnapshots.clear()
-    this.lastActionPageText.clear()
+    this.lastActionPageState.clear()
     this.visibleTabId = undefined
     this.hostWindow = undefined
     this.lastBounds = undefined
@@ -1467,12 +1647,12 @@ export class VisibleBrowser {
     }
   }
 
-  private async settleAfterClick(
+  private async settleAfterPageAction(
     tabId: string,
-    previousText: string
+    previousState: string
   ): Promise<BrowserPageContent | undefined> {
     const deadline = Date.now() + BROWSER_CLICK_SETTLE_TIMEOUT_MS
-    let observedText = previousText
+    let observedState = previousState
     let lastChangeAt: number | undefined
     let latestPage: BrowserPageContent | undefined
 
@@ -1484,9 +1664,9 @@ export class VisibleBrowser {
       }
 
       const now = Date.now()
-      const currentText = latestPage.text
-      if (currentText !== observedText) {
-        observedText = currentText
+      const currentState = browserPageState(latestPage)
+      if (currentState !== observedState) {
+        observedState = currentState
         lastChangeAt = now
       } else if (
         lastChangeAt !== undefined &&

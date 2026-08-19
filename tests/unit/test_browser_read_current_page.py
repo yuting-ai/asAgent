@@ -164,6 +164,7 @@ async def test_browser_read_tool_registers_only_for_bound_browser_runs() -> None
             "browser.inspect",
             "browser.click",
             "browser.fill",
+            "browser.select",
             "browser.wait",
         }
     )

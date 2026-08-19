@@ -607,6 +607,30 @@ describe('VisibleBrowser window.open', () => {
     vi.useRealTimers()
   })
 
+  it('returns early when navigation changes the URL without changing page text', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL
+      .mockReturnValueOnce('https://example.com/before')
+      .mockReturnValueOnce('https://example.com/after')
+      .mockReturnValueOnce('https://example.com/after')
+    view.webContents.executeJavaScript.mockResolvedValue({
+      title: 'Calendar',
+      text: 'Same controls'
+    })
+
+    const pending = browser.waitForCurrentPage('tab-1', 15)
+    await vi.advanceTimersByTimeAsync(1_000)
+    await expect(pending).resolves.toEqual({
+      changed: true,
+      page: { title: 'Calendar', url: 'https://example.com/after', text: 'Same controls' }
+    })
+    vi.useRealTimers()
+  })
+
   it('returns the latest page at the timeout and rejects a hidden tab', async () => {
     vi.useFakeTimers()
     const { browser, createView } = createBrowser()
@@ -789,6 +813,285 @@ describe('VisibleBrowser window.open', () => {
     expect(scripts[2]).toContain("new Event('change'")
     expect(scripts[3]).toContain('asagent-agent-pointer')
     expect(view.webContents.sendInputEvent).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('returns bounded native select options from inspect snapshots', async () => {
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://example.com/form')
+    view.webContents.executeJavaScript.mockResolvedValueOnce({
+      elements: [
+        {
+          target_id: 'target_1',
+          name: 'Email',
+          role: 'email',
+          tag: 'input',
+          disabled: false
+        },
+        {
+          target_id: 'target_2',
+          name: 'Country',
+          role: 'combobox',
+          tag: 'select',
+          disabled: false,
+          options: [
+            { value: 'au', label: 'Australia', disabled: false },
+            { value: 'us', label: 'United States', disabled: false }
+          ]
+        }
+      ]
+    })
+
+    await expect(browser.inspectInteractive('tab-1')).resolves.toEqual({
+      url: 'https://example.com/form',
+      elements: [
+        {
+          target_id: 'target_1',
+          name: 'Email',
+          role: 'email',
+          tag: 'input',
+          disabled: false
+        },
+        {
+          target_id: 'target_2',
+          name: 'Country',
+          role: 'combobox',
+          tag: 'select',
+          disabled: false,
+          options: [
+            { value: 'au', label: 'Australia', disabled: false },
+            { value: 'us', label: 'United States', disabled: false }
+          ]
+        }
+      ]
+    })
+
+    const script = String(view.webContents.executeJavaScript.mock.calls[0]?.[0])
+    expect(script).toContain('el instanceof HTMLSelectElement')
+    expect(script).toContain('item.options = selectOptions(el)')
+    expect(script).not.toContain('internal selector')
+  })
+
+  it('selects an inspected native select without submitting the form', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://example.com/form')
+    view.webContents.getTitle.mockReturnValue('Country form')
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_4',
+            name: 'Country',
+            role: 'combobox',
+            tag: 'select',
+            disabled: false,
+            options: [{ value: 'au', label: 'Australia', disabled: false }]
+          }
+        ]
+      })
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const pending = browser.selectCurrentPage('tab-1', 'target_4', 'au')
+    await vi.advanceTimersByTimeAsync(150)
+    await expect(pending).resolves.toEqual({
+      action: 'selected',
+      url: 'https://example.com/form',
+      title: 'Country form'
+    })
+
+    const scripts = view.webContents.executeJavaScript.mock.calls.map((call) => String(call[0]))
+    expect(scripts[2]).toContain('asagent-agent-pointer')
+    expect(scripts[3]).toContain('HTMLSelectElement.prototype')
+    expect(scripts[3]).toContain("new Event('input'")
+    expect(scripts[3]).toContain("new Event('change'")
+    expect(scripts[3]).not.toContain('form.submit')
+    expect(scripts[4]).toContain('asagent-agent-pointer')
+    expect(view.webContents.sendInputEvent).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('selects iframe native select targets only inside the child frame', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://example.com/outer')
+    view.webContents.getTitle.mockReturnValue('Outer')
+
+    const child = createFakeFrame({ url: 'https://forms.example/app' })
+    Object.defineProperty(view.webContents.mainFrame, 'frames', {
+      value: [child],
+      configurable: true
+    })
+
+    view.webContents.mainFrame.executeJavaScript.mockResolvedValueOnce({
+      elements: [
+        {
+          target_id: 'target_1',
+          name: 'Outer',
+          role: 'button',
+          tag: 'button',
+          disabled: false
+        }
+      ]
+    })
+    child.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_2',
+            name: 'Country',
+            role: 'combobox',
+            tag: 'select',
+            disabled: false,
+            options: [{ value: 'au', label: 'Australia', disabled: false }]
+          }
+        ]
+      })
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const pending = browser.selectCurrentPage('tab-1', 'target_2', 'au')
+    await vi.advanceTimersByTimeAsync(150)
+    await expect(pending).resolves.toEqual({
+      action: 'selected',
+      url: 'https://example.com/outer',
+      title: 'Outer'
+    })
+
+    expect(view.webContents.sendInputEvent).not.toHaveBeenCalled()
+    expect(view.webContents.mainFrame.executeJavaScript).toHaveBeenCalledTimes(2)
+    const childScripts = child.executeJavaScript.mock.calls.map((call) => String(call[0]))
+    expect(childScripts[2]).toContain('asagent-agent-pointer')
+    expect(childScripts[3]).toContain('HTMLSelectElement.prototype')
+    expect(childScripts[4]).toContain('asagent-agent-pointer')
+    vi.useRealTimers()
+  })
+
+  it('returns a stable page snapshot after a select navigates without changing text', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://example.com/calendar/september')
+    view.webContents.getTitle.mockReturnValue('September')
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_4',
+            name: 'Month',
+            role: 'combobox',
+            tag: 'select',
+            disabled: false,
+            options: [{ value: '10', label: 'October', disabled: false }]
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: 'September', text: 'Same controls' })
+      .mockResolvedValueOnce(true)
+      .mockImplementationOnce(async () => {
+        view.webContents.getURL.mockReturnValue('https://example.com/calendar/october')
+        view.webContents.getTitle.mockReturnValue('October')
+        return true
+      })
+      .mockResolvedValueOnce({ title: 'October', text: 'Same controls' })
+      .mockResolvedValueOnce({ title: 'October', text: 'Same controls' })
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const pending = browser.selectCurrentPage('tab-1', 'target_4', '10')
+    await vi.advanceTimersByTimeAsync(400)
+    await expect(pending).resolves.toEqual({
+      action: 'selected',
+      url: 'https://example.com/calendar/october',
+      title: 'October',
+      page: {
+        title: 'October',
+        url: 'https://example.com/calendar/october',
+        text: 'Same controls'
+      }
+    })
+    vi.useRealTimers()
+  })
+
+  it('rejects non-select targets, unknown options, and disabled options', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_1',
+            name: 'Email',
+            role: 'email',
+            tag: 'input',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error('target is not selectable'))
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_2',
+            name: 'Country',
+            role: 'combobox',
+            tag: 'select',
+            disabled: false,
+            options: [
+              { value: 'au', label: 'Australia', disabled: false },
+              { value: 'us', label: 'United States', disabled: true }
+            ]
+          }
+        ]
+      })
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error('option was not found'))
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error('option is disabled'))
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const notSelectable = browser.selectCurrentPage('tab-1', 'target_1', 'au')
+    const notSelectableAssertion = expect(notSelectable).rejects.toThrow('target is not selectable')
+    await vi.advanceTimersByTimeAsync(150)
+    await notSelectableAssertion
+
+    await browser.inspectInteractive('tab-1')
+    const missingOption = browser.selectCurrentPage('tab-1', 'target_2', 'xx')
+    const missingOptionAssertion = expect(missingOption).rejects.toThrow('option was not found')
+    await vi.advanceTimersByTimeAsync(150)
+    await missingOptionAssertion
+
+    const disabledOption = browser.selectCurrentPage('tab-1', 'target_2', 'us')
+    const disabledOptionAssertion = expect(disabledOption).rejects.toThrow('option is disabled')
+    await vi.advanceTimersByTimeAsync(150)
+    await disabledOptionAssertion
+
+    await expect(browser.selectCurrentPage('tab-1', 'target_99', 'au')).rejects.toThrow(
+      'page changed; inspect interactive elements again'
+    )
     vi.useRealTimers()
   })
 

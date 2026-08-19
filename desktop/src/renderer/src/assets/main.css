@@ -2215,6 +2215,23 @@ body.is-resizing-columns {
   line-height: 1.45;
 }
 
+.activity-item.is-running .activity-item-dot {
+  color: var(--brass);
+}
+
+.activity-item.is-waiting .activity-item-dot {
+  color: var(--amber);
+}
+
+.activity-item.is-failed .activity-item-dot,
+.activity-item.is-failed .activity-item-detail {
+  color: var(--red);
+}
+
+.activity-item-detail {
+  color: var(--text-faint);
+}
+
 .tool-approval-banner {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -3450,4 +3467,10 @@ body.is-resizing-columns {
 .browser-agent-input .composer-send svg {
   width: 14px;
   height: 14px;
+}
+
+.browser-agent-input .composer-stop {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 14px;
 }

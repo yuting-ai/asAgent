@@ -41,16 +41,33 @@ type ActiveRun = {
 
 type RunActivityOutcome = 'completed' | 'failed' | 'cancelled' | 'limit'
 
+type RunActivityStepStatus = 'running' | 'completed' | 'failed' | 'waiting'
+
+type RunActivityStep = {
+  id: string
+  label: string
+  status: RunActivityStepStatus
+  detail: string | null
+}
+
 type RunActivity = {
   runId: string
   conversationId: string
-  entries: string[]
-  currentLabel: string
-  toolNames: string[]
+  steps: RunActivityStep[]
   phase: 'live' | 'done'
   outcome: RunActivityOutcome | null
   startedAt: number
   endedAt: number | null
+}
+
+type PersistedRunHistory = {
+  run: {
+    run_id: string
+    status: 'created' | 'completed' | 'failed' | 'cancelled' | 'limit_reached'
+    created_at: string
+    updated_at: string
+  }
+  events: Array<{ event_type: string; created_at: string; data: Record<string, unknown> }>
 }
 
 type ToolApproval = {
@@ -376,30 +393,6 @@ function formatMessageTime(iso: string): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-function terminalActivityEntry(outcome: RunActivityOutcome): string {
-  switch (outcome) {
-    case 'completed':
-      return 'Answered'
-    case 'failed':
-      return 'Run failed'
-    case 'cancelled':
-      return 'Stopped'
-    case 'limit':
-      return 'Reached the safety limit'
-  }
-}
-
-function runActivityStatus(eventType: string): string | null {
-  switch (eventType) {
-    case 'model.requested':
-      return 'Thinking…'
-    case 'tool.requested':
-      return 'Using a tool…'
-    default:
-      return null
-  }
-}
-
 function runActivityOutcome(eventType: string): RunActivityOutcome | null {
   switch (eventType) {
     case 'run.completed':
@@ -423,14 +416,11 @@ function formatElapsed(startedAt: number, endedAt: number | null): string | null
 
 function activitySummaryLabel(activity: RunActivity): string {
   const elapsed = formatElapsed(activity.startedAt, activity.endedAt)
-  const toolSummary =
-    activity.toolNames.length === 0
-      ? null
-      : activity.toolNames.length === 1
-        ? `Used ${activity.toolNames[0]}`
-        : `Used ${activity.toolNames.length} tools`
-
-  const details = [elapsed, toolSummary].filter((detail): detail is string => detail !== null)
+  const actionCount = activity.steps.filter((step) => step.id.startsWith('tool:')).length
+  const details = [
+    actionCount === 0 ? null : `${actionCount} ${actionCount === 1 ? 'action' : 'actions'}`,
+    elapsed
+  ].filter((detail): detail is string => detail !== null)
 
   switch (activity.outcome) {
     case 'failed':
@@ -441,8 +431,156 @@ function activitySummaryLabel(activity: RunActivity): string {
       return ['Stopped for safety', ...details].join(' · ')
     case 'completed':
     default:
-      return ['Worked', ...details].join(' · ')
+      return ['Completed', ...details].join(' · ')
   }
+}
+
+function activityCurrentLabel(activity: RunActivity): string {
+  const current = activity.steps.findLast(
+    (step) => step.status === 'running' || step.status === 'waiting'
+  )
+  return current === undefined ? 'Working…' : current.label
+}
+
+function persistedRunActivity(history: PersistedRunHistory): RunActivity {
+  const steps: RunActivityStep[] = []
+  for (const event of history.events) {
+    if (event.event_type === 'model.requested') {
+      steps.push({
+        id: `model:${steps.length + 1}`,
+        label: 'Planning next action',
+        detail: null,
+        status: 'completed'
+      })
+    } else if (event.event_type === 'tool.requested') {
+      const callId =
+        typeof event.data.tool_call_id === 'string'
+          ? event.data.tool_call_id
+          : `unknown-${steps.length + 1}`
+      const label =
+        typeof event.data.display_name === 'string' ? event.data.display_name : 'Use tool'
+      steps.push({ id: `tool:${callId}`, label, detail: null, status: 'completed' })
+    } else if (event.event_type === 'tool.failed') {
+      const callId = typeof event.data.tool_call_id === 'string' ? event.data.tool_call_id : ''
+      const detail =
+        typeof event.data.error_summary === 'string' ? event.data.error_summary : 'Tool failed.'
+      const step = steps.find((item) => item.id === `tool:${callId}`)
+      if (step !== undefined) {
+        step.status = 'failed'
+        step.detail = detail
+      }
+    }
+  }
+  const outcome: RunActivityOutcome =
+    history.run.status === 'limit_reached'
+      ? 'limit'
+      : history.run.status === 'cancelled'
+        ? 'cancelled'
+        : history.run.status === 'failed'
+          ? 'failed'
+          : 'completed'
+  return {
+    runId: history.run.run_id,
+    conversationId: '',
+    steps,
+    phase: 'done',
+    outcome,
+    startedAt: new Date(history.run.created_at).getTime(),
+    endedAt: new Date(history.run.updated_at).getTime()
+  }
+}
+
+function runHistoryByAssistantMessage(
+  messages: ConversationMessage[],
+  history: PersistedRunHistory[]
+): Map<string, PersistedRunHistory[]> {
+  const result = new Map<string, PersistedRunHistory[]>()
+  for (const run of history) {
+    const assistant = messages.find(
+      (message) =>
+        message.role === 'assistant' &&
+        new Date(message.created_at).getTime() >= new Date(run.run.updated_at).getTime()
+    )
+    if (assistant !== undefined) {
+      const entries = result.get(assistant.message_id) ?? []
+      entries.push(run)
+      result.set(assistant.message_id, entries)
+    }
+  }
+  return result
+}
+
+function RunActivityCard({
+  activity,
+  expanded,
+  onExpandedChange
+}: {
+  activity: RunActivity
+  expanded: boolean
+  onExpandedChange: (expanded: boolean) => void
+}): React.JSX.Element {
+  return (
+    <div className="msg agent run-activity-msg">
+      {activity.phase === 'done' && !expanded ? (
+        <button
+          aria-expanded="false"
+          className={`activity-summary outcome-${activity.outcome ?? 'completed'}`}
+          onClick={() => onExpandedChange(true)}
+          type="button"
+        >
+          <span className="activity-summary-label">{activitySummaryLabel(activity)}</span>
+          <span aria-hidden="true" className="activity-chevron">
+            ▾
+          </span>
+        </button>
+      ) : (
+        <div className={`activity-details${activity.phase === 'live' ? ' is-live' : ''}`}>
+          {activity.phase === 'live' ? (
+            <div aria-live="polite" className="activity-live">
+              <span aria-hidden="true" className="activity-spinner" />
+              <span>{activityCurrentLabel(activity)}</span>
+            </div>
+          ) : (
+            <button
+              aria-expanded="true"
+              className="activity-card-header is-button"
+              onClick={() => onExpandedChange(false)}
+              type="button"
+            >
+              <span className="activity-card-title">{activitySummaryLabel(activity)}</span>
+              <span aria-hidden="true" className="activity-chevron">
+                ▴
+              </span>
+            </button>
+          )}
+          <ul className="activity-list">
+            {activity.steps.map((step) => (
+              <li
+                className={`activity-item is-${step.status}`}
+                key={`${activity.runId}-${step.id}`}
+              >
+                <span aria-hidden="true" className="activity-item-dot">
+                  {step.status === 'completed'
+                    ? '✓'
+                    : step.status === 'failed'
+                      ? '×'
+                      : step.status === 'waiting'
+                        ? '…'
+                        : '•'}
+                </span>
+                <span>
+                  {step.label}
+                  {step.detail === null ? null : (
+                    <span className="activity-item-detail"> — {step.detail}</span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function BrowserNavIcon({
@@ -566,6 +704,9 @@ export default function App(): React.JSX.Element {
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
   const [isCancellingRun, setIsCancellingRun] = useState(false)
   const [runActivity, setRunActivity] = useState<RunActivity | null>(null)
+  const [runHistory, setRunHistory] = useState<PersistedRunHistory[]>([])
+  const [browserRunHistory, setBrowserRunHistory] = useState<PersistedRunHistory[]>([])
+  const [expandedHistoryRunIds, setExpandedHistoryRunIds] = useState<Set<string>>(new Set())
   const [activityExpanded, setActivityExpanded] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<ToolApproval | null>(null)
   const [isDecidingApproval, setIsDecidingApproval] = useState(false)
@@ -577,6 +718,7 @@ export default function App(): React.JSX.Element {
   const [browserConversations, setBrowserConversations] = useState<ConversationSummary[]>([])
   const [browserMessages, setBrowserMessages] = useState<ConversationMessage[]>([])
   const [browserDraft, setBrowserDraft] = useState('')
+  const [browserEditingMessageId, setBrowserEditingMessageId] = useState<string | null>(null)
   const [browserConversationByTabId, setBrowserConversationByTabId] = useState<
     Record<string, string>
   >({})
@@ -1036,6 +1178,7 @@ export default function App(): React.JSX.Element {
     if (selectedConversationId === null) {
       queueMicrotask(() => {
         setMessages([])
+        setRunHistory([])
         setFileChanges([])
         setUndoErrorChangeId(null)
       })
@@ -1047,14 +1190,16 @@ export default function App(): React.JSX.Element {
 
     async function loadConversation(): Promise<void> {
       try {
-        const [items, changes] = await Promise.all([
+        const [items, changes, history] = await Promise.all([
           window.desktop.listConversationMessages(conversationId),
-          window.desktop.listConversationFileChanges(conversationId)
+          window.desktop.listConversationFileChanges(conversationId),
+          window.desktop.listConversationRunHistory(conversationId)
         ])
 
         if (!cancelled) {
           setMessages(items)
           setFileChanges(changes)
+          setRunHistory(history)
           setErrorMessage(null)
         }
       } catch {
@@ -1075,6 +1220,7 @@ export default function App(): React.JSX.Element {
     if (selectedBrowserConversationId === null) {
       queueMicrotask(() => {
         setBrowserMessages([])
+        setBrowserRunHistory([])
       })
       return
     }
@@ -1085,9 +1231,13 @@ export default function App(): React.JSX.Element {
 
     async function loadBrowserConversation(): Promise<void> {
       try {
-        const items = await window.desktop.listBrowserConversationMessages(conversationId)
+        const [items, history] = await Promise.all([
+          window.desktop.listBrowserConversationMessages(conversationId),
+          window.desktop.listBrowserConversationRunHistory(conversationId)
+        ])
         if (!cancelled && loadId === browserMessageLoadIdRef.current) {
           setBrowserMessages(items)
+          setBrowserRunHistory(history)
         }
       } catch {
         if (!cancelled && loadId === browserMessageLoadIdRef.current) {
@@ -1131,7 +1281,7 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     const removeEventListener = window.desktop.onRunEvent((update) => {
-      recordRunEvent(update.runId, update.event.event_type)
+      recordRunEvent(update.runId, update.event.event_type, update.event.data)
 
       const outcome = runActivityOutcome(update.event.event_type)
       if (outcome === null) {
@@ -1167,7 +1317,11 @@ export default function App(): React.JSX.Element {
     const removeErrorListener = window.desktop.onRunStreamError((error) => {
       setActiveRun((current) => (current?.runId === error.runId ? null : current))
       setIsCancellingRun(false)
-      setRunActivityStatus(error.runId, 'Run connection lost.')
+      setRunActivityWaiting(
+        error.runId,
+        'Run connection lost.',
+        'The live event stream disconnected.'
+      )
       finishRunActivity(error.runId, 'failed')
       setErrorMessage(error.message)
     })
@@ -1175,8 +1329,7 @@ export default function App(): React.JSX.Element {
     const removeApprovalListener = window.desktop.onToolApprovalRequested((approval) => {
       setPendingApproval(approval)
       setIsDecidingApproval(false)
-      setRunActivityTool(approval.run_id, approval.display_name)
-      setRunActivityStatus(approval.run_id, `Waiting for approval for ${approval.display_name}…`)
+      setRunActivityWaiting(approval.run_id, `Waiting for approval: ${approval.display_name}`, null)
     })
 
     const removeApprovalErrorListener = window.desktop.onToolApprovalError((error) => {
@@ -1208,7 +1361,7 @@ export default function App(): React.JSX.Element {
   }, [
     messages,
     pendingApproval?.approval_id,
-    runActivity?.entries.length,
+    runActivity?.steps,
     runActivity?.phase,
     selectedConversationId
   ])
@@ -1378,6 +1531,8 @@ export default function App(): React.JSX.Element {
       : browserApprovalDetails(visibleBrowserApproval, visibleBrowserApprovalServer)
   const isBusy =
     backendStatus !== 'ready' || isCreatingConversation || isSubmittingMessage || activeRun !== null
+  const chatRunIsActive = activeRun?.conversationId === selectedConversationId
+  const browserRunIsActive = activeRun?.conversationId === selectedBrowserConversationId
 
   const usesExternalModel = appInfo?.dataProcessingMode === 'external'
 
@@ -1427,68 +1582,111 @@ export default function App(): React.JSX.Element {
     }
   }
 
-  function setRunActivityStatus(runId: string, currentLabel: string): void {
+  function setRunActivityWaiting(runId: string, label: string, detail: string | null): void {
     setRunActivity((current) => {
       if (current === null || current.runId !== runId) {
         return current
       }
 
-      if (current.currentLabel === currentLabel) {
-        return current
-      }
-
       return {
         ...current,
-        currentLabel
+        steps: [
+          ...current.steps.map((step) =>
+            step.status === 'running' || step.status === 'waiting'
+              ? { ...step, status: 'completed' as const }
+              : step
+          ),
+          {
+            id: `status:${current.steps.length + 1}`,
+            label,
+            detail,
+            status: 'waiting'
+          }
+        ]
       }
     })
   }
 
-  function setRunActivityTool(runId: string, toolName: string): void {
-    setRunActivity((current) => {
-      if (current === null || current.runId !== runId) {
-        return current
-      }
-
-      if (current.toolNames.includes(toolName)) {
-        return current
-      }
-
-      return {
-        ...current,
-        toolNames: [...current.toolNames, toolName]
-      }
-    })
-  }
-
-  function recordRunEvent(runId: string, eventType: string): void {
+  function recordRunEvent(runId: string, eventType: string, data: Record<string, unknown>): void {
     const outcome = runActivityOutcome(eventType)
     if (outcome !== null) {
       finishRunActivity(runId, outcome)
       return
     }
 
-    const currentLabel = runActivityStatus(eventType)
-    if (currentLabel !== null) {
-      setRunActivityStatus(runId, currentLabel)
-    }
+    setRunActivity((current) => {
+      if (current === null || current.runId !== runId) return current
 
-    if (eventType === 'tool.completed') {
-      setRunActivity((current) => {
-        if (current === null || current.runId !== runId) {
-          return current
-        }
-
-        const toolName = current.toolNames.at(-1) ?? 'a tool'
-        const entry = `Used ${toolName}`
-
+      const closeLiveSteps = (steps: RunActivityStep[]): RunActivityStep[] =>
+        steps.map((step) =>
+          step.status === 'running' || step.status === 'waiting'
+            ? { ...step, status: 'completed' as const }
+            : step
+        )
+      if (eventType === 'model.requested') {
         return {
           ...current,
-          entries: current.entries.includes(entry) ? current.entries : [...current.entries, entry],
-          currentLabel: 'Thinking…'
+          steps: [
+            ...closeLiveSteps(current.steps),
+            {
+              id: `model:${data.step ?? current.steps.length + 1}`,
+              label: 'Planning next action',
+              detail: null,
+              status: 'running'
+            }
+          ]
         }
-      })
-    }
+      }
+      if (eventType === 'model.completed') {
+        return { ...current, steps: closeLiveSteps(current.steps) }
+      }
+      if (eventType === 'tool.requested') {
+        const callId =
+          typeof data.tool_call_id === 'string'
+            ? data.tool_call_id
+            : `unknown-${current.steps.length + 1}`
+        const displayName = typeof data.display_name === 'string' ? data.display_name : 'Use tool'
+        return {
+          ...current,
+          steps: [
+            ...closeLiveSteps(current.steps),
+            { id: `tool:${callId}`, label: displayName, detail: null, status: 'running' }
+          ]
+        }
+      }
+      if (eventType === 'tool.completed' || eventType === 'tool.failed') {
+        const callId = typeof data.tool_call_id === 'string' ? data.tool_call_id : ''
+        const errorSummary = typeof data.error_summary === 'string' ? data.error_summary : null
+        return {
+          ...current,
+          steps: current.steps.map((step) =>
+            step.id === `tool:${callId}`
+              ? {
+                  ...step,
+                  status: eventType === 'tool.completed' ? 'completed' : 'failed',
+                  detail: errorSummary
+                }
+              : step
+          )
+        }
+      }
+      if (eventType === 'tool.approval_requested') {
+        const displayName = typeof data.display_name === 'string' ? data.display_name : 'tool'
+        return {
+          ...current,
+          steps: current.steps.map((step) =>
+            step.status === 'running'
+              ? {
+                  ...step,
+                  label: `Waiting for approval: ${displayName}`,
+                  status: 'waiting' as const
+                }
+              : step
+          )
+        }
+      }
+      return current
+    })
   }
 
   function finishRunActivity(runId: string, outcome: RunActivityOutcome): void {
@@ -1497,11 +1695,19 @@ export default function App(): React.JSX.Element {
         return current
       }
 
-      const entry = terminalActivityEntry(outcome)
       return {
         ...current,
-        entries: current.entries.includes(entry) ? current.entries : [...current.entries, entry],
-        currentLabel: entry,
+        steps: current.steps.map((step) =>
+          step.status === 'running' || step.status === 'waiting'
+            ? {
+                ...step,
+                status:
+                  outcome === 'failed' || outcome === 'limit'
+                    ? ('failed' as const)
+                    : ('completed' as const)
+              }
+            : step
+        ),
         phase: 'done',
         outcome,
         endedAt: Date.now()
@@ -1711,9 +1917,7 @@ export default function App(): React.JSX.Element {
       setRunActivity({
         runId: submitted.run.run_id,
         conversationId,
-        entries: ['Started'],
-        currentLabel: 'Starting…',
-        toolNames: [],
+        steps: [{ id: 'start', label: 'Starting…', detail: null, status: 'running' }],
         phase: 'live',
         outcome: null,
         startedAt: Date.now(),
@@ -1743,6 +1947,19 @@ export default function App(): React.JSX.Element {
     setDraft('')
   }
 
+  function beginBrowserMessageEdit(message: ConversationMessage): void {
+    if (isBusy) return
+    setBrowserDraft(message.content)
+    setBrowserEditingMessageId(message.message_id)
+    setErrorMessage(null)
+    window.requestAnimationFrame(() => browserAgentInputRef.current?.focus())
+  }
+
+  function cancelBrowserMessageEdit(): void {
+    setBrowserEditingMessageId(null)
+    setBrowserDraft('')
+  }
+
   async function copyMessage(message: ConversationMessage): Promise<void> {
     try {
       await window.desktop.copyText(message.content)
@@ -1765,7 +1982,7 @@ export default function App(): React.JSX.Element {
     }
 
     setIsCancellingRun(true)
-    setRunActivityStatus(activeRun.runId, 'Stopping…')
+    setRunActivityWaiting(activeRun.runId, 'Stopping…', null)
 
     try {
       await window.desktop.cancelRun(activeRun.runId)
@@ -1786,13 +2003,14 @@ export default function App(): React.JSX.Element {
 
     try {
       await window.desktop.decideToolApproval(approval.approval_id, decision)
-      setRunActivityStatus(
+      setRunActivityWaiting(
         approval.run_id,
         decision === 'deny'
           ? 'Tool denied. Continuing…'
           : decision === 'allow_conversation' && approval.tool_id.startsWith('filesystem.')
             ? 'File changes are allowed for this conversation. Continuing…'
-            : `Using ${approval.display_name}…`
+            : `Using ${approval.display_name}…`,
+        null
       )
       setPendingApproval(null)
     } catch {
@@ -2157,6 +2375,7 @@ export default function App(): React.JSX.Element {
         )
       )
       setBrowserDraft('')
+      setBrowserEditingMessageId(null)
       setActiveRun({
         runId: submitted.run.run_id,
         conversationId,
@@ -2165,9 +2384,7 @@ export default function App(): React.JSX.Element {
       setRunActivity({
         runId: submitted.run.run_id,
         conversationId,
-        entries: ['Started'],
-        currentLabel: 'Starting…',
-        toolNames: [],
+        steps: [{ id: 'start', label: 'Starting…', detail: null, status: 'running' }],
         phase: 'live',
         outcome: null,
         startedAt: Date.now(),
@@ -2666,6 +2883,10 @@ export default function App(): React.JSX.Element {
                               )
                         const fileChangesAfterMessage = new Map<number, FileChange[]>()
                         const unanchoredFileChanges: FileChange[] = []
+                        const runHistoryBeforeAssistant = runHistoryByAssistantMessage(
+                          visibleMessages,
+                          runHistory
+                        )
 
                         for (const change of fileChanges) {
                           const changeTime = new Date(change.created_at).getTime()
@@ -2742,76 +2963,32 @@ export default function App(): React.JSX.Element {
                           )
                         }
 
-                        function renderRunActivity(activity: RunActivity): React.JSX.Element {
-                          return (
-                            <div className="msg agent run-activity-msg">
-                              {activity.phase === 'done' && !activityExpanded ? (
-                                <button
-                                  aria-expanded="false"
-                                  className={`activity-summary outcome-${activity.outcome ?? 'completed'}`}
-                                  onClick={() => setActivityExpanded(true)}
-                                  type="button"
-                                >
-                                  <span className="activity-summary-label">
-                                    {activitySummaryLabel(activity)}
-                                  </span>
-                                  <span aria-hidden="true" className="activity-chevron">
-                                    ▾
-                                  </span>
-                                </button>
-                              ) : (
-                                <div
-                                  className={`activity-details${
-                                    activity.phase === 'live' ? ' is-live' : ''
-                                  }`}
-                                >
-                                  {activity.phase === 'live' ? (
-                                    <div aria-live="polite" className="activity-live">
-                                      <span aria-hidden="true" className="activity-spinner" />
-                                      <span>{activity.currentLabel}</span>
-                                    </div>
-                                  ) : (
-                                    <button
-                                      aria-expanded="true"
-                                      className="activity-card-header is-button"
-                                      onClick={() => setActivityExpanded(false)}
-                                      type="button"
-                                    >
-                                      <span className="activity-card-title">
-                                        {activitySummaryLabel(activity)}
-                                      </span>
-                                      <span aria-hidden="true" className="activity-chevron">
-                                        ▴
-                                      </span>
-                                    </button>
-                                  )}
-                                  {activity.phase === 'done' ? (
-                                    <ul className="activity-list">
-                                      {activity.entries.map((entry, index) => {
-                                        return (
-                                          <li
-                                            className="activity-item"
-                                            key={`${activity.runId}-${index}`}
-                                          >
-                                            <span aria-hidden="true" className="activity-item-dot">
-                                              ✓
-                                            </span>
-                                            <span>{entry}</span>
-                                          </li>
-                                        )
-                                      })}
-                                    </ul>
-                                  ) : null}
-                                </div>
-                              )}
-                            </div>
-                          )
-                        }
-
                         return (
                           <>
                             {visibleMessages.map((message, index) => (
                               <div className="chat-turn" key={message.message_id}>
+                                {message.role === 'assistant'
+                                  ? (runHistoryBeforeAssistant.get(message.message_id) ?? []).map(
+                                      (history) => {
+                                        const activity = persistedRunActivity(history)
+                                        return (
+                                          <RunActivityCard
+                                            activity={activity}
+                                            expanded={expandedHistoryRunIds.has(activity.runId)}
+                                            key={activity.runId}
+                                            onExpandedChange={(expanded) =>
+                                              setExpandedHistoryRunIds((current) => {
+                                                const next = new Set(current)
+                                                if (expanded) next.add(activity.runId)
+                                                else next.delete(activity.runId)
+                                                return next
+                                              })
+                                            }
+                                          />
+                                        )
+                                      }
+                                    )
+                                  : null}
                                 <div className={`message-entry ${message.role}`}>
                                   <div
                                     className={`msg ${message.role === 'assistant' ? 'agent' : 'user'}`}
@@ -2882,15 +3059,23 @@ export default function App(): React.JSX.Element {
                                     ) : null}
                                   </div>
                                 </div>
-                                {visibleActivity !== null && index === activityAnchorIndex
-                                  ? renderRunActivity(visibleActivity)
-                                  : null}
+                                {visibleActivity !== null && index === activityAnchorIndex ? (
+                                  <RunActivityCard
+                                    activity={visibleActivity}
+                                    expanded={activityExpanded}
+                                    onExpandedChange={setActivityExpanded}
+                                  />
+                                ) : null}
                                 {(fileChangesAfterMessage.get(index) ?? []).map(renderFileChange)}
                               </div>
                             ))}
-                            {visibleActivity !== null && activityAnchorIndex === -1
-                              ? renderRunActivity(visibleActivity)
-                              : null}
+                            {visibleActivity !== null && activityAnchorIndex === -1 ? (
+                              <RunActivityCard
+                                activity={visibleActivity}
+                                expanded={activityExpanded}
+                                onExpandedChange={setActivityExpanded}
+                              />
+                            ) : null}
                             {unanchoredFileChanges.map(renderFileChange)}
                           </>
                         )
@@ -2991,16 +3176,18 @@ export default function App(): React.JSX.Element {
                             : fileAccessSummary(workspaceSettings)
                         }
                       >
-                        {activeRun === null
-                          ? workspaceSettings === null ||
-                            workspaceSettings.additional_roots.length +
-                              workspaceSettings.additional_files.length ===
-                              0
-                            ? 'Add a file or folder to this conversation'
-                            : fileAccessSummary(workspaceSettings)
-                          : 'asAgent is working'}
+                        {chatRunIsActive
+                          ? 'asAgent is working'
+                          : activeRun === null
+                            ? workspaceSettings === null ||
+                              workspaceSettings.additional_roots.length +
+                                workspaceSettings.additional_files.length ===
+                                0
+                              ? 'Add a file or folder to this conversation'
+                              : fileAccessSummary(workspaceSettings)
+                            : 'Another conversation is running'}
                       </span>
-                      {activeRun === null ? (
+                      {!chatRunIsActive ? (
                         <button
                           aria-label={isSubmittingMessage ? 'Sending' : 'Send message'}
                           className="composer-send"
@@ -3291,6 +3478,40 @@ export default function App(): React.JSX.Element {
                               className={`browser-agent-turn ${message.role === 'user' ? 'is-user' : 'is-assistant'}`}
                               key={message.message_id}
                             >
+                              {message.role === 'assistant'
+                                ? (
+                                    runHistoryByAssistantMessage(
+                                      browserMessages,
+                                      browserRunHistory
+                                    ).get(message.message_id) ?? []
+                                  ).map((history) => {
+                                    const activity = persistedRunActivity(history)
+                                    return (
+                                      <RunActivityCard
+                                        activity={activity}
+                                        expanded={expandedHistoryRunIds.has(activity.runId)}
+                                        key={activity.runId}
+                                        onExpandedChange={(expanded) =>
+                                          setExpandedHistoryRunIds((current) => {
+                                            const next = new Set(current)
+                                            if (expanded) next.add(activity.runId)
+                                            else next.delete(activity.runId)
+                                            return next
+                                          })
+                                        }
+                                      />
+                                    )
+                                  })
+                                : null}
+                              {runActivity?.conversationId === selectedBrowserConversationId &&
+                              message.role === 'assistant' &&
+                              new Date(message.created_at).getTime() >= runActivity.startedAt ? (
+                                <RunActivityCard
+                                  activity={runActivity}
+                                  expanded={activityExpanded}
+                                  onExpandedChange={setActivityExpanded}
+                                />
+                              ) : null}
                               <div className="browser-agent-bubble">
                                 {message.role === 'assistant' ? (
                                   <div className="markdown-content">
@@ -3318,41 +3539,56 @@ export default function App(): React.JSX.Element {
                                   message.content
                                 )}
                               </div>
-                              {message.role === 'assistant' ? (
-                                <div className="browser-agent-meta">
-                                  <time
-                                    dateTime={message.created_at}
-                                    title={new Date(message.created_at).toLocaleString()}
-                                  >
-                                    {formatMessageTime(message.created_at)}
-                                  </time>
+                              <div className="message-meta browser-agent-meta">
+                                <time
+                                  dateTime={message.created_at}
+                                  title={new Date(message.created_at).toLocaleString()}
+                                >
+                                  {formatMessageTime(message.created_at)}
+                                </time>
+                                <button
+                                  aria-label={
+                                    copiedMessageId === message.message_id
+                                      ? 'Copied'
+                                      : 'Copy message'
+                                  }
+                                  className="message-action"
+                                  onClick={() => void copyMessage(message)}
+                                  title={
+                                    copiedMessageId === message.message_id
+                                      ? 'Copied'
+                                      : 'Copy message'
+                                  }
+                                  type="button"
+                                >
+                                  <CopyIcon copied={copiedMessageId === message.message_id} />
+                                </button>
+                                {message.role === 'user' ? (
                                   <button
-                                    aria-label={
-                                      copiedMessageId === message.message_id
-                                        ? 'Copied'
-                                        : 'Copy message'
-                                    }
+                                    aria-label="Edit and resend message"
                                     className="message-action"
-                                    onClick={() => void copyMessage(message)}
-                                    title={
-                                      copiedMessageId === message.message_id
-                                        ? 'Copied'
-                                        : 'Copy message'
-                                    }
+                                    disabled={isBusy}
+                                    onClick={() => beginBrowserMessageEdit(message)}
+                                    title="Edit and resend message"
                                     type="button"
                                   >
-                                    <CopyIcon copied={copiedMessageId === message.message_id} />
+                                    <Icon path="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
                                   </button>
-                                </div>
-                              ) : null}
+                                ) : null}
+                              </div>
                             </div>
                           ))}
-                          {runActivity?.conversationId === selectedBrowserConversationId ? (
-                            <p className="browser-agent-status">
-                              {runActivity.phase === 'live'
-                                ? runActivity.currentLabel
-                                : activitySummaryLabel(runActivity)}
-                            </p>
+                          {runActivity?.conversationId === selectedBrowserConversationId &&
+                          !browserMessages.some(
+                            (message) =>
+                              message.role === 'assistant' &&
+                              new Date(message.created_at).getTime() >= runActivity.startedAt
+                          ) ? (
+                            <RunActivityCard
+                              activity={runActivity}
+                              expanded={activityExpanded}
+                              onExpandedChange={setActivityExpanded}
+                            />
                           ) : null}
                           <div ref={browserAgentMessagesEndRef} />
                         </>
@@ -3422,6 +3658,14 @@ export default function App(): React.JSX.Element {
                       className="browser-agent-composer"
                       onSubmit={(event) => void submitBrowserMessage(event)}
                     >
+                      {browserEditingMessageId !== null ? (
+                        <div className="composer-editing">
+                          <span>Editing a previous message. Sending creates a new message.</span>
+                          <button onClick={cancelBrowserMessageEdit} type="button">
+                            Cancel
+                          </button>
+                        </div>
+                      ) : null}
                       <label className="browser-agent-input">
                         <textarea
                           ref={browserAgentInputRef}
@@ -3437,15 +3681,26 @@ export default function App(): React.JSX.Element {
                           rows={1}
                           value={browserDraft}
                         />
-                        <button
-                          aria-label="Send message"
-                          className="composer-send"
-                          disabled={!browserDraft.trim() || isBusy}
-                          title="Send message"
-                          type="submit"
-                        >
-                          <Icon path="M12 19V5m-6 6 6-6 6 6" />
-                        </button>
+                        {browserRunIsActive ? (
+                          <button
+                            className="composer-stop"
+                            disabled={isCancellingRun}
+                            onClick={() => void cancelActiveRun()}
+                            type="button"
+                          >
+                            {isCancellingRun ? 'Stopping…' : 'Stop'}
+                          </button>
+                        ) : (
+                          <button
+                            aria-label="Send message"
+                            className="composer-send"
+                            disabled={!browserDraft.trim() || isBusy}
+                            title="Send message"
+                            type="submit"
+                          >
+                            <Icon path="M12 19V5m-6 6 6-6 6 6" />
+                          </button>
+                        )}
                       </label>
                     </form>
                   </aside>

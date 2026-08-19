@@ -900,10 +900,13 @@ async def test_loop_publishes_ordered_safe_events_for_a_tool_round() -> None:
     assert publisher.events[3].data == {
         "tool_call_id": "call_123",
         "provider_tool_name": "builtin_echo",
+        "tool_id": "builtin.echo",
+        "display_name": "Echo",
     }
     assert publisher.events[4].data == {
         "tool_call_id": "call_123",
         "tool_id": "builtin.echo",
+        "display_name": "Echo",
     }
     assert all("hello" not in str(event.data) for event in publisher.events)
 

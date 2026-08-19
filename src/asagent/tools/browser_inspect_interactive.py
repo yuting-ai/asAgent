@@ -13,6 +13,8 @@ _MAX_NAME_CHARS = 120
 _MAX_ROLE_CHARS = 40
 _MAX_TAG_CHARS = 40
 _MAX_URL_CHARS = 2048
+_MAX_SELECT_OPTIONS = 50
+_MAX_OPTION_TEXT_CHARS = 120
 
 
 class BrowserInspectInteractiveTool:
@@ -31,10 +33,13 @@ class BrowserInspectInteractiveTool:
                 "Lists visible interactive elements on the browser tab that "
                 "was active when this Browser conversation message was "
                 "submitted. Returns a bounded list of target_id, name, role, "
-                "tag, and disabled. Before clicking an unfamiliar page "
-                "element, use this tool and pass a returned target_id to "
-                "browser.click. Do not guess CSS selectors or use external "
-                "search to infer page structure. Accepts no arguments."
+                "tag, and disabled. Native select elements also include a "
+                "bounded options list with value, label, and disabled. Before "
+                "clicking, filling, or selecting an unfamiliar page element, "
+                "use this tool and pass a returned target_id to browser.click, "
+                "browser.fill, or browser.select. Do not guess CSS selectors "
+                "or option values, and do not use external search to infer "
+                "page structure. Accepts no arguments."
             ),
             input_schema={
                 "type": "object",
@@ -60,15 +65,23 @@ class BrowserInspectInteractiveTool:
 
         elements = []
         for item in snapshot.elements[:_MAX_ELEMENTS]:
-            elements.append(
-                {
-                    "target_id": item.target_id,
-                    "name": _bounded(item.name, _MAX_NAME_CHARS),
-                    "role": _bounded(item.role, _MAX_ROLE_CHARS),
-                    "tag": _bounded(item.tag, _MAX_TAG_CHARS),
-                    "disabled": item.disabled,
-                }
-            )
+            element: dict[str, object] = {
+                "target_id": item.target_id,
+                "name": _bounded(item.name, _MAX_NAME_CHARS),
+                "role": _bounded(item.role, _MAX_ROLE_CHARS),
+                "tag": _bounded(item.tag, _MAX_TAG_CHARS),
+                "disabled": item.disabled,
+            }
+            if item.options is not None:
+                element["options"] = [
+                    {
+                        "value": _bounded(option.value, _MAX_OPTION_TEXT_CHARS),
+                        "label": _bounded(option.label, _MAX_OPTION_TEXT_CHARS),
+                        "disabled": option.disabled,
+                    }
+                    for option in item.options[:_MAX_SELECT_OPTIONS]
+                ]
+            elements.append(element)
 
         payload = {
             "url": _bounded(snapshot.url, _MAX_URL_CHARS),

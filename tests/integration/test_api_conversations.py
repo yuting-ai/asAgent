@@ -11,10 +11,11 @@ from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
 from asagent.api.auth import LocalApiToken
 from asagent.core.conversation import Conversation
-from asagent.core.ids import ConversationId, MessageId, RunId, UserId
+from asagent.core.ids import ConversationId, EventId, MessageId, RunId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.repositories import RunRepository
 from asagent.core.run import Run
+from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
 from asagent.storage.sqlite.conversation_repository import (
     SqliteConversationRepository,
@@ -255,6 +256,93 @@ async def test_list_conversation_messages_returns_visible_messages_in_sequence_o
         assistant_message.created_at,
     ]
     assert all("conversation_id" not in item for item in payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "path"),
+    (
+        ("chat", "/api/v1/conversations/conv-local/run-history"),
+        ("browser", "/api/v1/browser/conversations/conv-local/run-history"),
+    ),
+)
+async def test_list_conversation_run_history_replays_persisted_safe_events(
+    tmp_path: Path,
+    kind: Literal["chat", "browser"],
+    path: str,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+    created_at = datetime(2026, 8, 11, 8, 0, tzinfo=UTC)
+    conversation = _conversation(
+        ConversationId("conv-local"),
+        UserId("local-user"),
+        created_at,
+        created_at,
+        kind=kind,
+    )
+    conversations = SqliteConversationRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    app = create_app(
+        access_token=LocalApiToken("test-token"),
+        conversations=conversations,
+        runs=runs,
+        run_submission=_unused_run_submission(conversations),
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+    )
+    try:
+        await conversations.save(conversation)
+        run = Run(
+            RunId("run-local"),
+            conversation.conversation_id,
+            RunStatus.COMPLETED,
+            created_at,
+            created_at,
+        )
+        await runs.save(run)
+        await runs.append_event(
+            RunEvent(
+                EventId("evt-1"),
+                run.run_id,
+                conversation.conversation_id,
+                1,
+                "tool.completed",
+                created_at,
+                {"tool_call_id": "call-1", "display_name": "Read current page"},
+            )
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            response = await client.get(
+                path, headers={"Authorization": "Bearer test-token"}
+            )
+    finally:
+        await runs.aclose()
+        await conversations.aclose()
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "run": {
+                "run_id": "run-local",
+                "status": "completed",
+                "created_at": "2026-08-11T08:00:00Z",
+                "updated_at": "2026-08-11T08:00:00Z",
+            },
+            "events": [
+                {
+                    "event_type": "tool.completed",
+                    "created_at": "2026-08-11T08:00:00Z",
+                    "data": {
+                        "tool_call_id": "call-1",
+                        "display_name": "Read current page",
+                    },
+                }
+            ],
+        }
+    ]
 
 
 @pytest.mark.asyncio

@@ -111,6 +111,11 @@ describe('BrowserPageBridge', () => {
       url: 'https://example.com/',
       title: 'Example'
     }))
+    const selectCurrentPage = vi.fn(async () => ({
+      action: 'selected' as const,
+      url: 'https://example.com/form',
+      title: 'Country'
+    }))
     const waitForCurrentPage = vi.fn(async () => ({
       changed: true,
       page: {
@@ -125,6 +130,7 @@ describe('BrowserPageBridge', () => {
       inspectInteractive,
       clickCurrentPage,
       fillCurrentPage,
+      selectCurrentPage,
       waitForCurrentPage,
       createServer,
       randomToken: () => 'bridge-token'
@@ -279,6 +285,53 @@ describe('BrowserPageBridge', () => {
       action: 'filled',
       url: 'https://example.com/',
       title: 'Example'
+    })
+
+    const selectUnauthorized = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/select-current-page',
+        {},
+        JSON.stringify({ tab_id: 'tab-1', target_id: 'target_4', value: 'au' })
+      ),
+      selectUnauthorized
+    )
+    await vi.waitFor(() => expect(selectUnauthorized.end).toHaveBeenCalled())
+    expect(selectUnauthorized.statusCode).toBe(401)
+    expect(selectCurrentPage).not.toHaveBeenCalled()
+
+    const selectMissingValue = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/select-current-page',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1', target_id: 'target_4' })
+      ),
+      selectMissingValue
+    )
+    await vi.waitFor(() => expect(selectMissingValue.end).toHaveBeenCalled())
+    expect(selectMissingValue.statusCode).toBe(400)
+    expect(selectCurrentPage).not.toHaveBeenCalled()
+
+    const selectAuthorized = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/select-current-page',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1', target_id: 'target_4', value: 'au' })
+      ),
+      selectAuthorized
+    )
+    await vi.waitFor(() => expect(selectAuthorized.end).toHaveBeenCalled())
+    expect(selectAuthorized.statusCode).toBe(200)
+    expect(selectCurrentPage).toHaveBeenCalledWith('tab-1', 'target_4', 'au')
+    expect(JSON.parse(selectAuthorized.body ?? '')).toEqual({
+      action: 'selected',
+      url: 'https://example.com/form',
+      title: 'Country'
     })
 
     await bridge.stop()

@@ -122,6 +122,57 @@ async def test_browser_inspect_interactive_returns_bounded_elements() -> None:
 
 
 @pytest.mark.asyncio
+async def test_browser_inspect_interactive_returns_native_select_options() -> None:
+    transport = _FakeTransport(
+        status_code=200,
+        payload={
+            "url": "https://example.com/form",
+            "elements": [
+                {
+                    "target_id": "target_4",
+                    "name": "Country",
+                    "role": "combobox",
+                    "tag": "select",
+                    "disabled": False,
+                    "options": [
+                        {"value": "au", "label": "Australia", "disabled": False},
+                        {"value": "us", "label": "United States", "disabled": False},
+                    ],
+                }
+            ],
+        },
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        tool = BrowserInspectInteractiveTool(
+            client=BrowserPageBridgeClient(
+                base_url="http://127.0.0.1:43124",
+                token="bridge-token",
+                http_client=client,
+            ),
+            tab_id="tab-1",
+        )
+        result = await tool.execute({})
+
+    assert json.loads(result) == {
+        "url": "https://example.com/form",
+        "elements": [
+            {
+                "target_id": "target_4",
+                "name": "Country",
+                "role": "combobox",
+                "tag": "select",
+                "disabled": False,
+                "options": [
+                    {"value": "au", "label": "Australia", "disabled": False},
+                    {"value": "us", "label": "United States", "disabled": False},
+                ],
+            }
+        ],
+    }
+    assert "selector" not in result
+
+
+@pytest.mark.asyncio
 async def test_browser_inspect_interactive_maps_safe_bridge_failure() -> None:
     transport = _FakeTransport(
         status_code=409,

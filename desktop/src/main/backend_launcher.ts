@@ -47,6 +47,15 @@ export type RunEvent = {
   data: Record<string, unknown>
 }
 
+export type RunHistory = {
+  run: RunSummary
+  events: Array<{
+    event_type: string
+    created_at: string
+    data: Record<string, unknown>
+  }>
+}
+
 export type ToolApprovalDecision = 'deny' | 'allow_once' | 'allow_conversation'
 
 const TOOL_APPROVAL_DECISIONS: ReadonlySet<ToolApprovalDecision> = new Set([
@@ -292,6 +301,13 @@ export class BackendLauncher {
     )
   }
 
+  async listConversationRunHistory(conversationId: string): Promise<RunHistory[]> {
+    return this.requestJson(
+      `/api/v1/conversations/${encodeURIComponent(conversationId)}/run-history`,
+      'GET'
+    )
+  }
+
   async listConversationFileChanges(conversationId: string): Promise<FileChange[]> {
     return this.requestJson(
       `/api/v1/conversations/${encodeURIComponent(conversationId)}/file-changes`,
@@ -358,6 +374,13 @@ export class BackendLauncher {
   async listBrowserConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
     return this.requestJson(
       `/api/v1/browser/conversations/${encodeURIComponent(conversationId)}/messages`,
+      'GET'
+    )
+  }
+
+  async listBrowserConversationRunHistory(conversationId: string): Promise<RunHistory[]> {
+    return this.requestJson(
+      `/api/v1/browser/conversations/${encodeURIComponent(conversationId)}/run-history`,
       'GET'
     )
   }

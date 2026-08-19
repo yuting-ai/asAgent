@@ -18,6 +18,16 @@ interface ConversationMessage {
   created_at: string
 }
 
+interface RunHistory {
+  run: {
+    run_id: string
+    status: 'created' | 'completed' | 'failed' | 'cancelled' | 'limit_reached'
+    created_at: string
+    updated_at: string
+  }
+  events: Array<{ event_type: string; created_at: string; data: Record<string, unknown> }>
+}
+
 interface SubmittedMessage {
   message: ConversationMessage
   run: {
@@ -35,6 +45,7 @@ interface RunUpdate {
   event: {
     event_type: string
     sequence: number
+    data: Record<string, unknown>
   }
 }
 
@@ -135,6 +146,7 @@ interface DesktopBridge {
   restartApp(): Promise<void>
   listConversations(): Promise<ConversationSummary[]>
   listConversationMessages(conversationId: string): Promise<ConversationMessage[]>
+  listConversationRunHistory(conversationId: string): Promise<RunHistory[]>
   listConversationFileChanges(conversationId: string): Promise<FileChange[]>
   undoFileChange(changeId: string, path: string): Promise<FileChange>
   createConversation(): Promise<ConversationSummary>
@@ -145,6 +157,7 @@ interface DesktopBridge {
   createBrowserConversation(): Promise<ConversationSummary>
   deleteBrowserConversation(conversationId: string): Promise<void>
   listBrowserConversationMessages(conversationId: string): Promise<ConversationMessage[]>
+  listBrowserConversationRunHistory(conversationId: string): Promise<RunHistory[]>
   submitBrowserMessage(
     conversationId: string,
     content: string,

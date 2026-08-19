@@ -3,6 +3,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 
 import {
   BROWSER_OPERATION_ERRORS,
+  BROWSER_SELECT_VALUE_LIMIT,
   BROWSER_TARGET_ID_LIMIT,
   normalizeBrowserOperationError,
   parseBrowserTargetId,
@@ -10,6 +11,7 @@ import {
   type BrowserFillResult,
   type BrowserInteractiveSnapshot,
   type BrowserPageContent,
+  type BrowserSelectResult,
   type BrowserWaitResult
 } from './browser_view'
 
@@ -18,6 +20,11 @@ export type BrowserPageBridgeOptions = {
   inspectInteractive: (tabId: string) => Promise<BrowserInteractiveSnapshot>
   clickCurrentPage: (tabId: string, targetId: string) => Promise<BrowserClickResult>
   fillCurrentPage: (tabId: string, targetId: string, value: string) => Promise<BrowserFillResult>
+  selectCurrentPage: (
+    tabId: string,
+    targetId: string,
+    value: string
+  ) => Promise<BrowserSelectResult>
   waitForCurrentPage: (tabId: string, seconds: number) => Promise<BrowserWaitResult>
   createServer?: typeof createServer
   randomToken?: () => string
@@ -85,6 +92,11 @@ export class BrowserPageBridge {
     targetId: string,
     value: string
   ) => Promise<BrowserFillResult>
+  private readonly selectCurrentPage: (
+    tabId: string,
+    targetId: string,
+    value: string
+  ) => Promise<BrowserSelectResult>
   private readonly waitForCurrentPage: (
     tabId: string,
     seconds: number
@@ -99,6 +111,7 @@ export class BrowserPageBridge {
     this.inspectInteractive = options.inspectInteractive
     this.clickCurrentPage = options.clickCurrentPage
     this.fillCurrentPage = options.fillCurrentPage
+    this.selectCurrentPage = options.selectCurrentPage
     this.waitForCurrentPage = options.waitForCurrentPage
     this.createHttpServer = options.createServer ?? createServer
     this.randomToken = options.randomToken ?? (() => randomBytes(32).toString('base64url'))
@@ -169,6 +182,7 @@ export class BrowserPageBridge {
           request.url !== '/inspect-interactive' &&
           request.url !== '/click-current-page' &&
           request.url !== '/fill-current-page' &&
+          request.url !== '/select-current-page' &&
           request.url !== '/wait-for-current-page')
       ) {
         writeJson(response, 404, { detail: 'not found' })
@@ -250,6 +264,17 @@ export class BrowserPageBridge {
           return
         }
         const result = await this.fillCurrentPage(tabId.trim(), targetId, value)
+        writeJson(response, 200, result)
+        return
+      }
+
+      if (request.url === '/select-current-page') {
+        const value = record['value']
+        if (typeof value !== 'string' || value.length > BROWSER_SELECT_VALUE_LIMIT) {
+          writeJson(response, 400, { detail: 'invalid request' })
+          return
+        }
+        const result = await this.selectCurrentPage(tabId.trim(), targetId, value)
         writeJson(response, 200, result)
         return
       }

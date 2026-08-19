@@ -438,6 +438,12 @@ app.whenReady().then(async () => {
       }
       return visibleBrowser.fillCurrentPage(tabId, targetId, value)
     },
+    selectCurrentPage: (tabId, targetId, value) => {
+      if (visibleBrowser === undefined) {
+        throw new Error('current browser tab is not visible')
+      }
+      return visibleBrowser.selectCurrentPage(tabId, targetId, value)
+    },
     waitForCurrentPage: (tabId, seconds) => {
       if (visibleBrowser === undefined) {
         throw new Error('current browser tab is not visible')
@@ -673,6 +679,16 @@ app.whenReady().then(async () => {
     return getReadyBackendLauncher().listConversationMessages(conversationId)
   })
 
+  ipcMain.handle('desktop:list-conversation-run-history', (event, conversationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof conversationId !== 'string' || !conversationId.trim()) {
+      throw new Error('Conversation ID is invalid.')
+    }
+    return getReadyBackendLauncher().listConversationRunHistory(conversationId)
+  })
+
   ipcMain.handle('desktop:list-conversation-file-changes', (event, conversationId: unknown) => {
     const frame = event.senderFrame
     if (frame === null) {
@@ -820,6 +836,19 @@ app.whenReady().then(async () => {
 
     return getReadyBackendLauncher().listBrowserConversationMessages(conversationId)
   })
+
+  ipcMain.handle(
+    'desktop:list-browser-conversation-run-history',
+    (event, conversationId: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) throw new Error('Untrusted renderer IPC request.')
+      assertTrustedRenderer(frame.url)
+      if (typeof conversationId !== 'string' || !conversationId.trim()) {
+        throw new Error('Conversation ID is invalid.')
+      }
+      return getReadyBackendLauncher().listBrowserConversationRunHistory(conversationId)
+    }
+  )
 
   ipcMain.handle(
     'desktop:submit-browser-message',

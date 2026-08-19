@@ -96,6 +96,7 @@ from asagent.tools.browser_fill import BrowserFillTool
 from asagent.tools.browser_inspect_interactive import BrowserInspectInteractiveTool
 from asagent.tools.browser_read_current_page import BrowserReadCurrentPageTool
 from asagent.tools.browser_run_bindings import BrowserRunBindings
+from asagent.tools.browser_select import BrowserSelectTool
 from asagent.tools.browser_wait import BrowserWaitTool
 from asagent.tools.builtin.calculator import CalculatorTool
 from asagent.tools.builtin.current_time import CurrentTimeTool
@@ -123,6 +124,7 @@ _BROWSER_READ_PERMISSIONS = frozenset({"browser.read"})
 _BROWSER_INSPECT_PERMISSIONS = frozenset({"browser.inspect"})
 _BROWSER_CLICK_PERMISSIONS = frozenset({"browser.click"})
 _BROWSER_FILL_PERMISSIONS = frozenset({"browser.fill"})
+_BROWSER_SELECT_PERMISSIONS = frozenset({"browser.select"})
 _BROWSER_WAIT_PERMISSIONS = frozenset({"browser.wait"})
 _BROWSER_TOOL_PERMISSIONS = (
     _BROWSER_READ_PERMISSIONS
@@ -294,12 +296,22 @@ async def _register_browser_tools(
         ),
     )
     registry.register(
+        BrowserSelectTool(
+            client=browser_page_client,
+            tab_id=tab_id,
+        ),
+    )
+    registry.register(
         BrowserWaitTool(
             client=browser_page_client,
             tab_id=tab_id,
         ),
     )
-    return _BROWSER_TOOL_PERMISSIONS | _BROWSER_FILL_PERMISSIONS
+    return (
+        _BROWSER_TOOL_PERMISSIONS
+        | _BROWSER_FILL_PERMISSIONS
+        | _BROWSER_SELECT_PERMISSIONS
+    )
 
 
 def _filesystem_permissions(
@@ -597,7 +609,6 @@ def build_persistent_agent_runtime(
                     | browser_permissions
                 ),
                 max_steps=max_steps,
-                max_calls_per_tool_input=(1 if browser_permissions else None),
             )
 
         return PersistentAgentRuntime(
@@ -694,7 +705,6 @@ def build_persistent_development_runtime(
                     | browser_permissions
                 ),
                 max_steps=max_steps,
-                max_calls_per_tool_input=(1 if browser_permissions else None),
             )
 
         return PersistentAgentRuntime(

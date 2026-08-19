@@ -185,6 +185,25 @@ class RunResponse(BaseModel):
         )
 
 
+class RunEventResponse(BaseModel):
+    event_type: str
+    created_at: datetime
+    data: dict[str, object]
+
+    @classmethod
+    def from_event(cls, event: RunEvent) -> "RunEventResponse":
+        return cls(
+            event_type=event.event_type,
+            created_at=event.created_at,
+            data=dict(event.data),
+        )
+
+
+class RunHistoryResponse(BaseModel):
+    run: RunResponse
+    events: list[RunEventResponse]
+
+
 class CancelRunResponse(BaseModel):
     run_id: str
     cancellation_requested: Literal[True] = True
@@ -547,6 +566,28 @@ def create_app(
         )
         return [MessageResponse.from_message(message) for message in stored_messages]
 
+    async def list_run_history_of_kind(
+        conversation_id: str,
+        *,
+        kind: ConversationKind,
+    ) -> list[RunHistoryResponse]:
+        stored_conversation = await get_local_conversation(
+            ConversationId(conversation_id), kind=kind
+        )
+        stored_runs = await runs.list_for_conversation(
+            stored_conversation.conversation_id
+        )
+        return [
+            RunHistoryResponse(
+                run=RunResponse.from_run(run),
+                events=[
+                    RunEventResponse.from_event(event)
+                    for event in await runs.list_events(run.run_id)
+                ],
+            )
+            for run in stored_runs
+        ]
+
     async def get_pending_approval(approval_id: ApprovalId) -> ToolApprovalRequest:
         if tool_approvals is None:
             raise HTTPException(
@@ -785,6 +826,16 @@ def create_app(
         return await list_messages_of_kind(conversation_id, kind="chat")
 
     @app.get(
+        "/api/v1/conversations/{conversation_id}/run-history",
+        response_model=list[RunHistoryResponse],
+        dependencies=[Depends(authenticate)],
+    )
+    async def list_conversation_run_history(
+        conversation_id: str,
+    ) -> list[RunHistoryResponse]:
+        return await list_run_history_of_kind(conversation_id, kind="chat")
+
+    @app.get(
         "/api/v1/browser/conversations",
         response_model=list[ConversationResponse],
         dependencies=[Depends(authenticate)],
@@ -829,6 +880,16 @@ def create_app(
         conversation_id: str,
     ) -> list[MessageResponse]:
         return await list_messages_of_kind(conversation_id, kind="browser")
+
+    @app.get(
+        "/api/v1/browser/conversations/{conversation_id}/run-history",
+        response_model=list[RunHistoryResponse],
+        dependencies=[Depends(authenticate)],
+    )
+    async def list_browser_conversation_run_history(
+        conversation_id: str,
+    ) -> list[RunHistoryResponse]:
+        return await list_run_history_of_kind(conversation_id, kind="browser")
 
     @app.post(
         "/api/v1/browser/conversations/{conversation_id}/messages",

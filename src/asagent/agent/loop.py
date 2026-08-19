@@ -273,13 +273,23 @@ class AgentLoop:
                         )
                         return await result(RunStatus.CANCELLED, None)
 
-                    await publish(
-                        "tool.requested",
-                        {
-                            "tool_call_id": tool_call.call_id,
-                            "provider_tool_name": tool_call.name,
-                        },
-                    )
+                    requested_data: dict[str, object] = {
+                        "tool_call_id": tool_call.call_id,
+                        "provider_tool_name": tool_call.name,
+                    }
+                    try:
+                        requested_tool_id = self._tool_snapshot.tool_id_for(
+                            tool_call.name,
+                        )
+                        requested_data["tool_id"] = requested_tool_id
+                        requested_data["display_name"] = (
+                            self._tool_snapshot.definition_for(
+                                requested_tool_id,
+                            ).display_name
+                        )
+                    except KeyError:
+                        pass
+                    await publish("tool.requested", requested_data)
                     execution = await self._execute_tool(
                         tool_call,
                         identical_call_streak,
@@ -292,6 +302,13 @@ class AgentLoop:
                     }
                     if execution.tool_id is not None:
                         event_data["tool_id"] = execution.tool_id
+                        event_data["display_name"] = self._tool_snapshot.definition_for(
+                            execution.tool_id,
+                        ).display_name
+                    if not execution.succeeded:
+                        event_data["error_summary"] = _tool_error_summary(
+                            execution.content,
+                        )
                     await publish(
                         ("tool.completed" if execution.succeeded else "tool.failed"),
                         event_data,
@@ -464,6 +481,7 @@ class AgentLoop:
                     "approval_id": str(request.approval_id),
                     "tool_call_id": request.tool_call_id,
                     "tool_id": request.definition.tool_id,
+                    "display_name": request.definition.display_name,
                 },
             )
 
@@ -558,3 +576,11 @@ class AgentLoop:
             return "model response contained duplicate tool call ids"
 
         return None
+
+
+def _tool_error_summary(content: str) -> str:
+    """Return a bounded, controlled error summary for the live activity timeline."""
+
+    if not content.startswith("Error: "):
+        return "Tool failed."
+    return content.removeprefix("Error: ")[:240]

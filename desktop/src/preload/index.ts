@@ -14,6 +14,16 @@ type ConversationMessage = {
   created_at: string
 }
 
+type RunHistory = {
+  run: {
+    run_id: string
+    status: 'created' | 'completed' | 'failed' | 'cancelled' | 'limit_reached'
+    created_at: string
+    updated_at: string
+  }
+  events: Array<{ event_type: string; created_at: string; data: Record<string, unknown> }>
+}
+
 type SubmittedMessage = {
   message: ConversationMessage
   run: {
@@ -31,6 +41,7 @@ type RunUpdate = {
   event: {
     event_type: string
     sequence: number
+    data: Record<string, unknown>
   }
 }
 
@@ -144,6 +155,8 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:list-conversations'),
   listConversationMessages: (conversationId: string): Promise<ConversationMessage[]> =>
     ipcRenderer.invoke('desktop:list-conversation-messages', conversationId),
+  listConversationRunHistory: (conversationId: string): Promise<RunHistory[]> =>
+    ipcRenderer.invoke('desktop:list-conversation-run-history', conversationId),
   listConversationFileChanges: (conversationId: string): Promise<FileChange[]> =>
     ipcRenderer.invoke('desktop:list-conversation-file-changes', conversationId),
   undoFileChange: (changeId: string, path: string): Promise<FileChange> =>
@@ -164,6 +177,8 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:delete-browser-conversation', conversationId),
   listBrowserConversationMessages: (conversationId: string): Promise<ConversationMessage[]> =>
     ipcRenderer.invoke('desktop:list-browser-conversation-messages', conversationId),
+  listBrowserConversationRunHistory: (conversationId: string): Promise<RunHistory[]> =>
+    ipcRenderer.invoke('desktop:list-browser-conversation-run-history', conversationId),
   submitBrowserMessage: (
     conversationId: string,
     content: string,
