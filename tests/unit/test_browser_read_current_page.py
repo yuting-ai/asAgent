@@ -159,13 +159,14 @@ async def test_browser_read_tool_registers_only_for_bound_browser_runs() -> None
         browser_page_client=client,
     )
     assert browser_permissions == frozenset(
-        {"browser.read", "browser.inspect", "browser.click"}
+        {"browser.read", "browser.inspect", "browser.click", "browser.wait"}
     )
     assert (
         browser_registry.get("browser.read_current_page").definition.tool_id
         == "browser.read_current_page"
     )
     assert browser_registry.get("browser.click").definition.tool_id == "browser.click"
+    assert browser_registry.get("browser.wait").definition.tool_id == "browser.wait"
 
     unbound_registry = ToolRegistry()
     unbound_permissions = await _register_browser_tools(

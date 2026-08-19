@@ -544,6 +544,38 @@ describe('VisibleBrowser window.open', () => {
     await expect(browser.readCurrentPage('tab-missing')).rejects.toThrow('not visible')
   })
 
+  it('includes bounded text from nested frames without exposing their URLs', async () => {
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.getURL.mockReturnValue('https://example.com/outer')
+    const child = createFakeFrame({
+      url: 'https://embedded.example/private',
+      executeJavaScript: vi.fn(async () => ({
+        title: 'Embedded app',
+        text: 'Prediction Results',
+        structured_text: 'UG_at_PS: 13.21 wt.%\nUV_at_PS: 39.09 g H₂/L'
+      }))
+    })
+    Object.defineProperty(view.webContents.mainFrame, 'frames', {
+      value: [child],
+      configurable: true
+    })
+    view.webContents.executeJavaScript.mockResolvedValue({
+      title: 'Outer page',
+      text: 'Hugging Face Space'
+    })
+
+    await expect(browser.readCurrentPage('tab-1')).resolves.toEqual({
+      title: 'Outer page',
+      url: 'https://example.com/outer',
+      text: 'Hugging Face Space\n\n[Embedded page content]\nPrediction Results\n\n[Structured table content]\nUG_at_PS: 13.21 wt.%\nUV_at_PS: 39.09 g H₂/L'
+    })
+    expect(child.executeJavaScript).toHaveBeenCalledTimes(1)
+    expect(String(child.executeJavaScript.mock.calls[0]?.[0])).toContain('aria-valuetext')
+  })
+
   it('rejects reads after the tab is no longer visible', async () => {
     const { browser, createView } = createBrowser()
     const window = createFakeWindow()
@@ -553,6 +585,50 @@ describe('VisibleBrowser window.open', () => {
 
     await expect(browser.readCurrentPage('tab-1')).rejects.toThrow('not visible')
     expect(view.webContents.executeJavaScript).not.toHaveBeenCalled()
+  })
+
+  it('returns early with the stable page after visible content changes', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({ title: 'Page', text: 'Working' })
+      .mockResolvedValueOnce({ title: 'Page', text: 'Results are ready' })
+      .mockResolvedValueOnce({ title: 'Page', text: 'Results are ready' })
+
+    const pending = browser.waitForCurrentPage('tab-1', 15)
+    await vi.advanceTimersByTimeAsync(1_000)
+    await expect(pending).resolves.toEqual({
+      changed: true,
+      page: { title: 'Page', url: '', text: 'Results are ready' }
+    })
+    vi.useRealTimers()
+  })
+
+  it('returns the latest page at the timeout and rejects a hidden tab', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.executeJavaScript.mockResolvedValue({ title: 'Page', text: 'Working' })
+
+    const unchanged = browser.waitForCurrentPage('tab-1', 1)
+    await vi.advanceTimersByTimeAsync(1_000)
+    await expect(unchanged).resolves.toEqual({
+      changed: false,
+      page: { title: 'Page', url: '', text: 'Working' }
+    })
+
+    const hidden = browser.waitForCurrentPage('tab-1', 1)
+    await vi.advanceTimersByTimeAsync(0)
+    const hiddenAssertion = expect(hidden).rejects.toThrow('not visible')
+    browser.hide()
+    await vi.advanceTimersByTimeAsync(500)
+    await hiddenAssertion
+    vi.useRealTimers()
   })
 
   it('restores persisted tabs and lists scrubbed urls', async () => {
@@ -600,7 +676,8 @@ describe('VisibleBrowser window.open', () => {
           }
         ]
       })
-      .mockResolvedValueOnce({ x: 40, y: 60 })
+      .mockResolvedValueOnce({ title: '', text: '' })
+      .mockResolvedValueOnce({ x: 40, y: 60, activation: 'mouse' })
       .mockResolvedValueOnce({ x: 40, y: 60 })
       .mockResolvedValueOnce(true)
 
@@ -627,14 +704,101 @@ describe('VisibleBrowser window.open', () => {
     const scripts = view.webContents.executeJavaScript.mock.calls.map((call) => String(call[0]))
     expect(scripts[0]).toContain('data-asagent-target-id')
     expect(JSON.stringify(scripts[0])).not.toContain('internal selector')
-    expect(scripts[1]).toContain('data-asagent-target-id')
-    expect(scripts[1]).toContain('asagent-agent-pointer')
-    expect(scripts[3]).toContain('asagent-agent-pointer')
+    expect(scripts[2]).toContain('data-asagent-target-id')
+    expect(scripts[2]).toContain('asagent-agent-pointer')
+    expect(scripts[4]).toContain('asagent-agent-pointer')
     expect(view.webContents.sendInputEvent.mock.calls.map((call) => call[0])).toEqual([
       { type: 'mouseMove', x: 40, y: 60 },
       { type: 'mouseDown', x: 40, y: 60, button: 'left', clickCount: 1 },
       { type: 'mouseUp', x: 40, y: 60, button: 'left', clickCount: 1 }
     ])
+    vi.useRealTimers()
+  })
+
+  it('activates semantic label targets without requiring a label click box', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_1',
+            name: 'Use sample file',
+            role: 'checkbox',
+            tag: 'label',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: '', text: '' })
+      .mockResolvedValueOnce({ x: 20, y: 30, activation: 'click' })
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const pending = browser.clickCurrentPage('tab-1', 'target_1')
+    await vi.advanceTimersByTimeAsync(150)
+    await expect(pending).resolves.toMatchObject({ action: 'clicked' })
+
+    const scripts = view.webContents.executeJavaScript.mock.calls.map((call) => String(call[0]))
+    expect(scripts[2]).toContain('semanticActivation = true')
+    expect(scripts[3]).toContain('target.click()')
+    expect(view.webContents.sendInputEvent).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('waits briefly for changed page content after a click', async () => {
+    vi.useFakeTimers()
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.executeJavaScript
+      .mockResolvedValueOnce({
+        elements: [
+          {
+            target_id: 'target_1',
+            name: 'Run',
+            role: 'button',
+            tag: 'button',
+            disabled: false
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ title: 'Page', text: 'Ready' })
+      .mockResolvedValueOnce({ x: 10, y: 12, activation: 'mouse' })
+      .mockResolvedValueOnce({ x: 10, y: 12 })
+      .mockResolvedValueOnce({ title: 'Page', text: 'Results are ready' })
+      .mockResolvedValueOnce({ title: 'Page', text: 'Results are ready' })
+      .mockResolvedValueOnce(true)
+
+    await browser.inspectInteractive('tab-1')
+    const pending = browser.clickCurrentPage('tab-1', 'target_1')
+    await vi.advanceTimersByTimeAsync(400)
+    await expect(pending).resolves.toEqual({
+      action: 'clicked',
+      url: '',
+      title: 'New Tab',
+      page: {
+        title: 'Page',
+        url: '',
+        text: 'Results are ready'
+      }
+    })
+
+    view.webContents.executeJavaScript.mockResolvedValue({
+      title: 'Page',
+      text: 'Final results'
+    })
+    const waitPending = browser.waitForCurrentPage('tab-1', 15)
+    await vi.advanceTimersByTimeAsync(500)
+    await expect(waitPending).resolves.toEqual({
+      changed: true,
+      page: { title: 'Page', url: '', text: 'Final results' }
+    })
     vi.useRealTimers()
   })
 
@@ -656,7 +820,8 @@ describe('VisibleBrowser window.open', () => {
           }
         ]
       })
-      .mockResolvedValueOnce({ x: 10, y: 12 })
+      .mockResolvedValueOnce({ title: '', text: '' })
+      .mockResolvedValueOnce({ x: 10, y: 12, activation: 'mouse' })
       .mockRejectedValueOnce(new Error('target is obscured'))
       .mockResolvedValueOnce(true)
 
@@ -665,7 +830,7 @@ describe('VisibleBrowser window.open', () => {
     const assertion = expect(pending).rejects.toThrow('obscured')
     await vi.advanceTimersByTimeAsync(150)
     await assertion
-    expect(view.webContents.executeJavaScript).toHaveBeenCalledTimes(4)
+    expect(view.webContents.executeJavaScript).toHaveBeenCalledTimes(5)
     expect(view.webContents.sendInputEvent).not.toHaveBeenCalled()
 
     await expect(browser.clickCurrentPage('tab-missing', 'target_1')).rejects.toThrow(
@@ -765,6 +930,24 @@ describe('VisibleBrowser window.open', () => {
     expect(String(nested.executeJavaScript.mock.calls[0]?.[0])).toContain('FIRST_TARGET_NUMBER = 3')
   })
 
+  it('prioritizes semantic controls and excludes iframe shells from inspection', async () => {
+    const { browser, createView } = createBrowser()
+    const window = createFakeWindow()
+    browser.show(window, bounds, 'tab-1')
+    const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+    view.webContents.mainFrame.executeJavaScript.mockResolvedValueOnce({ elements: [] })
+
+    await browser.inspectInteractive('tab-1')
+
+    const script = String(view.webContents.mainFrame.executeJavaScript.mock.calls[0]?.[0])
+    expect(script).toContain("tag === 'html' || tag === 'body' || tag === 'iframe'")
+    expect(script).toContain('function isSemanticallyVisible(el)')
+    expect(script).toContain('function isPointerVisible(el)')
+    expect(script).toContain("if (tag === 'label') {\n      return elementName(el) !== '';")
+    expect(script).toContain("'checkbox', 'radio', 'switch'")
+    expect(script).toContain('candidates.sort((left, right) => priority(left) - priority(right))')
+  })
+
   it('clicks iframe targets only inside the child frame', async () => {
     vi.useFakeTimers()
     const { browser, createView } = createBrowser()
@@ -791,6 +974,7 @@ describe('VisibleBrowser window.open', () => {
         }
       ]
     })
+    view.webContents.mainFrame.executeJavaScript.mockResolvedValueOnce({ title: '', text: '' })
     child.executeJavaScript
       .mockResolvedValueOnce({
         elements: [
@@ -803,7 +987,8 @@ describe('VisibleBrowser window.open', () => {
           }
         ]
       })
-      .mockResolvedValueOnce({ x: 12, y: 18 })
+      .mockResolvedValueOnce({ title: '', text: '' })
+      .mockResolvedValueOnce({ x: 12, y: 18, activation: 'mouse' })
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(true)
 
@@ -817,7 +1002,7 @@ describe('VisibleBrowser window.open', () => {
     })
 
     expect(view.webContents.sendInputEvent).not.toHaveBeenCalled()
-    expect(view.webContents.mainFrame.executeJavaScript).toHaveBeenCalledTimes(1)
+    expect(view.webContents.mainFrame.executeJavaScript).toHaveBeenCalledTimes(2)
     expect(child.executeJavaScript.mock.calls.map((call) => String(call[0]))).toEqual(
       expect.arrayContaining([
         expect.stringContaining('data-asagent-target-id'),
@@ -826,8 +1011,8 @@ describe('VisibleBrowser window.open', () => {
       ])
     )
     const childScripts = child.executeJavaScript.mock.calls.map((call) => String(call[0]))
-    expect(childScripts[1]).toContain('asagent-agent-pointer')
-    expect(childScripts[2]).toContain('target.click()')
+    expect(childScripts[2]).toContain('asagent-agent-pointer')
+    expect(childScripts[3]).toContain('target.click()')
     vi.useRealTimers()
   })
 

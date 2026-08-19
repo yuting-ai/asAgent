@@ -33,6 +33,13 @@ class BrowserClickResult:
     action: str
     url: str
     title: str
+    page: BrowserPageContent | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserWaitResult:
+    changed: bool
+    page: BrowserPageContent
 
 
 class BrowserPageBridgeError(RuntimeError):
@@ -83,12 +90,24 @@ class BrowserPageBridgeClient:
         )
         return _click_result_from_payload(payload)
 
+    async def wait_for_current_page(
+        self, tab_id: str, seconds: int
+    ) -> BrowserWaitResult:
+        payload = await self._post_json(
+            "/wait-for-current-page",
+            {"tab_id": tab_id, "seconds": seconds},
+            failure_message="current browser tab is not visible",
+            timeout_seconds=float(seconds + 5),
+        )
+        return _wait_result_from_payload(payload)
+
     async def _post_json(
         self,
         path: str,
-        body: dict[str, str],
+        body: dict[str, object],
         *,
         failure_message: str,
+        timeout_seconds: float | None = None,
     ) -> Any:
         client = self._http_client
         owns_client = client is None
@@ -103,7 +122,9 @@ class BrowserPageBridgeClient:
                     "Content-Type": "application/json",
                 },
                 json=body,
-                timeout=self._timeout_seconds,
+                timeout=self._timeout_seconds
+                if timeout_seconds is None
+                else timeout_seconds,
             )
         except httpx.HTTPError as error:
             raise BrowserPageBridgeError(failure_message) from error
@@ -204,4 +225,29 @@ def _click_result_from_payload(payload: object) -> BrowserClickResult:
     ):
         raise BrowserPageBridgeError("target was not found")
 
-    return BrowserClickResult(action=action, url=url, title=title)
+    page_payload = payload.get("page")
+    page = None
+    if page_payload is not None:
+        try:
+            page = _page_content_from_payload(page_payload)
+        except BrowserPageBridgeError as error:
+            raise BrowserPageBridgeError("target was not found") from error
+
+    return BrowserClickResult(action=action, url=url, title=title, page=page)
+
+
+def _wait_result_from_payload(payload: object) -> BrowserWaitResult:
+    if not isinstance(payload, dict):
+        raise BrowserPageBridgeError("current browser tab is not visible")
+
+    changed = payload.get("changed")
+    page_payload = payload.get("page")
+    if not isinstance(changed, bool):
+        raise BrowserPageBridgeError("current browser tab is not visible")
+
+    try:
+        page = _page_content_from_payload(page_payload)
+    except BrowserPageBridgeError as error:
+        raise BrowserPageBridgeError("current browser tab is not visible") from error
+
+    return BrowserWaitResult(changed=changed, page=page)

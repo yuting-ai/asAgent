@@ -8,13 +8,15 @@ import {
   parseBrowserTargetId,
   type BrowserClickResult,
   type BrowserInteractiveSnapshot,
-  type BrowserPageContent
+  type BrowserPageContent,
+  type BrowserWaitResult
 } from './browser_view'
 
 export type BrowserPageBridgeOptions = {
   readCurrentPage: (tabId: string) => Promise<BrowserPageContent>
   inspectInteractive: (tabId: string) => Promise<BrowserInteractiveSnapshot>
   clickCurrentPage: (tabId: string, targetId: string) => Promise<BrowserClickResult>
+  waitForCurrentPage: (tabId: string, seconds: number) => Promise<BrowserWaitResult>
   createServer?: typeof createServer
   randomToken?: () => string
 }
@@ -76,6 +78,10 @@ export class BrowserPageBridge {
     tabId: string,
     targetId: string
   ) => Promise<BrowserClickResult>
+  private readonly waitForCurrentPage: (
+    tabId: string,
+    seconds: number
+  ) => Promise<BrowserWaitResult>
   private readonly createHttpServer: typeof createServer
   private readonly randomToken: () => string
   private server: Server | undefined
@@ -85,6 +91,7 @@ export class BrowserPageBridge {
     this.readCurrentPage = options.readCurrentPage
     this.inspectInteractive = options.inspectInteractive
     this.clickCurrentPage = options.clickCurrentPage
+    this.waitForCurrentPage = options.waitForCurrentPage
     this.createHttpServer = options.createServer ?? createServer
     this.randomToken = options.randomToken ?? (() => randomBytes(32).toString('base64url'))
   }
@@ -152,7 +159,8 @@ export class BrowserPageBridge {
         request.method !== 'POST' ||
         (request.url !== '/read-current-page' &&
           request.url !== '/inspect-interactive' &&
-          request.url !== '/click-current-page')
+          request.url !== '/click-current-page' &&
+          request.url !== '/wait-for-current-page')
       ) {
         writeJson(response, 404, { detail: 'not found' })
         return
@@ -193,6 +201,22 @@ export class BrowserPageBridge {
       if (request.url === '/inspect-interactive') {
         const snapshot = await this.inspectInteractive(tabId.trim())
         writeJson(response, 200, snapshot)
+        return
+      }
+
+      if (request.url === '/wait-for-current-page') {
+        const seconds = record['seconds']
+        if (
+          typeof seconds !== 'number' ||
+          !Number.isInteger(seconds) ||
+          seconds < 1 ||
+          seconds > 30
+        ) {
+          writeJson(response, 400, { detail: 'invalid request' })
+          return
+        }
+        const result = await this.waitForCurrentPage(tabId.trim(), seconds)
+        writeJson(response, 200, result)
         return
       }
 

@@ -87,6 +87,11 @@ async def test_browser_click_executor_runs_without_approval_policy() -> None:
             "action": "clicked",
             "url": "https://example.com/next",
             "title": "Next page",
+            "page": {
+                "title": "Next page",
+                "url": "https://example.com/next",
+                "text": "Results are ready",
+            },
         },
     )
     async with httpx.AsyncClient(transport=transport) as client:
@@ -113,6 +118,11 @@ async def test_browser_click_executor_runs_without_approval_policy() -> None:
         "action": "clicked",
         "url": "https://example.com/next",
         "title": "Next page",
+        "page": {
+            "title": "Next page",
+            "url": "https://example.com/next",
+            "text": "Results are ready",
+        },
     }
     assert transport.requests[0].url.path == "/click-current-page"
     assert json.loads(transport.requests[0].content.decode()) == {
@@ -226,7 +236,7 @@ async def test_browser_click_registers_only_for_bound_browser_runs() -> None:
         browser_page_client=client,
     )
     assert browser_permissions == frozenset(
-        {"browser.read", "browser.inspect", "browser.click"}
+        {"browser.read", "browser.inspect", "browser.click", "browser.wait"}
     )
     assert browser_registry.get("browser.click").definition.tool_id == "browser.click"
     assert (
@@ -237,6 +247,7 @@ async def test_browser_click_registers_only_for_bound_browser_runs() -> None:
         browser_registry.get("browser.read_current_page").definition.tool_id
         == "browser.read_current_page"
     )
+    assert browser_registry.get("browser.wait").definition.tool_id == "browser.wait"
 
     unbound_registry = ToolRegistry()
     unbound_permissions = await _register_browser_tools(
