@@ -1,17 +1,19 @@
 :root {
-  --bg: #eef1f6;
+  --bg: #fafaf8;
   --bg-raised: #ffffff;
-  --bg-inset: #e9edf3;
-  --line: #dee3eb;
-  --line-soft: #e6eaf0;
-  --text: #1a1d23;
-  --text-dim: #5b6270;
-  --text-faint: #97a0ac;
-  --brass: #12968c;
-  --brass-dim: #bee7e2;
-  --brass-glow: rgba(18, 150, 140, 0.12);
-  --green: #3e8c64;
-  --green-dim: rgba(62, 140, 100, 0.12);
+  --bg-inset: #f3f3f0;
+  --rail-bg: #f6f6f3;
+  --line: #e2e2dd;
+  --line-soft: #ecece8;
+  --text: #1d1d1b;
+  --text-dim: #73736f;
+  --text-faint: #a0a09a;
+  --brass: #5967d9;
+  --brass-dim: #7d87df;
+  --brass-glow: rgba(89, 103, 217, 0.1);
+  --accent-soft: #eef0ff;
+  --green: #2fa879;
+  --green-dim: rgba(47, 168, 121, 0.09);
   --red: #e2574c;
   --red-dim: rgba(226, 87, 76, 0.1);
   --amber: #c98a3e;
@@ -87,9 +89,9 @@ button {
 @keyframes pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(18, 150, 140, 0.3);
+    box-shadow: 0 0 0 0 rgba(89, 103, 217, 0.24);
   }
   50% {
-    box-shadow: 0 0 0 5px rgba(18, 150, 140, 0);
+    box-shadow: 0 0 0 5px rgba(89, 103, 217, 0);
   }
 }

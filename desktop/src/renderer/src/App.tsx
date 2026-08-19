@@ -28,6 +28,11 @@ type ConversationSummary = {
   last_page_title: string | null
 }
 
+type RecentConversation = {
+  kind: 'chat' | 'browser'
+  conversation: ConversationSummary
+}
+
 type ConversationMessage = {
   message_id: string
   role: 'user' | 'assistant'
@@ -141,7 +146,7 @@ type BrowserTab = {
 }
 
 type ActivityTab = 'approvals' | 'schedule'
-type ScrollArea = 'threads' | 'messages'
+type ScrollArea = 'threads' | 'messages' | 'recents'
 type ResizableColumn = 'rail' | 'threads' | 'attention' | 'browserAgent'
 type DesktopLayout = {
   railWidth: number
@@ -300,15 +305,27 @@ function conversationLabel(title: string | null): string {
   return title ?? 'New conversation'
 }
 
-function browserConversationHost(url: string | null): string | null {
-  if (url === null) {
-    return null
-  }
-  try {
-    return new URL(url).hostname.replace(/^www\./u, '') || null
-  } catch {
-    return null
-  }
+function orderRecentConversations(
+  conversations: ConversationSummary[],
+  browserConversations: ConversationSummary[]
+): RecentConversation[] {
+  return [
+    ...conversations.map((conversation) => ({ kind: 'chat' as const, conversation })),
+    ...browserConversations.map((conversation) => ({
+      kind: 'browser' as const,
+      conversation
+    }))
+  ].sort((left, right) => {
+    const updatedAtDifference =
+      new Date(right.conversation.updated_at).getTime() -
+      new Date(left.conversation.updated_at).getTime()
+    if (updatedAtDifference !== 0) {
+      return updatedAtDifference
+    }
+    return `${right.kind}:${right.conversation.conversation_id}`.localeCompare(
+      `${left.kind}:${left.conversation.conversation_id}`
+    )
+  })
 }
 
 function fileAccessSummary(settings: WorkspaceSettingsStatus): string {
@@ -770,7 +787,6 @@ export default function App(): React.JSX.Element {
   const [browserConversationByTabId, setBrowserConversationByTabId] = useState<
     Record<string, string>
   >({})
-  const [browserRecentOpen, setBrowserRecentOpen] = useState(false)
   const selectedBrowserConversationId = browserConversationByTabId[activeBrowserTabId] ?? null
   const [activityTab, setActivityTab] = useState<ActivityTab>('approvals')
   const [tavilySettings, setTavilySettings] = useState<TavilySettingsStatus | null>(null)
@@ -809,7 +825,6 @@ export default function App(): React.JSX.Element {
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null)
   const browserAgentMessagesEndRef = useRef<HTMLDivElement | null>(null)
   const browserAgentInputRef = useRef<HTMLTextAreaElement | null>(null)
-  const browserRecentRef = useRef<HTMLDivElement | null>(null)
   const browserSurfaceRef = useRef<HTMLDivElement | null>(null)
   const browserAddressRef = useRef<HTMLInputElement | null>(null)
   const browserTabsRef = useRef(browserTabs)
@@ -841,7 +856,6 @@ export default function App(): React.JSX.Element {
     setBrowserTabs([...current, created])
     setActiveBrowserTabId(created.id)
     setBrowserError(null)
-    setBrowserRecentOpen(false)
     window.setTimeout(() => {
       browserAddressRef.current?.focus()
     }, 0)
@@ -857,7 +871,6 @@ export default function App(): React.JSX.Element {
       delete next[tabId]
       return next
     })
-    setBrowserRecentOpen(false)
     const current = browserTabsRef.current
     const index = current.findIndex((tab) => tab.id === tabId)
     const remaining = current.filter((tab) => tab.id !== tabId)
@@ -1302,32 +1315,6 @@ export default function App(): React.JSX.Element {
   }, [selectedBrowserConversationId])
 
   useEffect(() => {
-    if (!browserRecentOpen) {
-      return
-    }
-
-    function handlePointerDown(event: MouseEvent): void {
-      if (browserRecentRef.current?.contains(event.target as Node) === true) {
-        return
-      }
-      setBrowserRecentOpen(false)
-    }
-
-    function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') {
-        setBrowserRecentOpen(false)
-      }
-    }
-
-    window.addEventListener('mousedown', handlePointerDown)
-    window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('mousedown', handlePointerDown)
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [browserRecentOpen])
-
-  useEffect(() => {
     const removeEventListener = window.desktop.onRunEvent((update) => {
       recordRunEvent(update.runId, update.event.event_type, update.event.data)
 
@@ -1588,6 +1575,7 @@ export default function App(): React.JSX.Element {
       : browserApprovalDetails(visibleBrowserApproval, visibleBrowserApprovalServer)
   const isBusy =
     backendStatus !== 'ready' || isCreatingConversation || isSubmittingMessage || activeRun !== null
+  const recentConversations = orderRecentConversations(conversations, browserConversations)
   const chatRunIsActive = activeRun?.conversationId === selectedConversationId
   const browserRunIsActive = activeRun?.conversationId === selectedBrowserConversationId
 
@@ -1633,7 +1621,6 @@ export default function App(): React.JSX.Element {
   function selectBrowserTab(tabId: string): void {
     setActiveBrowserTabId(tabId)
     setBrowserError(null)
-    setBrowserRecentOpen(false)
   }
 
   function updateActiveBrowserAddress(address: string): void {
@@ -2417,7 +2404,6 @@ export default function App(): React.JSX.Element {
       current[tabId] === conversationId ? current : { ...current, [tabId]: conversationId }
     )
     void window.desktop.setBrowserTabConversation(tabId, conversationId).catch(() => undefined)
-    setBrowserRecentOpen(false)
   }
 
   function openBrowserConversation(conversationId: string): void {
@@ -2427,7 +2413,6 @@ export default function App(): React.JSX.Element {
     )
     if (conversation === undefined) {
       setErrorMessage('The conversation could not be opened.')
-      setBrowserRecentOpen(false)
       return
     }
     const boundTab = currentTabs.find(
@@ -2440,7 +2425,6 @@ export default function App(): React.JSX.Element {
 
     if (currentTabs.length >= MAX_BROWSER_TABS) {
       setErrorMessage('Close a browser tab before opening this conversation.')
-      setBrowserRecentOpen(false)
       return
     }
 
@@ -2456,7 +2440,6 @@ export default function App(): React.JSX.Element {
     }))
     setActiveBrowserTabId(created.id)
     setBrowserError(null)
-    setBrowserRecentOpen(false)
     void window.desktop
       .setBrowserTabConversation(created.id, conversationId)
       .catch(() => setErrorMessage('The conversation could not be opened.'))
@@ -2758,70 +2741,148 @@ export default function App(): React.JSX.Element {
             </button>
           </div>
 
-          <div className="rail-section">
-            <div className="rail-label">Connected</div>
-            <button
-              className={railItemClass('files')}
-              onClick={() => setActiveView('files')}
-              type="button"
-            >
-              <svg
-                className="rail-icon"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
+          <div className="rail-section rail-recents">
+            <div className="rail-recents-header">
+              <div className="rail-label">Recents</div>
+              <button
+                aria-label="New chat"
+                className="rail-recents-new"
+                disabled={isBusy}
+                onClick={() => {
+                  setActiveView('chat')
+                  void createConversation()
+                }}
+                title="New chat"
+                type="button"
               >
-                <rect height="16" rx="2" width="18" x="3" y="4" />
-                <path d="M3 9h18" />
-              </svg>
-              <span className="rail-item-label">Files &amp; Folders</span>
-              <span className="status-dot pending" title="Not connected yet" />
-            </button>
-            <button
-              className={railItemClass('mail')}
-              onClick={() => setActiveView('mail')}
-              type="button"
+                <Icon path="M12 5v14M5 12h14" />
+              </button>
+            </div>
+            <div
+              className={`rail-recents-list${
+                visibleScrollbar === 'recents' ? ' scrollbar-visible' : ''
+              }`}
+              onWheel={() => revealScrollbar('recents')}
             >
-              <Icon className="rail-icon" path="M4 4h16v16H4zM4 8h16M8 4v16" />
-              <span className="rail-item-label">Mail</span>
-              <span className="status-dot pending" title="Not connected yet" />
-            </button>
-            <button
-              className={railItemClass('calendar')}
-              onClick={() => setActiveView('calendar')}
-              type="button"
-            >
-              <svg
-                className="rail-icon"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-              >
-                <rect height="14" rx="2" width="18" x="3" y="5" />
-                <path d="M3 10h18" />
-              </svg>
-              <span className="rail-item-label">Calendar</span>
-              <span className="status-dot pending" title="Not connected yet" />
-            </button>
-            <button
-              className={railItemClass('add-app')}
-              onClick={() => setActiveView('add-app')}
-              type="button"
-            >
-              <svg
-                className="rail-icon"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-              >
-                <circle cx="12" cy="12" r="9" />
-                <path d="M8 12h8M12 8v8" />
-              </svg>
-              <span className="rail-item-label">+ Add app</span>
-            </button>
+              {recentConversations.length === 0 ? (
+                <p className="rail-recents-empty">No conversations yet</p>
+              ) : (
+                recentConversations.map(({ kind, conversation }) => {
+                  const selected =
+                    kind === 'chat'
+                      ? activeView === 'chat' &&
+                        conversation.conversation_id === selectedConversationId
+                      : activeView === 'browser' &&
+                        conversation.conversation_id === selectedBrowserConversationId
+                  const renaming =
+                    kind === 'chat' && renamingConversationId === conversation.conversation_id
+
+                  return (
+                    <div
+                      className={`rail-recent-item${selected ? ' active' : ''}${
+                        renaming ? ' renaming' : ''
+                      }`}
+                      key={`${kind}:${conversation.conversation_id}`}
+                    >
+                      {renaming ? (
+                        <input
+                          ref={renameInputRef}
+                          className="rail-recent-rename"
+                          onBlur={() => void saveRename(conversation.conversation_id)}
+                          onChange={(event) => setRenameDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              void saveRename(conversation.conversation_id)
+                            }
+                            if (event.key === 'Escape') {
+                              event.preventDefault()
+                              cancelRename()
+                            }
+                          }}
+                          type="text"
+                          value={renameDraft}
+                        />
+                      ) : (
+                        <>
+                          <button
+                            className="rail-recent-body"
+                            disabled={isBusy}
+                            onClick={() => {
+                              if (kind === 'chat') {
+                                setActiveView('chat')
+                                setSelectedConversationId(conversation.conversation_id)
+                              } else {
+                                setActiveView('browser')
+                                openBrowserConversation(conversation.conversation_id)
+                              }
+                            }}
+                            title={
+                              kind === 'browser' && conversation.last_page_url !== null
+                                ? conversation.last_page_url
+                                : conversationLabel(conversation.title)
+                            }
+                            type="button"
+                          >
+                            {kind === 'chat' ? (
+                              <Icon
+                                className="rail-recent-kind is-chat"
+                                path="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5Z"
+                              />
+                            ) : (
+                              <svg
+                                aria-hidden="true"
+                                className="rail-recent-kind is-browser"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                viewBox="0 0 24 24"
+                              >
+                                <circle cx="12" cy="12" r="9" />
+                                <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" />
+                              </svg>
+                            )}
+                            <span className="rail-recent-title">
+                              {conversationLabel(conversation.title)}
+                            </span>
+                            <time className="rail-recent-time" dateTime={conversation.updated_at}>
+                              {formatThreadTime(conversation.updated_at)}
+                            </time>
+                          </button>
+                          <div className="rail-recent-actions">
+                            {kind === 'chat' ? (
+                              <button
+                                aria-label="Rename conversation"
+                                disabled={isBusy}
+                                onClick={() => startRename(conversation)}
+                                title="Rename"
+                                type="button"
+                              >
+                                <Icon path="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                              </button>
+                            ) : null}
+                            <button
+                              aria-label="Delete conversation"
+                              className="danger"
+                              disabled={isBusy}
+                              onClick={() =>
+                                void (kind === 'chat'
+                                  ? deleteConversation(conversation.conversation_id)
+                                  : deleteBrowserConversation(conversation.conversation_id))
+                              }
+                              title="Delete"
+                              type="button"
+                            >
+                              <Icon path="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+            </div>
           </div>
 
           <div className="rail-footer">
@@ -2897,7 +2958,6 @@ export default function App(): React.JSX.Element {
                         key={conversation.conversation_id}
                       >
                         <input
-                          ref={renameInputRef}
                           className="chat-thread-rename-input"
                           onBlur={() => void saveRename(conversation.conversation_id)}
                           onChange={(event) => setRenameDraft(event.target.value)}
@@ -3526,99 +3586,6 @@ export default function App(): React.JSX.Element {
                       >
                         <Icon path="M12 5v14M5 12h14" />
                       </button>
-                      <div className="browser-recent" ref={browserRecentRef}>
-                        <button
-                          aria-expanded={browserRecentOpen}
-                          aria-label="Recent conversations"
-                          className="browser-agent-toolbar-button"
-                          onClick={() => setBrowserRecentOpen((open) => !open)}
-                          title="Recent conversations"
-                          type="button"
-                        >
-                          <Icon path="M12 8v4l3 2m6-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
-                        </button>
-                        {browserRecentOpen ? (
-                          <div className="browser-recent-menu" role="listbox">
-                            {browserConversations.length === 0 ? (
-                              <p className="browser-recent-empty">No recent conversations</p>
-                            ) : (
-                              browserConversations.map((conversation) => {
-                                const selected =
-                                  conversation.conversation_id === selectedBrowserConversationId
-                                const open = browserTabs.some(
-                                  (tab) =>
-                                    browserConversationByTabId[tab.id] ===
-                                    conversation.conversation_id
-                                )
-                                const host = browserConversationHost(conversation.last_page_url)
-                                return (
-                                  <div
-                                    className={`browser-recent-row${selected ? ' selected' : ''}`}
-                                    key={conversation.conversation_id}
-                                  >
-                                    <button
-                                      aria-selected={selected}
-                                      className="browser-recent-item"
-                                      onClick={() =>
-                                        openBrowserConversation(conversation.conversation_id)
-                                      }
-                                      role="option"
-                                      type="button"
-                                    >
-                                      <span className="browser-recent-copy">
-                                        <span className="browser-recent-title">
-                                          {conversationLabel(conversation.title)}
-                                        </span>
-                                        {host === null ? null : (
-                                          <span
-                                            className="browser-recent-host"
-                                            title={conversation.last_page_url ?? undefined}
-                                          >
-                                            {host}
-                                          </span>
-                                        )}
-                                      </span>
-                                      {open ? (
-                                        <span className="browser-recent-open">Open</span>
-                                      ) : null}
-                                      <time
-                                        className="browser-recent-time"
-                                        dateTime={conversation.updated_at}
-                                      >
-                                        {formatThreadTime(conversation.updated_at)}
-                                      </time>
-                                    </button>
-                                    <button
-                                      aria-label="Delete conversation"
-                                      className="browser-recent-delete"
-                                      disabled={isBusy}
-                                      onClick={(event) => {
-                                        event.stopPropagation()
-                                        void deleteBrowserConversation(conversation.conversation_id)
-                                      }}
-                                      title="Delete"
-                                      type="button"
-                                    >
-                                      <svg
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        viewBox="0 0 24 24"
-                                      >
-                                        <path d="M3 6h18" />
-                                        <path d="M8 6V4h8v2" />
-                                        <path d="M19 6 18 20H6L5 6" />
-                                        <path d="M10 11v6" />
-                                        <path d="M14 11v6" />
-                                      </svg>
-                                    </button>
-                                  </div>
-                                )
-                              })
-                            )}
-                          </div>
-                        ) : null}
-                      </div>
                     </div>
                     {errorMessage !== null && activeView === 'browser' ? (
                       <p className="browser-agent-error">{errorMessage}</p>
