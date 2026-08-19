@@ -5,8 +5,8 @@
 - 项目阶段：阶段 7 进行中；阶段 0–6 的 Core、Agent Loop、SQLite 持久化、Context Builder 基础、受控 Workspace Tool 边界与 Local API/SSE 已完成，当前继续 Electron 最小集成。
 - 代码状态：已具备 Provider-neutral Core、内存/SQLite Repository、最小 Chat 与持久化 Agent Runtime、OpenAI-compatible Provider、工具与安全执行管线、Context Builder 基础、受控文件工具，以及仅监听回环地址并使用一次性 Bearer Token 的 FastAPI Local API。当前 API 已提供 Health、按 `kind` 隔离的 Chat/Browser Conversation 列表/创建、可见 Message 查询/提交、按 Run ID 查询状态、协作取消，以及基于持久化 RunEvent 的认证 SSE 回放/实时观察。首条消息提交会在 RunStarter 同事务中生成会话标题。桌面 Browser 侧栏已接入独立的真实 Browser Conversation；仅绑定的 Browser Run 可注册 `browser.read_current_page`、`browser.inspect_interactive` 与 `browser.click(target_id)`。
 - 项目路径：`/Users/yuting/Desktop/BityDev/asAgent`
-- 当前日期：2026-08-16
-- 当前目标：Browser inspect/click（含跨域 iframe）与共用 `max_steps` 已提交；已知 HF Space 交互清单误抽问题记为后续修复；下一项可选 `browser.fill` 或 inspector 启发式修复。
+- 当前日期：2026-08-17
+- 当前目标：Browser inspect/click（含跨域 iframe）与共用 `max_steps` 已提交；HF Space 标准表单控件、嵌入 frame 正文聚合与可访问 HTML 表格/ARIA grid 值提取均已人工验证。`browser.click` 已在短暂页面变化稳定后直接返回最新有界页面快照；`browser.wait(seconds)` 已改为以 seconds 为上限的页面变化轮询并提前返回。两者均通过自动化验证。canvas 等纯视觉结果仍需后续视觉回退策略，再实现 `browser.fill`。
 
 ## 2. 已完成
 
@@ -3977,3 +3977,48 @@
 ### 下一步
 
 - 可选：修复上述 inspector 启发式；或继续 `browser.fill`。
+
+## 2026-08-17 Browser 标准表单 label 识别与激活
+
+### 完成
+
+- 修复 `browser.inspect_interactive` 对标准表单 `label` 的漏检：语义可见性不再要求 label 自身具有尺寸或可接收 pointer；普通可点击元素仍要求可见的物理点击区域。
+- 修复候选去重：非语义的大型容器不再移除其内部的 `a`、`button`、`input`、`select`、`textarea` 或 `label` 等语义控件。
+- `browser.click(target_id)` 对 label 先显示可见 pointer，再执行原生 `HTMLElement.click()`；普通顶层控件继续走真实鼠标输入路径。
+- 已在 `https://ytbai-h2mof-predictor.hf.space/` 人工验证：Agent 可以勾选 **Use sample file** 并完成运行。
+
+### 验证
+
+- `cd desktop && npm test -- --run src/main/browser_view.test.ts`：50 passed。
+- `cd desktop && npm run typecheck`、`npm run lint`、`npx prettier --check src/main/browser_view.ts src/main/browser_view.test.ts` 与 `git diff --check`：通过。
+
+### 决策变化
+
+- 无；这是 DEC-079 既有 `target_id` 交互清单与可见点击边界内的兼容性修复。
+
+### 下一步
+
+- 先让 `browser.read_current_page` 聚合嵌入 frame 的有界正文；随后按需单独实现 `browser.fill`。
+
+## 2026-08-18 browser.click 返回稳定后的页面快照
+
+### 完成
+
+- Electron Main 复用点击后的短暂页面变化稳定检测，并把最后一次成功读取的有界、脱敏页面内容作为可选 `page` 返回。
+- 私有页面桥与 Python `browser.click` 结果契约支持该可选快照，Agent 可直接判断结果是否已经出现，不必在每次点击后固定等待。
+- 页面读取或稳定检测失败时仍返回正常的 `clicked`；`browser.wait(seconds)` 继续只作为页面明确仍在异步处理时的兜底能力。
+- `browser.wait(seconds)` 不再盲目 sleep：Main 每约 500ms 读取页面，相对最近 click/wait 快照发生变化并稳定后提前返回最新 `page`，否则等待至秒数上限。
+- 最近页面基线只保存在对应标签的 Main 内存中，关闭标签或退出时清理，不写入 SQLite 或临时文件。
+
+### 验证
+
+- Desktop：`browser_view` / `browser_page_bridge` 55 passed；`typecheck:node` 与 ESLint 通过。
+- Python：Browser click/read/wait 相关测试 14 passed；Ruff 与 mypy 通过。
+
+### 决策变化
+
+- 无新增决策；补充 DEC-079 既有 Browser Tool 返回契约。
+
+### 下一步
+
+- 用户在 H2MOF Predictor 上人工验证：即使 Agent 请求 `browser.wait(30)`，结果较早出现时也应提前返回，而不是等待满 30 秒。

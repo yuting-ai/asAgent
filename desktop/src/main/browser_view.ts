@@ -26,6 +26,12 @@ export type BrowserClickResult = {
   action: 'clicked'
   url: string
   title: string
+  page?: BrowserPageContent
+}
+
+export type BrowserWaitResult = {
+  changed: boolean
+  page: BrowserPageContent
 }
 
 export type BrowserInteractiveElement = {
@@ -50,6 +56,10 @@ export const BROWSER_INTERACTIVE_RETURN_LIMIT = 80
 export const BROWSER_AGENT_POINTER_ID = 'asagent-agent-pointer'
 export const BROWSER_TARGET_ATTR = 'data-asagent-target-id'
 export const BROWSER_CLICK_POINTER_DELAY_MS = 150
+export const BROWSER_CLICK_SETTLE_TIMEOUT_MS = 1_000
+export const BROWSER_CLICK_SETTLE_QUIET_MS = 250
+export const BROWSER_WAIT_POLL_INTERVAL_MS = 500
+export const BROWSER_WAIT_SETTLE_QUIET_MS = 500
 
 export const BROWSER_OPERATION_ERRORS = [
   'target was not found',
@@ -73,12 +83,59 @@ type InteractionTargetRecord = {
   selector: string
   name: string
   role: string
+  tag: string
 }
 
 const BROWSER_PAGE_EXTRACT_SCRIPT = `(() => {
+  const STRUCTURED_TEXT_LIMIT = 8 * 1024
+  function isVisible(element) {
+    if (!(element instanceof HTMLElement)) {
+      return false
+    }
+    const style = window.getComputedStyle(element)
+    return (
+      style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      Number(style.opacity) !== 0
+    )
+  }
+  function normalizedText(value) {
+    return String(value || '').replace(/\\s+/g, ' ').trim()
+  }
+  function structuredValue(element) {
+    const label = normalizedText(
+      element.getAttribute('aria-label') || element.getAttribute('aria-valuetext'),
+    )
+    const text = normalizedText(element.innerText || element.textContent)
+    if (label && text && label !== text) {
+      return label + ': ' + text
+    }
+    return label || text
+  }
+  const structuredValues = []
+  const seen = new Set()
+  for (const element of document.querySelectorAll(
+    'table th, table td, [role="gridcell"], [role="cell"], [role="columnheader"], [role="rowheader"], [aria-valuetext]',
+  )) {
+    if (!isVisible(element)) {
+      continue
+    }
+    const value = structuredValue(element)
+    if (value && !seen.has(value)) {
+      seen.add(value)
+      structuredValues.push(value)
+    }
+    if (structuredValues.join('\\n').length >= STRUCTURED_TEXT_LIMIT) {
+      break
+    }
+  }
   const title = String(document.title || '')
   const text = String(document.body && document.body.innerText ? document.body.innerText : '')
-  return { title, text }
+  return {
+    title,
+    text,
+    structured_text: structuredValues.join('\\n').slice(0, STRUCTURED_TEXT_LIMIT),
+  }
 })()`
 
 const BROWSER_REMOVE_POINTER_SCRIPT = `(() => {
@@ -274,7 +331,7 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
     node.removeAttribute(ATTR);
   });
 
-  function isVisible(el) {
+  function isSemanticallyVisible(el) {
     if (!(el instanceof HTMLElement)) {
       return false;
     }
@@ -282,9 +339,18 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
     if (
       style.display === 'none' ||
       style.visibility === 'hidden' ||
-      style.pointerEvents === 'none' ||
       Number(style.opacity) === 0
     ) {
+      return false;
+    }
+    return true;
+  }
+
+  function isPointerVisible(el) {
+    if (!isSemanticallyVisible(el)) {
+      return false;
+    }
+    if (window.getComputedStyle(el).pointerEvents === 'none') {
       return false;
     }
     const rect = el.getBoundingClientRect();
@@ -346,6 +412,18 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
     if (tag === 'input') {
       return ((el.getAttribute('type') || 'text') + '').slice(0, 40);
     }
+    if (tag === 'label' && el instanceof HTMLLabelElement) {
+      if (el.control instanceof HTMLInputElement) {
+        return ((el.control.getAttribute('type') || 'checkbox') + '').slice(0, 40);
+      }
+      if (el.control instanceof HTMLSelectElement) {
+        return 'combobox';
+      }
+      if (el.control instanceof HTMLTextAreaElement) {
+        return 'textbox';
+      }
+      return 'label';
+    }
     if (tag === 'select') {
       return 'combobox';
     }
@@ -356,10 +434,19 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
   }
 
   function isCandidate(el) {
-    if (!(el instanceof HTMLElement) || !isVisible(el)) {
+    if (!(el instanceof HTMLElement) || !isSemanticallyVisible(el)) {
       return false;
     }
     const tag = el.tagName.toLowerCase();
+    if (tag === 'html' || tag === 'body' || tag === 'iframe') {
+      return false;
+    }
+    if (tag === 'label') {
+      return elementName(el) !== '';
+    }
+    if (!isPointerVisible(el)) {
+      return false;
+    }
     if (tag === 'a' && el.hasAttribute('href')) {
       return true;
     }
@@ -371,18 +458,35 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
       return type !== 'hidden';
     }
     const role = (el.getAttribute('role') || '').toLowerCase();
-    if (role === 'button' || role === 'link') {
+    if (
+      ['button', 'link', 'checkbox', 'radio', 'switch', 'menuitemcheckbox', 'menuitemradio', 'option'].includes(
+        role,
+      )
+    ) {
       return true;
     }
     if (el.hasAttribute('onclick') || el.tabIndex >= 0) {
       return true;
     }
     try {
-      if (window.getComputedStyle(el).cursor === 'pointer') {
+      if (
+        ['div', 'span', 'li', 'section', 'article'].includes(tag) &&
+        window.getComputedStyle(el).cursor === 'pointer' &&
+        elementName(el) !== ''
+      ) {
         return true;
       }
     } catch (_) {}
     return false;
+  }
+
+  function isSemanticControl(el) {
+    const tag = el.tagName.toLowerCase();
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    return (
+      ['a', 'button', 'input', 'select', 'textarea', 'label'].includes(tag) ||
+      ['button', 'link', 'checkbox', 'radio', 'switch', 'menuitemcheckbox', 'menuitemradio', 'option'].includes(role)
+    );
   }
 
   const all = Array.from(document.querySelectorAll('body *')).slice(0, SCAN_LIMIT);
@@ -392,9 +496,24 @@ function browserInspectScript(firstTargetNumber: number, maxElements: number): s
       raw.push(el);
     }
   }
-  const candidates = raw.filter(
-    (el) => !raw.some((other) => other !== el && other.contains(el)),
+  const candidates = raw.filter((el) =>
+    !raw.some(
+      (other) =>
+        other !== el &&
+        other.contains(el) &&
+        (!isSemanticControl(el) || isSemanticControl(other)),
+    ),
   );
+  const priority = (el) => {
+    if (isSemanticControl(el)) {
+      return 0;
+    }
+    if (el.hasAttribute('onclick') || el.tabIndex >= 0) {
+      return 1;
+    }
+    return 2;
+  };
+  candidates.sort((left, right) => priority(left) - priority(right));
 
   const elements = [];
   for (let index = 0; index < candidates.length && elements.length < RETURN_LIMIT; index += 1) {
@@ -437,39 +556,63 @@ function browserIframeClickScript(selector: string): string {
   })()`
 }
 
-function browserClickPrepareScript(selector: string): string {
+function browserClickPrepareScript(selector: string, semanticActivation: boolean): string {
   const encodedSelector = JSON.stringify(selector)
   const pointerId = JSON.stringify(BROWSER_AGENT_POINTER_ID)
+  const useSemanticActivation = JSON.stringify(semanticActivation)
   return `(() => {
     const selector = ${encodedSelector};
     const pointerId = ${pointerId};
+    const semanticActivation = ${useSemanticActivation};
     const target = document.querySelector(selector);
     if (!(target instanceof HTMLElement)) {
       throw new Error('target was not found');
     }
-    const style = window.getComputedStyle(target);
-    if (
-      style.display === 'none' ||
-      style.visibility === 'hidden' ||
-      style.pointerEvents === 'none' ||
-      Number(style.opacity) === 0
-    ) {
-      throw new Error('target is not visible');
+    function isSemanticallyVisible(el) {
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0;
     }
-    const initialRect = target.getBoundingClientRect();
-    if (initialRect.width <= 0 || initialRect.height <= 0) {
+    function usablePoint(el) {
+      if (!isSemanticallyVisible(el) || window.getComputedStyle(el).pointerEvents === 'none') {
+        return null;
+      }
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        return null;
+      }
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) {
+        return null;
+      }
+      const topElement = document.elementFromPoint(x, y);
+      if (topElement === null || (topElement !== el && !el.contains(topElement) && !topElement.contains(el))) {
+        return null;
+      }
+      return { x, y };
+    }
+    if (!isSemanticallyVisible(target)) {
       throw new Error('target is not visible');
     }
     target.scrollIntoView({ block: 'center', inline: 'center' });
-    const rect = target.getBoundingClientRect();
-    const x = Math.round(rect.left + rect.width / 2);
-    const y = Math.round(rect.top + rect.height / 2);
-    if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) {
-      throw new Error('target is not visible');
+    let point = usablePoint(target);
+    if (point === null && semanticActivation) {
+      const related = [
+        ...Array.from(target.querySelectorAll('*')),
+        target.parentElement,
+      ];
+      for (const element of related) {
+        if (element instanceof HTMLElement) {
+          element.scrollIntoView({ block: 'center', inline: 'center' });
+          point = usablePoint(element);
+          if (point !== null) {
+            break;
+          }
+        }
+      }
     }
-    const topElement = document.elementFromPoint(x, y);
-    if (topElement === null || (topElement !== target && !target.contains(topElement))) {
-      throw new Error('target is obscured');
+    if (point === null) {
+      throw new Error(semanticActivation ? 'target is not visible' : 'target is obscured');
     }
     const existing = document.getElementById(pointerId);
     if (existing) {
@@ -482,8 +625,8 @@ function browserClickPrepareScript(selector: string): string {
       'pointer-events:none',
       'position:fixed',
       'z-index:2147483647',
-      'left:' + (x - 10) + 'px',
-      'top:' + (y - 10) + 'px',
+      'left:' + (point.x - 10) + 'px',
+      'top:' + (point.y - 10) + 'px',
       'width:20px',
       'height:20px',
       'border-radius:50%',
@@ -497,7 +640,23 @@ function browserClickPrepareScript(selector: string): string {
     requestAnimationFrame(() => {
       pointer.style.opacity = '1';
     });
-    return { x, y };
+    return { x: point.x, y: point.y, activation: semanticActivation ? 'click' : 'mouse' };
+  })()`
+}
+
+function browserSemanticClickScript(selector: string): string {
+  const encodedSelector = JSON.stringify(selector)
+  return `(() => {
+    const target = document.querySelector(${encodedSelector});
+    if (!(target instanceof HTMLElement)) {
+      throw new Error('target was not found');
+    }
+    const style = window.getComputedStyle(target);
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+      throw new Error('target is not visible');
+    }
+    target.click();
+    return true;
   })()`
 }
 
@@ -596,6 +755,7 @@ export class VisibleBrowser {
   private readonly onTabState: ((state: BrowserTabState) => void) | undefined
   private readonly tabs = new Map<string, BrowserPageView>()
   private readonly interactionSnapshots = new Map<string, Map<string, InteractionTargetRecord>>()
+  private readonly lastActionPageText = new Map<string, string>()
   private hostWindow: BrowserHostWindow | undefined
   private lastBounds: BrowserViewBounds | undefined
   private visibleTabId: string | undefined
@@ -698,6 +858,7 @@ export class VisibleBrowser {
     view.webContents.close()
     this.tabs.delete(closedTabId)
     this.interactionSnapshots.delete(closedTabId)
+    this.lastActionPageText.delete(closedTabId)
   }
 
   isVisibleTab(tabId: string): boolean {
@@ -720,27 +881,98 @@ export class VisibleBrowser {
       throw new Error('current browser tab is not visible')
     }
 
-    let extracted: unknown
-    try {
-      extracted = await view.webContents.executeJavaScript(BROWSER_PAGE_EXTRACT_SCRIPT)
-    } catch {
-      throw new Error('target was not found')
-    }
+    const frames = this.framesFor(view)
+    const textParts: string[] = []
+    let title = ''
 
-    if (typeof extracted !== 'object' || extracted === null || Array.isArray(extracted)) {
-      throw new Error('target was not found')
-    }
+    for (const [index, frame] of frames.entries()) {
+      let extracted: unknown
+      try {
+        extracted = await frame.executeJavaScript(BROWSER_PAGE_EXTRACT_SCRIPT)
+      } catch {
+        if (index === 0) {
+          throw new Error('target was not found')
+        }
+        continue
+      }
 
-    const record = extracted as Record<string, unknown>
-    if (typeof record.title !== 'string' || typeof record.text !== 'string') {
-      throw new Error('target was not found')
+      if (typeof extracted !== 'object' || extracted === null || Array.isArray(extracted)) {
+        if (index === 0) {
+          throw new Error('target was not found')
+        }
+        continue
+      }
+
+      const record = extracted as Record<string, unknown>
+      if (typeof record.title !== 'string' || typeof record.text !== 'string') {
+        if (index === 0) {
+          throw new Error('target was not found')
+        }
+        continue
+      }
+
+      if (index === 0) {
+        title = record.title
+      }
+      const structuredText =
+        typeof record.structured_text === 'string' ? record.structured_text.trim() : ''
+      const frameText = [
+        record.text.trim(),
+        structuredText === '' ? '' : `[Structured table content]\n${structuredText}`
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+      if (frameText !== '') {
+        textParts.push(index === 0 ? frameText : `[Embedded page content]\n${frameText}`)
+      }
     }
 
     return {
-      title: truncateBrowserText(record.title, BROWSER_PAGE_TITLE_LIMIT),
+      title: truncateBrowserText(title, BROWSER_PAGE_TITLE_LIMIT),
       url: browserDisplayUrl(view.webContents.getURL()),
-      text: truncateBrowserText(record.text, BROWSER_PAGE_TEXT_LIMIT)
+      text: truncateBrowserText(textParts.join('\n\n'), BROWSER_PAGE_TEXT_LIMIT)
     }
+  }
+
+  async waitForCurrentPage(tabId: string, seconds: number): Promise<BrowserWaitResult> {
+    this.assertNotDisposed()
+    const id = parseBrowserTabId(tabId)
+    this.assertVisibleTab(id)
+
+    const deadline = Date.now() + seconds * 1_000
+    let latestPage = await this.readCurrentPage(id)
+    let observedText = this.lastActionPageText.get(id) ?? latestPage.text
+    let changed = latestPage.text !== observedText
+    let lastChangeAt = changed ? Date.now() : undefined
+    observedText = latestPage.text
+
+    while (Date.now() < deadline) {
+      const remaining = deadline - Date.now()
+      await delay(Math.min(BROWSER_WAIT_POLL_INTERVAL_MS, remaining))
+      this.assertVisibleTab(id)
+
+      try {
+        latestPage = await this.readCurrentPage(id)
+      } catch {
+        continue
+      }
+
+      const now = Date.now()
+      if (latestPage.text !== observedText) {
+        observedText = latestPage.text
+        changed = true
+        lastChangeAt = now
+      } else if (
+        changed &&
+        lastChangeAt !== undefined &&
+        now - lastChangeAt >= BROWSER_WAIT_SETTLE_QUIET_MS
+      ) {
+        break
+      }
+    }
+
+    this.lastActionPageText.set(id, latestPage.text)
+    return { changed, page: latestPage }
   }
 
   async inspectInteractive(tabId: string): Promise<BrowserInteractiveSnapshot> {
@@ -813,7 +1045,8 @@ export class VisibleBrowser {
           frame,
           selector,
           name: truncateBrowserText(entry.name, 120),
-          role: truncateBrowserText(entry.role, 40)
+          role: truncateBrowserText(entry.role, 40),
+          tag: truncateBrowserText(entry.tag, 40)
         })
         elements.push({
           target_id: targetId,
@@ -860,11 +1093,20 @@ export class VisibleBrowser {
     const frame = target.frame
     const isMainFrame = frame === view.webContents.mainFrame
     let pointerInstalled = false
+    let textBeforeClick: string | undefined
+
+    try {
+      textBeforeClick = (await this.readCurrentPage(id)).text
+    } catch {
+      // Click remains available when a page cannot be read for settling.
+    }
 
     try {
       let prepared: unknown
       try {
-        prepared = await frame.executeJavaScript(browserClickPrepareScript(safeSelector))
+        prepared = await frame.executeJavaScript(
+          browserClickPrepareScript(safeSelector, target.tag === 'label')
+        )
       } catch (error) {
         throw new Error(normalizeBrowserOperationError(error))
       }
@@ -874,14 +1116,24 @@ export class VisibleBrowser {
       }
 
       const preparedPoint = prepared as Record<string, unknown>
-      if (typeof preparedPoint.x !== 'number' || typeof preparedPoint.y !== 'number') {
+      if (
+        typeof preparedPoint.x !== 'number' ||
+        typeof preparedPoint.y !== 'number' ||
+        (preparedPoint.activation !== 'mouse' && preparedPoint.activation !== 'click')
+      ) {
         throw new Error('target was not found')
       }
 
       pointerInstalled = true
       await delay(BROWSER_CLICK_POINTER_DELAY_MS)
 
-      if (isMainFrame) {
+      if (preparedPoint.activation === 'click') {
+        try {
+          await frame.executeJavaScript(browserSemanticClickScript(safeSelector))
+        } catch (error) {
+          throw new Error(normalizeBrowserOperationError(error))
+        }
+      } else if (isMainFrame) {
         let confirmed: unknown
         try {
           confirmed = await frame.executeJavaScript(
@@ -925,13 +1177,23 @@ export class VisibleBrowser {
         }
       }
 
+      const page =
+        textBeforeClick !== undefined && textBeforeClick !== ''
+          ? await this.settleAfterClick(id, textBeforeClick)
+          : undefined
+
+      if (page !== undefined) {
+        this.lastActionPageText.set(id, page.text)
+      }
+
       return {
         action: 'clicked',
         url: browserDisplayUrl(view.webContents.getURL()),
         title: truncateBrowserText(
           view.webContents.getTitle().trim() || titleFromUrl(view.webContents.getURL()),
           BROWSER_PAGE_TITLE_LIMIT
-        )
+        ),
+        ...(page === undefined ? {} : { page })
       }
     } finally {
       if (pointerInstalled) {
@@ -1008,6 +1270,7 @@ export class VisibleBrowser {
 
     this.tabs.clear()
     this.interactionSnapshots.clear()
+    this.lastActionPageText.clear()
     this.visibleTabId = undefined
     this.hostWindow = undefined
     this.lastBounds = undefined
@@ -1049,6 +1312,46 @@ export class VisibleBrowser {
     }
     visit(view.webContents.mainFrame)
     return result
+  }
+
+  private assertVisibleTab(tabId: string): void {
+    if (this.visibleTabId !== tabId || !this.tabs.has(tabId)) {
+      throw new Error('current browser tab is not visible')
+    }
+  }
+
+  private async settleAfterClick(
+    tabId: string,
+    previousText: string
+  ): Promise<BrowserPageContent | undefined> {
+    const deadline = Date.now() + BROWSER_CLICK_SETTLE_TIMEOUT_MS
+    let observedText = previousText
+    let lastChangeAt: number | undefined
+    let latestPage: BrowserPageContent | undefined
+
+    while (Date.now() < deadline) {
+      try {
+        latestPage = await this.readCurrentPage(tabId)
+      } catch {
+        return undefined
+      }
+
+      const now = Date.now()
+      const currentText = latestPage.text
+      if (currentText !== observedText) {
+        observedText = currentText
+        lastChangeAt = now
+      } else if (
+        lastChangeAt !== undefined &&
+        now - lastChangeAt >= BROWSER_CLICK_SETTLE_QUIET_MS
+      ) {
+        return latestPage
+      }
+
+      await delay(Math.min(BROWSER_CLICK_SETTLE_QUIET_MS, deadline - now))
+    }
+
+    return latestPage
   }
 
   private ensureView(tabId: string): BrowserPageView {

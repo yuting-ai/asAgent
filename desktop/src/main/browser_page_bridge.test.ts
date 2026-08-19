@@ -99,13 +99,27 @@ describe('BrowserPageBridge', () => {
     const clickCurrentPage = vi.fn(async () => ({
       action: 'clicked' as const,
       url: 'https://example.com/next',
-      title: 'Next'
+      title: 'Next',
+      page: {
+        title: 'Next',
+        url: 'https://example.com/next',
+        text: 'Results are ready'
+      }
+    }))
+    const waitForCurrentPage = vi.fn(async () => ({
+      changed: true,
+      page: {
+        title: 'Results',
+        url: 'https://example.com/next',
+        text: 'Results are ready'
+      }
     }))
 
     const bridge = new BrowserPageBridge({
       readCurrentPage,
       inspectInteractive,
       clickCurrentPage,
+      waitForCurrentPage,
       createServer,
       randomToken: () => 'bridge-token'
     })
@@ -196,6 +210,28 @@ describe('BrowserPageBridge', () => {
       ]
     })
 
+    const waitAuthorized = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/wait-for-current-page',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1', seconds: 15 })
+      ),
+      waitAuthorized
+    )
+    await vi.waitFor(() => expect(waitAuthorized.end).toHaveBeenCalled())
+    expect(waitAuthorized.statusCode).toBe(200)
+    expect(waitForCurrentPage).toHaveBeenCalledWith('tab-1', 15)
+    expect(JSON.parse(waitAuthorized.body ?? '')).toEqual({
+      changed: true,
+      page: {
+        title: 'Results',
+        url: 'https://example.com/next',
+        text: 'Results are ready'
+      }
+    })
+
     const clickAuthorized = createFakeResponse()
     requestHandler?.(
       createFakeRequest(
@@ -212,7 +248,12 @@ describe('BrowserPageBridge', () => {
     expect(JSON.parse(clickAuthorized.body ?? '')).toEqual({
       action: 'clicked',
       url: 'https://example.com/next',
-      title: 'Next'
+      title: 'Next',
+      page: {
+        title: 'Next',
+        url: 'https://example.com/next',
+        text: 'Results are ready'
+      }
     })
 
     await bridge.stop()

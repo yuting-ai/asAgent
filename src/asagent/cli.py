@@ -95,6 +95,7 @@ from asagent.tools.browser_click import BrowserClickTool
 from asagent.tools.browser_inspect_interactive import BrowserInspectInteractiveTool
 from asagent.tools.browser_read_current_page import BrowserReadCurrentPageTool
 from asagent.tools.browser_run_bindings import BrowserRunBindings
+from asagent.tools.browser_wait import BrowserWaitTool
 from asagent.tools.builtin.calculator import CalculatorTool
 from asagent.tools.builtin.current_time import CurrentTimeTool
 from asagent.tools.builtin.echo import EchoTool
@@ -120,10 +121,12 @@ _FILESYSTEM_WRITE_PERMISSIONS = frozenset({"filesystem.write"})
 _BROWSER_READ_PERMISSIONS = frozenset({"browser.read"})
 _BROWSER_INSPECT_PERMISSIONS = frozenset({"browser.inspect"})
 _BROWSER_CLICK_PERMISSIONS = frozenset({"browser.click"})
+_BROWSER_WAIT_PERMISSIONS = frozenset({"browser.wait"})
 _BROWSER_TOOL_PERMISSIONS = (
     _BROWSER_READ_PERMISSIONS
     | _BROWSER_INSPECT_PERMISSIONS
     | _BROWSER_CLICK_PERMISSIONS
+    | _BROWSER_WAIT_PERMISSIONS
 )
 _MCP_SUBPROCESS_ENVIRONMENT_NAMES = ("PATH",)
 
@@ -278,6 +281,12 @@ async def _register_browser_tools(
     )
     registry.register(
         BrowserClickTool(
+            client=browser_page_client,
+            tab_id=tab_id,
+        ),
+    )
+    registry.register(
+        BrowserWaitTool(
             client=browser_page_client,
             tab_id=tab_id,
         ),

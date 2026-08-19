@@ -10,6 +10,7 @@ from asagent.tools.errors import SAFE_BROWSER_OPERATION_ERRORS, ToolOperationErr
 
 _MAX_TARGET_ID_CHARS = 80
 _MAX_TITLE_CHARS = 512
+_MAX_TEXT_CHARS = 32 * 1024
 
 
 class BrowserClickTool:
@@ -31,10 +32,11 @@ class BrowserClickTool:
                 "tab. Accepts only a target_id returned by "
                 "browser.inspect_interactive. Do not guess CSS selectors or "
                 "use external search to infer page structure. Does not type, "
-                "fill, select, submit forms, or read the full page. After a "
-                "click that may change the page, call "
-                "browser.inspect_interactive again before another click, and "
-                "browser.read_current_page if you need the new content."
+                "fill, select, or submit forms. The result may include a "
+                "bounded page snapshot captured after the click settles. Use "
+                "that snapshot before deciding whether the page still needs "
+                "time to finish. Inspect interactive elements again before "
+                "another click."
             ),
             input_schema={
                 "type": "object",
@@ -64,11 +66,17 @@ class BrowserClickTool:
         except BrowserPageBridgeError as error:
             raise _as_operation_error(error) from error
 
-        payload = {
+        payload: dict[str, object] = {
             "action": result.action,
             "url": result.url,
             "title": _bounded(result.title, _MAX_TITLE_CHARS),
         }
+        if result.page is not None:
+            payload["page"] = {
+                "title": _bounded(result.page.title, _MAX_TITLE_CHARS),
+                "url": result.page.url,
+                "text": _bounded(result.page.text, _MAX_TEXT_CHARS),
+            }
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
