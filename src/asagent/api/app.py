@@ -10,7 +10,14 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import Response, StreamingResponse
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+)
 
 from asagent.agent.run_submission import (
     ConversationAccessDeniedError,
@@ -28,6 +35,7 @@ from asagent.bootstrap.agent_settings import (
 from asagent.bootstrap.model_settings import (
     ModelApiKeyMissingError,
     ModelSettings,
+    ModelSettingsIssue,
     ModelSettingsStatus,
 )
 from asagent.bootstrap.tavily_settings import (
@@ -47,6 +55,7 @@ from asagent.core.repositories import (
 from asagent.core.run import Run
 from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
+from asagent.models.config import ProviderLocation
 from asagent.storage.reversible_files import (
     FileChangeConflictError,
     FileChangeNotFoundError,
@@ -365,6 +374,9 @@ class TavilySettingsResponse(BaseModel):
 
 class ModelSettingsResponse(BaseModel):
     configured: bool
+    active: bool
+    issue: ModelSettingsIssue | None
+    location: ProviderLocation | None
     api_key_saved: bool
     model: str | None
     base_url: str | None
@@ -373,6 +385,9 @@ class ModelSettingsResponse(BaseModel):
     def from_status(cls, status: ModelSettingsStatus) -> "ModelSettingsResponse":
         return cls(
             configured=status.configured,
+            active=status.active,
+            issue=status.issue,
+            location=status.location,
             api_key_saved=status.api_key_saved,
             model=status.model,
             base_url=status.base_url,
@@ -382,6 +397,7 @@ class ModelSettingsResponse(BaseModel):
 class UpdateModelSettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    location: ProviderLocation = ProviderLocation.EXTERNAL
     model: str = Field(min_length=1)
     base_url: AnyHttpUrl
     api_key: str | None = None
@@ -1105,6 +1121,7 @@ def create_app(
         ) -> ModelSettingsResponse:
             try:
                 saved_status = await model_settings.save(
+                    location=request.location,
                     model=request.model,
                     base_url=str(request.base_url),
                     api_key=request.api_key,
@@ -1113,6 +1130,11 @@ def create_app(
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="model api key is not saved",
+                ) from error
+            except ValidationError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="local model base URL must use localhost or a loopback address",
                 ) from error
 
             return ModelSettingsResponse.from_status(saved_status)

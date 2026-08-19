@@ -88,6 +88,9 @@ interface TavilySettingsStatus {
 
 interface ModelSettingsStatus {
   configured: boolean
+  active: boolean
+  issue: 'api_key_missing' | 'credential_store_unavailable' | null
+  location: 'local' | 'external' | null
   api_key_saved: boolean
   model: string | null
   base_url: string | null
@@ -98,6 +101,7 @@ interface AgentSettingsStatus {
 }
 
 interface ModelSettingsInput {
+  location: 'local' | 'external'
   model: string
   baseUrl: string
   apiKey?: string

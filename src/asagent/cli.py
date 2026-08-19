@@ -1035,6 +1035,10 @@ async def _run_main(args: argparse.Namespace) -> None:
                         raise ProviderConfigurationError(
                             "requested provider profile is unavailable",
                         ) from error
+                    if profile.secret_id is None:
+                        raise ProviderConfigurationError(
+                            "requested provider profile does not use a secret",
+                        )
                     profile_name = args.profile
                     secrets = EnvironmentSecretProvider(
                         environment=dict(os.environ),
@@ -1211,6 +1215,10 @@ async def _run_main(args: argparse.Namespace) -> None:
                 raise ProviderConfigurationError(
                     "requested provider profile is unavailable",
                 ) from error
+            if profile.secret_id is None:
+                raise ProviderConfigurationError(
+                    "requested provider profile does not use a secret",
+                )
 
             secrets = EnvironmentSecretProvider(
                 environment=dict(os.environ),
@@ -1270,6 +1278,10 @@ async def _run_main(args: argparse.Namespace) -> None:
         raise ProviderConfigurationError(
             "requested provider profile is unavailable",
         ) from error
+    if profile.secret_id is None:
+        raise ProviderConfigurationError(
+            "requested provider profile does not use a secret",
+        )
     secrets = EnvironmentSecretProvider(
         environment=dict(os.environ),
         bindings={profile.secret_id: args.secret_env},

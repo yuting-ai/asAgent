@@ -155,6 +155,35 @@ async def test_complete_maps_request_and_response_without_network() -> None:
 
 
 @pytest.mark.asyncio
+async def test_local_provider_without_key_omits_authorization_header() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "authorization" not in request.headers
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "Local response."}}]},
+        )
+
+    config = ProviderConfig.model_validate(
+        {
+            "adapter": "openai_compatible",
+            "location": "local",
+            "model": "qwen3:8b",
+            "base_url": "http://127.0.0.1:11434/v1",
+        }
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleProvider(
+            config=config,
+            secrets=InMemorySecretProvider({}),
+            http_client=client,
+        )
+
+        response = await provider.complete(make_request())
+
+    assert response.text == "Local response."
+
+
+@pytest.mark.asyncio
 async def test_stream_maps_text_and_reasoning_events_without_network() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert json.loads(request.content)["stream"] is True

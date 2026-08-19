@@ -936,6 +936,9 @@ describe('BackendLauncher', () => {
         new Response(
           JSON.stringify({
             configured: true,
+            active: true,
+            issue: null,
+            location: 'external',
             api_key_saved: true,
             model: 'deepseek-chat',
             base_url: 'https://api.deepseek.com/v1'
@@ -947,6 +950,9 @@ describe('BackendLauncher', () => {
         new Response(
           JSON.stringify({
             configured: true,
+            active: true,
+            issue: null,
+            location: 'external',
             api_key_saved: true,
             model: 'deepseek-chat',
             base_url: 'https://api.deepseek.com/v1'
@@ -974,6 +980,7 @@ describe('BackendLauncher', () => {
     })
     await expect(
       launcher.saveModelSettings({
+        location: 'external',
         model: 'deepseek-chat',
         baseUrl: 'https://api.deepseek.com/v1',
         apiKey: 'secret-model-key'
@@ -985,6 +992,7 @@ describe('BackendLauncher', () => {
       expect.objectContaining({
         method: 'PUT',
         body: JSON.stringify({
+          location: 'external',
           model: 'deepseek-chat',
           base_url: 'https://api.deepseek.com/v1',
           api_key: 'secret-model-key'

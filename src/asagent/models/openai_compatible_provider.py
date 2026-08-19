@@ -143,16 +143,18 @@ class OpenAICompatibleProvider:
         return f"{str(self._config.base_url).rstrip('/')}/chat/completions"
 
     def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self._config.secret_id is None:
+            return headers
+
         secret = self._secrets.get_secret(self._config.secret_id)
         if not secret:
             raise ProviderConfigurationError(
                 "model provider secret is unavailable",
             )
 
-        return {
-            "Authorization": f"Bearer {secret}",
-            "Content-Type": "application/json",
-        }
+        headers["Authorization"] = f"Bearer {secret}"
+        return headers
 
     def _payload(self, request: ModelRequest, *, stream: bool) -> dict[str, object]:
         messages: list[dict[str, object]] = []

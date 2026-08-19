@@ -84,8 +84,8 @@ function isTrustedRendererUrl(url: string): boolean {
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 760,
+    width: 1280,
+    height: 840,
     minWidth: 820,
     minHeight: 600,
     show: false,
@@ -157,6 +157,7 @@ function parseOptionalTavilyApiKey(value: unknown): string | undefined {
 }
 
 function parseModelSettingsInput(value: unknown): {
+  location: 'local' | 'external'
   model: string
   baseUrl: string
   apiKey?: string
@@ -166,11 +167,13 @@ function parseModelSettingsInput(value: unknown): {
   }
 
   const input = value as Record<string, unknown>
+  const location = input['location']
   const model = input['model']
   const baseUrl = input['baseUrl']
   const apiKey = input['apiKey']
 
   if (
+    (location !== 'local' && location !== 'external') ||
     typeof model !== 'string' ||
     !model.trim() ||
     typeof baseUrl !== 'string' ||
@@ -183,6 +186,7 @@ function parseModelSettingsInput(value: unknown): {
   }
 
   return {
+    location,
     model: model.trim(),
     baseUrl: baseUrl.trim(),
     ...(apiKey === undefined ? {} : { apiKey: apiKey.trim() })
@@ -288,8 +292,7 @@ async function refreshDataProcessingMode(): Promise<void> {
   }
 
   const modelSettings = await getReadyBackendLauncher().getModelSettings()
-  dataProcessingMode =
-    modelSettings.configured && modelSettings.api_key_saved ? 'external' : 'local'
+  dataProcessingMode = modelSettings.location === 'external' ? 'external' : 'local'
 }
 
 function isTerminalRunEvent(eventType: string): boolean {

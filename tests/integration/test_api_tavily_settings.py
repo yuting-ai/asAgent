@@ -213,6 +213,9 @@ async def test_model_settings_save_status_and_delete_keep_api_key_private(
     initial = await client.get("/api/v1/settings/model")
     assert initial.json() == {
         "configured": False,
+        "active": False,
+        "issue": None,
+        "location": None,
         "api_key_saved": False,
         "model": None,
         "base_url": None,
@@ -221,6 +224,7 @@ async def test_model_settings_save_status_and_delete_keep_api_key_private(
     saved = await client.put(
         "/api/v1/settings/model",
         json={
+            "location": "external",
             "model": "deepseek-chat",
             "base_url": "https://api.deepseek.com/v1",
             "api_key": api_key,
@@ -229,6 +233,9 @@ async def test_model_settings_save_status_and_delete_keep_api_key_private(
     assert saved.status_code == 200
     assert saved.json() == {
         "configured": True,
+        "active": True,
+        "issue": None,
+        "location": "external",
         "api_key_saved": True,
         "model": "deepseek-chat",
         "base_url": "https://api.deepseek.com/v1",
@@ -246,6 +253,9 @@ async def test_model_settings_save_status_and_delete_keep_api_key_private(
     assert deleted.status_code == 200
     assert deleted.json() == {
         "configured": False,
+        "active": False,
+        "issue": None,
+        "location": None,
         "api_key_saved": False,
         "model": None,
         "base_url": None,
@@ -259,6 +269,7 @@ async def test_model_settings_reject_missing_or_blank_key_before_one_is_saved(
     missing_key = await tavily_api_context.client.put(
         "/api/v1/settings/model",
         json={
+            "location": "external",
             "model": "deepseek-chat",
             "base_url": "https://api.deepseek.com/v1",
         },
@@ -266,6 +277,7 @@ async def test_model_settings_reject_missing_or_blank_key_before_one_is_saved(
     blank_key = await tavily_api_context.client.put(
         "/api/v1/settings/model",
         json={
+            "location": "external",
             "model": "deepseek-chat",
             "base_url": "https://api.deepseek.com/v1",
             "api_key": "   ",
@@ -274,6 +286,47 @@ async def test_model_settings_reject_missing_or_blank_key_before_one_is_saved(
 
     assert missing_key.status_code == 409
     assert blank_key.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_local_model_settings_allow_loopback_without_api_key(
+    tavily_api_context: TavilyApiContext,
+) -> None:
+    saved = await tavily_api_context.client.put(
+        "/api/v1/settings/model",
+        json={
+            "location": "local",
+            "model": "qwen3:8b",
+            "base_url": "http://localhost:11434/v1",
+        },
+    )
+
+    assert saved.status_code == 200
+    assert saved.json() == {
+        "configured": True,
+        "active": True,
+        "issue": None,
+        "location": "local",
+        "api_key_saved": False,
+        "model": "qwen3:8b",
+        "base_url": "http://localhost:11434/v1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_local_model_settings_reject_non_loopback_base_url(
+    tavily_api_context: TavilyApiContext,
+) -> None:
+    response = await tavily_api_context.client.put(
+        "/api/v1/settings/model",
+        json={
+            "location": "local",
+            "model": "qwen3:8b",
+            "base_url": "https://api.example.test/v1",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio

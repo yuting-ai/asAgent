@@ -122,6 +122,9 @@ type TavilySettingsStatus = {
 
 type ModelSettingsStatus = {
   configured: boolean
+  active: boolean
+  issue: 'api_key_missing' | 'credential_store_unavailable' | null
+  location: 'local' | 'external' | null
   api_key_saved: boolean
   model: string | null
   base_url: string | null
@@ -163,7 +166,8 @@ const TAVILY_API_KEY_REQUIRED = 'Enter a Tavily API key before saving.'
 const TAVILY_DELETE_CONFIRM = 'Remove the saved Tavily API key and disable Tavily web search?'
 const MODEL_SETTINGS_LOAD_ERROR = 'Model settings could not be loaded.'
 const MODEL_SETTINGS_UPDATE_ERROR = 'Model settings could not be updated.'
-const MODEL_SETTINGS_REQUIRED = 'Enter a model, base URL, and API key before saving.'
+const MODEL_SETTINGS_REQUIRED = 'Enter a model and base URL before saving.'
+const MODEL_SETTINGS_EXTERNAL_KEY_REQUIRED = 'Enter an API key for the external model.'
 const AGENT_SETTINGS_LOAD_ERROR = 'Agent settings could not be loaded.'
 const AGENT_SETTINGS_UPDATE_ERROR = 'Agent settings could not be updated.'
 const AGENT_SETTINGS_REQUIRED = 'Enter a whole number from 1 to 50.'
@@ -802,6 +806,7 @@ export default function App(): React.JSX.Element {
   const [modelActionError, setModelActionError] = useState<string | null>(null)
   const [restartRequested, setRestartRequested] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
+  const [modelLocation, setModelLocation] = useState<'local' | 'external'>('local')
   const [modelName, setModelName] = useState('')
   const [modelBaseUrl, setModelBaseUrl] = useState('')
   const [modelApiKey, setModelApiKey] = useState('')
@@ -1154,6 +1159,7 @@ export default function App(): React.JSX.Element {
         const status = await window.desktop.getModelSettings()
         if (!cancelled) {
           setModelSettings(status)
+          setModelLocation(status.location ?? 'local')
           setModelName(status.model ?? '')
           setModelBaseUrl(status.base_url ?? '')
           setModelLoadError(null)
@@ -1604,6 +1610,8 @@ export default function App(): React.JSX.Element {
   )
 
   const usesExternalModel = appInfo?.dataProcessingMode === 'external'
+  const configuredExternalProviderUnavailable =
+    modelSettings?.location === 'external' && !modelSettings.active
 
   function openAssistantLink(href: string | undefined): void {
     if (href === undefined) {
@@ -2239,6 +2247,7 @@ export default function App(): React.JSX.Element {
 
   function applyModelStatus(status: ModelSettingsStatus): void {
     setModelSettings(status)
+    setModelLocation(status.location ?? 'local')
     setModelName(status.model ?? '')
     setModelBaseUrl(status.base_url ?? '')
     setModelApiKey('')
@@ -2246,16 +2255,35 @@ export default function App(): React.JSX.Element {
     setRestartRequested(true)
   }
 
+  function handleModelLocationChange(location: 'local' | 'external'): void {
+    if (isModelBusy || location === modelLocation) {
+      return
+    }
+
+    setModelLocation(location)
+    setModelApiKey('')
+    setModelActionError(null)
+
+    if (modelSettings?.location === location) {
+      setModelName(modelSettings.model ?? '')
+      setModelBaseUrl(modelSettings.base_url ?? '')
+      return
+    }
+
+    setModelName('')
+    setModelBaseUrl('')
+  }
+
   async function handleSaveModelSettings(): Promise<void> {
     if (isModelBusy) {
       return
     }
-    if (
-      !modelName.trim() ||
-      !modelBaseUrl.trim() ||
-      (!modelSettings?.api_key_saved && !modelApiKey.trim())
-    ) {
+    if (!modelName.trim() || !modelBaseUrl.trim()) {
       setModelActionError(MODEL_SETTINGS_REQUIRED)
+      return
+    }
+    if (modelLocation === 'external' && !modelSettings?.api_key_saved && !modelApiKey.trim()) {
+      setModelActionError(MODEL_SETTINGS_EXTERNAL_KEY_REQUIRED)
       return
     }
 
@@ -2264,6 +2292,7 @@ export default function App(): React.JSX.Element {
     try {
       applyModelStatus(
         await window.desktop.saveModelSettings({
+          location: modelLocation,
           model: modelName.trim(),
           baseUrl: modelBaseUrl.trim(),
           ...(modelApiKey.trim() ? { apiKey: modelApiKey.trim() } : {})
@@ -3970,11 +3999,17 @@ export default function App(): React.JSX.Element {
               subtitle="Everything asAgent can see, and who has touched it."
               title="Privacy & Permissions"
             />
-            <div className="privacy-banner">
+            <div
+              className={`privacy-banner${
+                configuredExternalProviderUnavailable ? ' issue' : ''
+              }`}
+            >
               <Icon path="M12 2 3 6v6c0 5 4 8.5 9 10 5-1.5 9-5 9-10V6l-9-4Z" />
-              {usesExternalModel
-                ? 'External model enabled. Conversation content and tool results needed for a request may be sent to the selected provider.'
-                : 'All processing stays on this device. No conversation content is sent to an external model provider.'}
+              {configuredExternalProviderUnavailable
+                ? 'The configured external provider is unavailable. New requests are using the offline fallback until its credential is restored.'
+                : usesExternalModel
+                  ? 'External model enabled. Conversation content and tool results needed for a request may be sent to the selected provider.'
+                  : 'All processing stays on this device. No conversation content is sent to an external model provider.'}
             </div>
             <div className="placeholder-banner">
               Permission rows below are sample layout only. Revoke / grant is not wired yet.
@@ -4033,8 +4068,16 @@ export default function App(): React.JSX.Element {
               </div>
               <div className="stat-row">
                 <span className="stat-label">External model access</span>
-                <span className={`stat-value${usesExternalModel ? ' warn' : ''}`}>
-                  {usesExternalModel ? 'Enabled' : 'Off'}
+                <span
+                  className={`stat-value${
+                    usesExternalModel || configuredExternalProviderUnavailable ? ' warn' : ''
+                  }`}
+                >
+                  {configuredExternalProviderUnavailable
+                    ? 'Unavailable'
+                    : usesExternalModel
+                      ? 'Enabled'
+                      : 'Off'}
                 </span>
               </div>
             </div>
@@ -4075,13 +4118,25 @@ export default function App(): React.JSX.Element {
                 <div className="center-sub">Manage model access, tools, and local file scope.</div>
               </div>
               <div className="center-header-actions">
-                <div className={`settings-mode-card${usesExternalModel ? ' external' : ''}`}>
+                <div
+                  className={`settings-mode-card${usesExternalModel ? ' external' : ''}${
+                    configuredExternalProviderUnavailable ? ' unavailable' : ''
+                  }`}
+                >
                   <span>Processing</span>
-                  <strong>{usesExternalModel ? 'External model' : 'Local mode'}</strong>
+                  <strong>
+                    {configuredExternalProviderUnavailable
+                      ? 'Provider unavailable'
+                      : usesExternalModel
+                        ? 'External model'
+                        : 'Local mode'}
+                  </strong>
                   <small>
-                    {usesExternalModel
-                      ? 'Conversation content may leave this device.'
-                      : 'No model data is sent externally.'}
+                    {configuredExternalProviderUnavailable
+                      ? 'Using offline fallback. Check the saved credential.'
+                      : usesExternalModel
+                        ? 'Conversation content may leave this device.'
+                        : 'No model data is sent externally.'}
                   </small>
                 </div>
                 <ContextPanelExpandButton />
@@ -4095,14 +4150,24 @@ export default function App(): React.JSX.Element {
                     <div className="settings-section-eyebrow">Model &amp; privacy</div>
                     <div className="settings-section-title">Model provider</div>
                     <p className="settings-section-copy">
-                      Configure one OpenAI-compatible provider for asAgent. The API key stays in
-                      your system credential store and is never shown here.
+                      Connect any OpenAI-compatible local server or external provider. API keys stay
+                      in your system credential store and are never shown here.
                     </p>
                   </div>
                   <span
-                    className={`settings-state${modelSettings?.configured ? ' configured' : ''}`}
+                    className={`settings-state${
+                      modelSettings?.configured
+                        ? modelSettings.active
+                          ? ' configured'
+                          : ' issue'
+                        : ''
+                    }`}
                   >
-                    {modelSettings?.configured ? 'Configured' : 'Not configured'}
+                    {modelSettings?.configured
+                      ? modelSettings.active
+                        ? `${modelSettings.location === 'local' ? 'Local' : 'External'} active`
+                        : `${modelSettings.location === 'local' ? 'Local' : 'External'} needs attention`
+                      : 'Not configured'}
                   </span>
                 </div>
 
@@ -4113,79 +4178,183 @@ export default function App(): React.JSX.Element {
                   <p className="settings-section-error">{modelLoadError}</p>
                 ) : null}
                 {!isModelLoading && modelLoadError === null ? (
-                  <div className="settings-key-form">
-                    <label className="settings-field-label" htmlFor="model-name">
-                      Model
-                    </label>
-                    <input
-                      className="settings-text-input"
-                      disabled={isModelBusy}
-                      id="model-name"
-                      onChange={(event) => setModelName(event.target.value)}
-                      placeholder="deepseek-v4-flash"
-                      spellCheck={false}
-                      value={modelName}
-                    />
-                    <label className="settings-field-label" htmlFor="model-base-url">
-                      OpenAI-compatible base URL
-                    </label>
-                    <input
-                      className="settings-text-input"
-                      disabled={isModelBusy}
-                      id="model-base-url"
-                      onChange={(event) => setModelBaseUrl(event.target.value)}
-                      placeholder="https://api.deepseek.com/"
-                      spellCheck={false}
-                      value={modelBaseUrl}
-                    />
-                    <label className="settings-field-label" htmlFor="model-api-key">
-                      {modelSettings?.api_key_saved ? 'Replace API key' : 'API key'}
-                    </label>
-                    <input
-                      autoComplete="off"
-                      className="settings-text-input"
-                      disabled={isModelBusy}
-                      id="model-api-key"
-                      onChange={(event) => setModelApiKey(event.target.value)}
-                      placeholder={
-                        modelSettings?.api_key_saved ? 'Enter a new API key' : 'Enter API key'
-                      }
-                      spellCheck={false}
-                      type="password"
-                      value={modelApiKey}
-                    />
-                    <div className="settings-card-actions">
-                      <button
-                        className="settings-button settings-button-primary"
-                        disabled={isModelBusy}
-                        onClick={() => {
-                          void handleSaveModelSettings()
-                        }}
-                        type="button"
-                      >
-                        Save model settings
-                      </button>
-                      {modelSettings?.configured ? (
+                  <div className="model-settings-flow">
+                    <div>
+                      <div className="model-settings-step">1. Choose where the model runs</div>
+                      <div className="model-location-options">
                         <button
-                          className="settings-button settings-button-danger"
+                          aria-pressed={modelLocation === 'local'}
+                          className={`model-location-option${
+                            modelLocation === 'local' ? ' selected' : ''
+                          }`}
                           disabled={isModelBusy}
                           onClick={() => {
-                            void handleRemoveModelSettings()
+                            handleModelLocationChange('local')
                           }}
                           type="button"
                         >
-                          Remove model settings
+                          <span className="model-location-icon">
+                            <Icon path="M4 5h16v11H4zM8 20h8M12 16v4" />
+                          </span>
+                          <span className="model-location-copy">
+                            <strong>Local model</strong>
+                            <small>Ollama, LM Studio, vLLM, or another localhost server.</small>
+                          </span>
+                          <span className="model-location-check">✓</span>
                         </button>
+                        <button
+                          aria-pressed={modelLocation === 'external'}
+                          className={`model-location-option${
+                            modelLocation === 'external' ? ' selected external' : ''
+                          }`}
+                          disabled={isModelBusy}
+                          onClick={() => {
+                            handleModelLocationChange('external')
+                          }}
+                          type="button"
+                        >
+                          <span className="model-location-icon">
+                            <Icon path="M6 19h11a4 4 0 0 0 .7-7.9A6 6 0 0 0 6.2 9.2 5 5 0 0 0 6 19Z" />
+                          </span>
+                          <span className="model-location-copy">
+                            <strong>External provider</strong>
+                            <small>OpenAI-compatible cloud endpoint with an API key.</small>
+                          </span>
+                          <span className="model-location-check">✓</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="model-connection-panel">
+                      <div className="model-connection-header">
+                        <div>
+                          <div className="model-settings-step">2. Enter connection details</div>
+                          <strong>
+                            {modelLocation === 'local'
+                              ? 'Local server connection'
+                              : 'External provider connection'}
+                          </strong>
+                        </div>
+                        <span
+                          className={`model-privacy-badge${
+                            modelLocation === 'external' ? ' external' : ''
+                          }`}
+                        >
+                          {modelLocation === 'local' ? 'Stays on device' : 'Data may leave device'}
+                        </span>
+                      </div>
+                      <p className="model-connection-copy">
+                        {modelLocation === 'local'
+                          ? 'The endpoint must use localhost or a loopback IP address. An API key is optional.'
+                          : 'Conversation content and required tool results may be sent to this provider. An API key is required.'}
+                      </p>
+
+                      {modelSettings !== null &&
+                      modelSettings.issue !== null &&
+                      modelSettings.location === modelLocation ? (
+                        <div className="model-provider-warning" role="status">
+                          <strong>Saved provider is not active</strong>
+                          <span>
+                            {modelSettings.issue === 'credential_store_unavailable'
+                              ? 'asAgent could not access the system credential store. Save the API key again or check Keychain access.'
+                              : 'The saved API key is missing. Enter it again and save these settings.'}
+                          </span>
+                        </div>
                       ) : null}
+
+                      <div className="model-fields-grid">
+                        <div className="model-field">
+                          <label className="settings-field-label" htmlFor="model-name">
+                            Model name
+                          </label>
+                          <input
+                            className="settings-text-input"
+                            disabled={isModelBusy}
+                            id="model-name"
+                            onChange={(event) => setModelName(event.target.value)}
+                            placeholder={modelLocation === 'local' ? 'qwen3:8b' : 'deepseek-chat'}
+                            spellCheck={false}
+                            value={modelName}
+                          />
+                        </div>
+                        <div className="model-field">
+                          <label className="settings-field-label" htmlFor="model-base-url">
+                            Base URL
+                          </label>
+                          <input
+                            className="settings-text-input"
+                            disabled={isModelBusy}
+                            id="model-base-url"
+                            onChange={(event) => setModelBaseUrl(event.target.value)}
+                            placeholder={
+                              modelLocation === 'local'
+                                ? 'http://127.0.0.1:11434/v1'
+                                : 'https://api.deepseek.com/v1'
+                            }
+                            spellCheck={false}
+                            value={modelBaseUrl}
+                          />
+                        </div>
+                        <div className="model-field model-field-wide">
+                          <label className="settings-field-label" htmlFor="model-api-key">
+                            {modelSettings?.api_key_saved
+                              ? 'Replace API key'
+                              : modelLocation === 'local'
+                                ? 'API key (optional)'
+                                : 'API key'}
+                          </label>
+                          <input
+                            autoComplete="off"
+                            className="settings-text-input"
+                            disabled={isModelBusy}
+                            id="model-api-key"
+                            onChange={(event) => setModelApiKey(event.target.value)}
+                            placeholder={
+                              modelSettings?.api_key_saved
+                                ? 'Leave blank to keep the saved API key'
+                                : modelLocation === 'local'
+                                  ? 'Only if your local server requires one'
+                                  : 'Enter API key'
+                            }
+                            spellCheck={false}
+                            type="password"
+                            value={modelApiKey}
+                          />
+                        </div>
+                      </div>
+
+                      {modelActionError !== null ? (
+                        <p className="settings-section-error model-settings-error">
+                          {modelActionError}
+                        </p>
+                      ) : null}
+                      <div className="settings-card-actions model-settings-actions">
+                        <button
+                          className="settings-button settings-button-primary"
+                          disabled={isModelBusy}
+                          onClick={() => {
+                            void handleSaveModelSettings()
+                          }}
+                          type="button"
+                        >
+                          Save model settings
+                        </button>
+                        {modelSettings?.configured ? (
+                          <button
+                            className="settings-button settings-button-danger"
+                            disabled={isModelBusy}
+                            onClick={() => {
+                              void handleRemoveModelSettings()
+                            }}
+                            type="button"
+                          >
+                            Remove model settings
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 ) : null}
-                {modelActionError !== null ? (
-                  <p className="settings-section-error">{modelActionError}</p>
-                ) : null}
-                <p className="settings-section-placeholder">
-                  Anthropic and Gemini providers are not available yet.
-                </p>
               </section>
 
               <section className="settings-section">

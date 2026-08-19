@@ -182,7 +182,7 @@ def _loop(
     max_steps: int = 8,
     max_calls_per_tool_input: int | None = None,
     max_tool_calls_per_model_response: int | None = None,
-    max_tool_result_chars: int = 4_000,
+    max_tool_result_chars: int = 20_000,
     granted_permissions: frozenset[str] = frozenset(),
     approval_policy: ToolApprovalPolicy | None = None,
     event_publisher: EventPublisher | None = None,

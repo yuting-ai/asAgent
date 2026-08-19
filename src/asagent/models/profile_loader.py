@@ -46,9 +46,14 @@ def save_provider_profiles(config_dir: Path, profiles: ProviderProfiles) -> None
             (
                 f"[providers.{json.dumps(name)}]",
                 f'adapter = "{profile.adapter.value}"',
+                f'location = "{profile.location.value}"',
                 f"model = {json.dumps(profile.model)}",
                 f"base_url = {json.dumps(str(profile.base_url))}",
-                f"secret_id = {json.dumps(profile.secret_id)}",
+                *(
+                    [f"secret_id = {json.dumps(profile.secret_id)}"]
+                    if profile.secret_id is not None
+                    else []
+                ),
                 f"timeout_seconds = {profile.timeout_seconds}",
                 "",
             ),

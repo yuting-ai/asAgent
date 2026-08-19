@@ -103,6 +103,9 @@ export type TavilySettingsStatus = {
 
 export type ModelSettingsStatus = {
   configured: boolean
+  active: boolean
+  issue: 'api_key_missing' | 'credential_store_unavailable' | null
+  location: 'local' | 'external' | null
   api_key_saved: boolean
   model: string | null
   base_url: string | null
@@ -113,6 +116,7 @@ export type AgentSettingsStatus = {
 }
 
 export type ModelSettingsInput = {
+  location: 'local' | 'external'
   model: string
   baseUrl: string
   apiKey?: string
@@ -455,6 +459,7 @@ export class BackendLauncher {
 
   async saveModelSettings(input: ModelSettingsInput): Promise<ModelSettingsStatus> {
     return this.requestJson('/api/v1/settings/model', 'PUT', {
+      location: input.location,
       model: input.model,
       base_url: input.baseUrl,
       ...(input.apiKey === undefined ? {} : { api_key: input.apiKey })

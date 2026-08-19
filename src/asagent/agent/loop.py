@@ -76,7 +76,7 @@ class AgentLoop:
         max_steps: int = 20,
         max_calls_per_tool_input: int | None = None,
         max_tool_calls_per_model_response: int | None = None,
-        max_tool_result_chars: int = 4_000,
+        max_tool_result_chars: int = 20_000,
         event_publisher: EventPublisher | None = None,
         event_id_factory: Callable[[], EventId] | None = None,
         clock: Callable[[], datetime] | None = None,

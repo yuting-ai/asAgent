@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from asagent.models.config import (
     ProviderAdapter,
     ProviderConfig,
+    ProviderLocation,
     ProviderProfiles,
 )
 
@@ -33,6 +34,7 @@ def test_provider_profiles_support_openai_compatible_and_anthropic_adapters() ->
     claude = profiles.providers["claude"]
 
     assert deepseek.adapter is ProviderAdapter.OPENAI_COMPATIBLE
+    assert deepseek.location is ProviderLocation.EXTERNAL
     assert deepseek.model == "deepseek-chat"
     assert str(deepseek.base_url).startswith("https://api.example.test/")
     assert deepseek.timeout_seconds == 180.0
@@ -84,5 +86,39 @@ def test_provider_profiles_reject_empty_profile_names() -> None:
                         "secret_id": "example_key",
                     }
                 }
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["http://localhost:11434/v1", "http://127.0.0.1:11434/v1", "http://[::1]:11434/v1"],
+)
+def test_local_provider_allows_loopback_without_secret(base_url: str) -> None:
+    profile = ProviderConfig.model_validate(
+        {
+            "adapter": "openai_compatible",
+            "location": "local",
+            "model": "qwen3:8b",
+            "base_url": base_url,
+        }
+    )
+
+    assert profile.location is ProviderLocation.LOCAL
+    assert profile.secret_id is None
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["http://192.168.1.10:11434/v1", "https://api.example.test/v1"],
+)
+def test_local_provider_rejects_non_loopback_hosts(base_url: str) -> None:
+    with pytest.raises(ValidationError):
+        ProviderConfig.model_validate(
+            {
+                "adapter": "openai_compatible",
+                "location": "local",
+                "model": "qwen3:8b",
+                "base_url": base_url,
             }
         )
