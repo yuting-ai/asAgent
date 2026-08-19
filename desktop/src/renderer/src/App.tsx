@@ -12,6 +12,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import { TOOL_APPROVAL_BANNER_ACTIONS, type ToolApprovalDecision } from './tool_approval'
+import { detectProviderPreset, getProviderPreset, MODEL_PROVIDER_PRESETS } from './model_presets'
 
 type AppInfo = {
   appName: string
@@ -120,6 +121,13 @@ type TavilySettingsStatus = {
   api_key_saved: boolean
 }
 
+type SavedProviderConfigStatus = {
+  location: 'local' | 'external'
+  model: string
+  base_url: string
+  api_key_saved: boolean
+}
+
 type ModelSettingsStatus = {
   configured: boolean
   active: boolean
@@ -128,6 +136,7 @@ type ModelSettingsStatus = {
   api_key_saved: boolean
   model: string | null
   base_url: string | null
+  saved_providers?: Record<string, SavedProviderConfigStatus>
 }
 
 type AgentSettingsStatus = {
@@ -330,19 +339,6 @@ function orderRecentConversations(
       `${left.kind}:${left.conversation.conversation_id}`
     )
   })
-}
-
-function fileAccessSummary(settings: WorkspaceSettingsStatus): string {
-  const label = (path: string, kind: 'File' | 'Folder'): string => {
-    const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
-    return `${kind}: ${name} — ${path}`
-  }
-  const paths = [
-    ...settings.additional_roots.map((path) => label(path, 'Folder')),
-    ...settings.additional_files.map((path) => label(path, 'File'))
-  ]
-
-  return paths.join(' · ')
 }
 
 function mcpServerNameFromToolId(toolId: string): string | null {
@@ -806,12 +802,32 @@ export default function App(): React.JSX.Element {
   const [modelActionError, setModelActionError] = useState<string | null>(null)
   const [restartRequested, setRestartRequested] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
-  const [modelLocation, setModelLocation] = useState<'local' | 'external'>('local')
+  const [selectedProviderId, setSelectedProviderId] = useState<string>('deepseek')
+  const [modelLocation, setModelLocation] = useState<'local' | 'external'>('external')
   const [modelName, setModelName] = useState('')
   const [modelBaseUrl, setModelBaseUrl] = useState('')
   const [modelApiKey, setModelApiKey] = useState('')
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [isModelBusy, setIsModelBusy] = useState(false)
+  const [providerDrafts, setProviderDrafts] = useState<
+    Record<string, { model: string; baseUrl: string; apiKey: string }>
+  >({})
+  const isSavedProvider =
+    modelSettings !== null &&
+    modelSettings.configured &&
+    detectProviderPreset(modelSettings.base_url, modelSettings.location) === selectedProviderId
+  const currentPresetSavedInfo =
+    modelSettings?.saved_providers?.[selectedProviderId] ??
+    (isSavedProvider
+      ? {
+          location: modelSettings?.location ?? 'external',
+          model: modelSettings?.model ?? '',
+          base_url: modelSettings?.base_url ?? '',
+          api_key_saved: modelSettings?.api_key_saved ?? false
+        }
+      : null)
+  const isCurrentPresetConfigured = currentPresetSavedInfo !== null
+  const isCurrentPresetApiKeySaved = currentPresetSavedInfo?.api_key_saved ?? false
   const [agentSettings, setAgentSettings] = useState<AgentSettingsStatus | null>(null)
   const [agentMaxSteps, setAgentMaxSteps] = useState('20')
   const [agentLoadError, setAgentLoadError] = useState<string | null>(null)
@@ -1159,7 +1175,9 @@ export default function App(): React.JSX.Element {
         const status = await window.desktop.getModelSettings()
         if (!cancelled) {
           setModelSettings(status)
-          setModelLocation(status.location ?? 'local')
+          const detectedPreset = detectProviderPreset(status.base_url, status.location)
+          setSelectedProviderId(detectedPreset)
+          setModelLocation(status.location ?? 'external')
           setModelName(status.model ?? '')
           setModelBaseUrl(status.base_url ?? '')
           setModelLoadError(null)
@@ -1813,7 +1831,7 @@ export default function App(): React.JSX.Element {
   }
 
   async function createConversation(): Promise<void> {
-    if (isBusy) {
+    if (backendStatus !== 'ready' || isCreatingConversation) {
       return
     }
 
@@ -1834,7 +1852,7 @@ export default function App(): React.JSX.Element {
   }
 
   function startRename(conversation: ConversationSummary): void {
-    if (isBusy) {
+    if (backendStatus !== 'ready') {
       return
     }
 
@@ -2028,7 +2046,7 @@ export default function App(): React.JSX.Element {
   }
 
   function beginMessageEdit(message: ConversationMessage): void {
-    if (isBusy) {
+    if (backendStatus !== 'ready') {
       return
     }
 
@@ -2044,7 +2062,7 @@ export default function App(): React.JSX.Element {
   }
 
   function beginBrowserMessageEdit(message: ConversationMessage): void {
-    if (isBusy) return
+    if (backendStatus !== 'ready') return
     setBrowserDraft(message.content)
     setBrowserEditingMessageId(message.message_id)
     setErrorMessage(null)
@@ -2247,12 +2265,65 @@ export default function App(): React.JSX.Element {
 
   function applyModelStatus(status: ModelSettingsStatus): void {
     setModelSettings(status)
-    setModelLocation(status.location ?? 'local')
+    const detectedPreset = detectProviderPreset(status.base_url, status.location)
+    setSelectedProviderId(detectedPreset)
+    setModelLocation(status.location ?? 'external')
     setModelName(status.model ?? '')
     setModelBaseUrl(status.base_url ?? '')
     setModelApiKey('')
     setModelActionError(null)
     setRestartRequested(true)
+    setProviderDrafts({})
+  }
+
+  function handleProviderPresetChange(presetId: string): void {
+    if (isModelBusy) {
+      return
+    }
+
+    setProviderDrafts((prev) => ({
+      ...prev,
+      [selectedProviderId]: {
+        model: modelName,
+        baseUrl: modelBaseUrl,
+        apiKey: modelApiKey
+      }
+    }))
+
+    setSelectedProviderId(presetId)
+    setModelActionError(null)
+
+    const saved = modelSettings?.saved_providers?.[presetId]
+    const isTargetActive =
+      modelSettings !== null &&
+      modelSettings.configured &&
+      detectProviderPreset(modelSettings.base_url, modelSettings.location) === presetId
+
+    const preset = getProviderPreset(presetId)
+    if (saved) {
+      setModelLocation(saved.location)
+      setModelName(saved.model)
+      setModelBaseUrl(saved.base_url)
+      setModelApiKey('')
+    } else if (isTargetActive) {
+      setModelLocation(modelSettings.location ?? preset.location)
+      setModelName(modelSettings.model ?? '')
+      setModelBaseUrl(modelSettings.base_url ?? preset.defaultBaseUrl)
+      setModelApiKey('')
+    } else {
+      const draft = providerDrafts[presetId]
+      if (draft) {
+        setModelLocation(preset.location)
+        setModelName(draft.model)
+        setModelBaseUrl(draft.baseUrl || preset.defaultBaseUrl)
+        setModelApiKey(draft.apiKey)
+      } else {
+        setModelLocation(preset.location)
+        setModelName('')
+        setModelBaseUrl(preset.defaultBaseUrl)
+        setModelApiKey('')
+      }
+    }
   }
 
   function handleModelLocationChange(location: 'local' | 'external'): void {
@@ -2261,17 +2332,7 @@ export default function App(): React.JSX.Element {
     }
 
     setModelLocation(location)
-    setModelApiKey('')
     setModelActionError(null)
-
-    if (modelSettings?.location === location) {
-      setModelName(modelSettings.model ?? '')
-      setModelBaseUrl(modelSettings.base_url ?? '')
-      return
-    }
-
-    setModelName('')
-    setModelBaseUrl('')
   }
 
   async function handleSaveModelSettings(): Promise<void> {
@@ -2282,7 +2343,7 @@ export default function App(): React.JSX.Element {
       setModelActionError(MODEL_SETTINGS_REQUIRED)
       return
     }
-    if (modelLocation === 'external' && !modelSettings?.api_key_saved && !modelApiKey.trim()) {
+    if (modelLocation === 'external' && !isCurrentPresetApiKeySaved && !modelApiKey.trim()) {
       setModelActionError(MODEL_SETTINGS_EXTERNAL_KEY_REQUIRED)
       return
     }
@@ -2355,13 +2416,25 @@ export default function App(): React.JSX.Element {
       return
     }
 
-    const selectedPath = await window.desktop.chooseWorkspacePath()
+    const selectedPaths = await window.desktop.chooseWorkspacePath()
+    if (selectedPaths.length === 0) {
+      return
+    }
+
+    const nextRoots = [...workspaceSettings.additional_roots]
+    const nextFiles = [...workspaceSettings.additional_files]
+
+    for (const item of selectedPaths) {
+      if (item.kind === 'directory' && !nextRoots.includes(item.path)) {
+        nextRoots.push(item.path)
+      } else if (item.kind === 'file' && !nextFiles.includes(item.path)) {
+        nextFiles.push(item.path)
+      }
+    }
+
     if (
-      selectedPath === null ||
-      (selectedPath.kind === 'directory' &&
-        workspaceSettings.additional_roots.includes(selectedPath.path)) ||
-      (selectedPath.kind === 'file' &&
-        workspaceSettings.additional_files.includes(selectedPath.path))
+      nextRoots.length === workspaceSettings.additional_roots.length &&
+      nextFiles.length === workspaceSettings.additional_files.length
     ) {
       return
     }
@@ -2370,13 +2443,36 @@ export default function App(): React.JSX.Element {
     try {
       setWorkspaceSettings(
         await window.desktop.saveConversationFileAccess(selectedConversationId, {
+          additionalFiles: nextFiles,
+          additionalRoots: nextRoots
+        })
+      )
+    } catch {
+      setErrorMessage('File access settings could not be updated.')
+    } finally {
+      setIsWorkspaceBusy(false)
+    }
+  }
+
+  async function handleRemoveWorkspacePath(
+    pathToRemove: string,
+    kind: 'directory' | 'file'
+  ): Promise<void> {
+    if (isWorkspaceBusy || workspaceSettings === null || selectedConversationId === null) {
+      return
+    }
+
+    setIsWorkspaceBusy(true)
+    try {
+      setWorkspaceSettings(
+        await window.desktop.saveConversationFileAccess(selectedConversationId, {
           additionalFiles:
-            selectedPath.kind === 'file'
-              ? [...workspaceSettings.additional_files, selectedPath.path]
+            kind === 'file'
+              ? workspaceSettings.additional_files.filter((path) => path !== pathToRemove)
               : workspaceSettings.additional_files,
           additionalRoots:
-            selectedPath.kind === 'directory'
-              ? [...workspaceSettings.additional_roots, selectedPath.path]
+            kind === 'directory'
+              ? workspaceSettings.additional_roots.filter((path) => path !== pathToRemove)
               : workspaceSettings.additional_roots
         })
       )
@@ -2480,7 +2576,7 @@ export default function App(): React.JSX.Element {
   }
 
   async function createBrowserConversationForActiveTab(): Promise<void> {
-    if (isBusy) {
+    if (backendStatus !== 'ready' || isCreatingConversation) {
       return
     }
 
@@ -2681,17 +2777,33 @@ export default function App(): React.JSX.Element {
         <nav aria-label="Primary" className="rail" id="primary-sidebar">
           <div aria-hidden="true" className="rail-window-controls" />
           <div className="rail-section">
-            <button
-              className={railItemClass('chat')}
-              onClick={() => setActiveView('chat')}
-              type="button"
-            >
-              <Icon
-                className="rail-icon"
-                path="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"
-              />
-              <span className="rail-item-label">Chat</span>
-            </button>
+            <div className="rail-item-container">
+              <button
+                className={railItemClass('chat')}
+                onClick={() => setActiveView('chat')}
+                type="button"
+              >
+                <Icon
+                  className="rail-icon"
+                  path="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"
+                />
+                <span className="rail-item-label">Chat</span>
+              </button>
+              <button
+                aria-label="New chat"
+                className="rail-action-button"
+                disabled={backendStatus !== 'ready' || isCreatingConversation}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setActiveView('chat')
+                  void createConversation()
+                }}
+                title="New chat"
+                type="button"
+              >
+                <Icon path="M12 5v14M5 12h14" />
+              </button>
+            </div>
             <button
               className={railItemClass('browser')}
               onClick={() => setActiveView('browser')}
@@ -2773,19 +2885,6 @@ export default function App(): React.JSX.Element {
           <div className="rail-section rail-recents">
             <div className="rail-recents-header">
               <div className="rail-label">Recents</div>
-              <button
-                aria-label="New chat"
-                className="rail-recents-new"
-                disabled={isBusy}
-                onClick={() => {
-                  setActiveView('chat')
-                  void createConversation()
-                }}
-                title="New chat"
-                type="button"
-              >
-                <Icon path="M12 5v14M5 12h14" />
-              </button>
             </div>
             <div
               className={`rail-recents-list${
@@ -2836,7 +2935,7 @@ export default function App(): React.JSX.Element {
                         <>
                           <button
                             className="rail-recent-body"
-                            disabled={isBusy}
+                            disabled={backendStatus !== 'ready'}
                             onClick={() => {
                               if (kind === 'chat') {
                                 setActiveView('chat')
@@ -2882,7 +2981,7 @@ export default function App(): React.JSX.Element {
                             {kind === 'chat' ? (
                               <button
                                 aria-label="Rename conversation"
-                                disabled={isBusy}
+                                disabled={backendStatus !== 'ready'}
                                 onClick={() => startRename(conversation)}
                                 title="Rename"
                                 type="button"
@@ -2893,7 +2992,10 @@ export default function App(): React.JSX.Element {
                             <button
                               aria-label="Delete conversation"
                               className="danger"
-                              disabled={isBusy}
+                              disabled={
+                                backendStatus !== 'ready' ||
+                                activeRun?.conversationId === conversation.conversation_id
+                              }
                               onClick={() =>
                                 void (kind === 'chat'
                                   ? deleteConversation(conversation.conversation_id)
@@ -2966,7 +3068,7 @@ export default function App(): React.JSX.Element {
                   </label>
                   <button
                     className="chat-new-btn"
-                    disabled={isBusy}
+                    disabled={backendStatus !== 'ready' || isCreatingConversation}
                     onClick={() => void createConversation()}
                     title="New conversation"
                     type="button"
@@ -3014,7 +3116,7 @@ export default function App(): React.JSX.Element {
                       >
                         <button
                           className="chat-thread-body"
-                          disabled={isBusy}
+                          disabled={backendStatus !== 'ready'}
                           onClick={() => setSelectedConversationId(conversation.conversation_id)}
                           type="button"
                         >
@@ -3029,7 +3131,7 @@ export default function App(): React.JSX.Element {
                           <button
                             aria-label="Rename conversation"
                             className="chat-thread-action-btn"
-                            disabled={isBusy}
+                            disabled={backendStatus !== 'ready'}
                             onClick={() => startRename(conversation)}
                             title="Rename"
                             type="button"
@@ -3041,13 +3143,16 @@ export default function App(): React.JSX.Element {
                               viewBox="0 0 24 24"
                             >
                               <path d="M12 20h9" />
-                              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
                             </svg>
                           </button>
                           <button
                             aria-label="Delete conversation"
                             className="chat-thread-action-btn chat-thread-action-btn-danger"
-                            disabled={isBusy}
+                            disabled={
+                              backendStatus !== 'ready' ||
+                              activeRun?.conversationId === conversation.conversation_id
+                            }
                             onClick={() => void deleteConversation(conversation.conversation_id)}
                             title="Delete"
                             type="button"
@@ -3107,7 +3212,8 @@ export default function App(): React.JSX.Element {
                     <>
                       {(() => {
                         const visibleActivity =
-                          runActivity?.conversationId === selectedConversationId
+                          runActivity?.conversationId === selectedConversationId &&
+                          !runHistory.some((history) => history.run.run_id === runActivity.runId)
                             ? runActivity
                             : null
                         const activityAnchorIndex =
@@ -3286,7 +3392,7 @@ export default function App(): React.JSX.Element {
                                       <button
                                         aria-label="Edit and resend message"
                                         className="message-action"
-                                        disabled={isBusy}
+                                        disabled={backendStatus !== 'ready'}
                                         onClick={() => beginMessageEdit(message)}
                                         title="Edit and resend message"
                                         type="button"
@@ -3379,8 +3485,14 @@ export default function App(): React.JSX.Element {
                     ) : null}
                     <textarea
                       ref={composerInputRef}
-                      disabled={selectedConversationId === null || isBusy}
+                      disabled={selectedConversationId === null || backendStatus !== 'ready'}
                       onChange={(event) => setDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault()
+                          event.currentTarget.form?.requestSubmit()
+                        }
+                      }}
                       placeholder={
                         selectedConversationId === null
                           ? 'Create or select a conversation first.'
@@ -3405,25 +3517,64 @@ export default function App(): React.JSX.Element {
                       >
                         <Icon path="M12 5v14m-7-7h14" />
                       </button>
-                      <span
-                        className="chat-composer-status"
-                        title={
-                          workspaceSettings === null
-                            ? undefined
-                            : fileAccessSummary(workspaceSettings)
-                        }
-                      >
-                        {chatRunIsActive
-                          ? 'asAgent is working'
-                          : activeRun === null
-                            ? workspaceSettings === null ||
-                              workspaceSettings.additional_roots.length +
-                                workspaceSettings.additional_files.length ===
-                                0
-                              ? 'Add a file or folder to this conversation'
-                              : fileAccessSummary(workspaceSettings)
-                            : 'Another conversation is running'}
-                      </span>
+                      <div className="chat-composer-context">
+                        {workspaceSettings !== null &&
+                        (workspaceSettings.additional_roots.length > 0 ||
+                          workspaceSettings.additional_files.length > 0) ? (
+                          <div className="chat-context-chips">
+                            {workspaceSettings.additional_roots.map((rootPath) => {
+                              const folderName =
+                                rootPath.split(/[\\/]/).filter(Boolean).at(-1) ?? rootPath
+                              return (
+                                <span className="chat-context-chip" key={rootPath} title={rootPath}>
+                                  <span className="chat-context-chip-icon">📁</span>
+                                  <span className="chat-context-chip-name">{folderName}</span>
+                                  <button
+                                    aria-label={`Remove folder ${folderName}`}
+                                    className="chat-context-chip-remove"
+                                    disabled={isWorkspaceBusy}
+                                    onClick={() =>
+                                      void handleRemoveWorkspacePath(rootPath, 'directory')
+                                    }
+                                    title={`Remove ${rootPath}`}
+                                    type="button"
+                                  >
+                                    <Icon path="M18 6 6 18M6 6l12 12" />
+                                  </button>
+                                </span>
+                              )
+                            })}
+                            {workspaceSettings.additional_files.map((filePath) => {
+                              const fileName =
+                                filePath.split(/[\\/]/).filter(Boolean).at(-1) ?? filePath
+                              return (
+                                <span className="chat-context-chip" key={filePath} title={filePath}>
+                                  <span className="chat-context-chip-icon">📄</span>
+                                  <span className="chat-context-chip-name">{fileName}</span>
+                                  <button
+                                    aria-label={`Remove file ${fileName}`}
+                                    className="chat-context-chip-remove"
+                                    disabled={isWorkspaceBusy}
+                                    onClick={() => void handleRemoveWorkspacePath(filePath, 'file')}
+                                    title={`Remove ${filePath}`}
+                                    type="button"
+                                  >
+                                    <Icon path="M18 6 6 18M6 6l12 12" />
+                                  </button>
+                                </span>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <span className="chat-composer-status">
+                            {chatRunIsActive
+                              ? 'asAgent is working'
+                              : activeRun === null
+                                ? 'Add a file or folder to this conversation'
+                                : 'Another conversation is running'}
+                          </span>
+                        )}
+                      </div>
                       {!chatRunIsActive ? (
                         <button
                           aria-label={isSubmittingMessage ? 'Sending' : 'Send message'}
@@ -3608,7 +3759,7 @@ export default function App(): React.JSX.Element {
                       <button
                         aria-label="New conversation"
                         className="browser-agent-toolbar-button"
-                        disabled={isBusy}
+                        disabled={backendStatus !== 'ready' || isCreatingConversation}
                         onClick={() => void createBrowserConversationForActiveTab()}
                         title="New conversation"
                         type="button"
@@ -3662,6 +3813,9 @@ export default function App(): React.JSX.Element {
                                   )
                                 : null}
                               {runActivity?.conversationId === selectedBrowserConversationId &&
+                              !browserRunHistory.some(
+                                (history) => history.run.run_id === runActivity.runId
+                              ) &&
                               message.role === 'assistant' &&
                               new Date(message.created_at).getTime() >= runActivity.startedAt ? (
                                 <RunActivityCard
@@ -3725,7 +3879,7 @@ export default function App(): React.JSX.Element {
                                   <button
                                     aria-label="Edit and resend message"
                                     className="message-action"
-                                    disabled={isBusy}
+                                    disabled={backendStatus !== 'ready'}
                                     onClick={() => beginBrowserMessageEdit(message)}
                                     title="Edit and resend message"
                                     type="button"
@@ -3755,6 +3909,9 @@ export default function App(): React.JSX.Element {
                             )
                           })}
                           {runActivity?.conversationId === selectedBrowserConversationId &&
+                          !browserRunHistory.some(
+                            (history) => history.run.run_id === runActivity.runId
+                          ) &&
                           !browserMessages.some(
                             (message) =>
                               message.role === 'assistant' &&
@@ -4000,9 +4157,7 @@ export default function App(): React.JSX.Element {
               title="Privacy & Permissions"
             />
             <div
-              className={`privacy-banner${
-                configuredExternalProviderUnavailable ? ' issue' : ''
-              }`}
+              className={`privacy-banner${configuredExternalProviderUnavailable ? ' issue' : ''}`}
             >
               <Icon path="M12 2 3 6v6c0 5 4 8.5 9 10 5-1.5 9-5 9-10V6l-9-4Z" />
               {configuredExternalProviderUnavailable
@@ -4179,61 +4334,21 @@ export default function App(): React.JSX.Element {
                 ) : null}
                 {!isModelLoading && modelLoadError === null ? (
                   <div className="model-settings-flow">
-                    <div>
-                      <div className="model-settings-step">1. Choose where the model runs</div>
-                      <div className="model-location-options">
-                        <button
-                          aria-pressed={modelLocation === 'local'}
-                          className={`model-location-option${
-                            modelLocation === 'local' ? ' selected' : ''
-                          }`}
-                          disabled={isModelBusy}
-                          onClick={() => {
-                            handleModelLocationChange('local')
-                          }}
-                          type="button"
-                        >
-                          <span className="model-location-icon">
-                            <Icon path="M4 5h16v11H4zM8 20h8M12 16v4" />
-                          </span>
-                          <span className="model-location-copy">
-                            <strong>Local model</strong>
-                            <small>Ollama, LM Studio, vLLM, or another localhost server.</small>
-                          </span>
-                          <span className="model-location-check">✓</span>
-                        </button>
-                        <button
-                          aria-pressed={modelLocation === 'external'}
-                          className={`model-location-option${
-                            modelLocation === 'external' ? ' selected external' : ''
-                          }`}
-                          disabled={isModelBusy}
-                          onClick={() => {
-                            handleModelLocationChange('external')
-                          }}
-                          type="button"
-                        >
-                          <span className="model-location-icon">
-                            <Icon path="M6 19h11a4 4 0 0 0 .7-7.9A6 6 0 0 0 6.2 9.2 5 5 0 0 0 6 19Z" />
-                          </span>
-                          <span className="model-location-copy">
-                            <strong>External provider</strong>
-                            <small>OpenAI-compatible cloud endpoint with an API key.</small>
-                          </span>
-                          <span className="model-location-check">✓</span>
-                        </button>
-                      </div>
-                    </div>
-
                     <div className="model-connection-panel">
                       <div className="model-connection-header">
                         <div>
-                          <div className="model-settings-step">2. Enter connection details</div>
                           <strong>
                             {modelLocation === 'local'
                               ? 'Local server connection'
                               : 'External provider connection'}
                           </strong>
+                          <p className="model-connection-copy">
+                            {selectedProviderId === 'custom'
+                              ? modelLocation === 'local'
+                                ? 'The endpoint must use localhost or a loopback IP address. An API key is optional.'
+                                : 'Conversation content and required tool results may be sent to this provider. An API key is required.'
+                              : getProviderPreset(selectedProviderId).description}
+                          </p>
                         </div>
                         <span
                           className={`model-privacy-badge${
@@ -4243,13 +4358,9 @@ export default function App(): React.JSX.Element {
                           {modelLocation === 'local' ? 'Stays on device' : 'Data may leave device'}
                         </span>
                       </div>
-                      <p className="model-connection-copy">
-                        {modelLocation === 'local'
-                          ? 'The endpoint must use localhost or a loopback IP address. An API key is optional.'
-                          : 'Conversation content and required tool results may be sent to this provider. An API key is required.'}
-                      </p>
 
-                      {modelSettings !== null &&
+                      {isCurrentPresetConfigured &&
+                      modelSettings !== null &&
                       modelSettings.issue !== null &&
                       modelSettings.location === modelLocation ? (
                         <div className="model-provider-warning" role="status">
@@ -4263,6 +4374,47 @@ export default function App(): React.JSX.Element {
                       ) : null}
 
                       <div className="model-fields-grid">
+                        <div className="model-field model-field-wide">
+                          <label className="settings-field-label" htmlFor="model-provider-preset">
+                            Provider
+                          </label>
+                          <select
+                            className="settings-select"
+                            disabled={isModelBusy}
+                            id="model-provider-preset"
+                            onChange={(event) => handleProviderPresetChange(event.target.value)}
+                            value={selectedProviderId}
+                          >
+                            {MODEL_PROVIDER_PRESETS.map((preset) => (
+                              <option key={preset.id} value={preset.id}>
+                                {preset.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {selectedProviderId === 'custom' ? (
+                          <div className="model-field model-field-wide">
+                            <label className="settings-field-label" htmlFor="model-custom-location">
+                              Location
+                            </label>
+                            <select
+                              className="settings-select"
+                              disabled={isModelBusy}
+                              id="model-custom-location"
+                              onChange={(event) =>
+                                handleModelLocationChange(
+                                  event.target.value as 'local' | 'external'
+                                )
+                              }
+                              value={modelLocation}
+                            >
+                              <option value="external">External provider (cloud endpoint)</option>
+                              <option value="local">Local model (localhost server)</option>
+                            </select>
+                          </div>
+                        ) : null}
+
                         <div className="model-field">
                           <label className="settings-field-label" htmlFor="model-name">
                             Model name
@@ -4272,11 +4424,12 @@ export default function App(): React.JSX.Element {
                             disabled={isModelBusy}
                             id="model-name"
                             onChange={(event) => setModelName(event.target.value)}
-                            placeholder={modelLocation === 'local' ? 'qwen3:8b' : 'deepseek-chat'}
+                            placeholder={getProviderPreset(selectedProviderId).placeholderModel}
                             spellCheck={false}
                             value={modelName}
                           />
                         </div>
+
                         <div className="model-field">
                           <label className="settings-field-label" htmlFor="model-base-url">
                             Base URL
@@ -4287,21 +4440,19 @@ export default function App(): React.JSX.Element {
                             id="model-base-url"
                             onChange={(event) => setModelBaseUrl(event.target.value)}
                             placeholder={
-                              modelLocation === 'local'
+                              getProviderPreset(selectedProviderId).defaultBaseUrl ||
+                              (modelLocation === 'local'
                                 ? 'http://127.0.0.1:11434/v1'
-                                : 'https://api.deepseek.com/v1'
+                                : 'https://api.openai.com/v1')
                             }
                             spellCheck={false}
                             value={modelBaseUrl}
                           />
                         </div>
+
                         <div className="model-field model-field-wide">
                           <label className="settings-field-label" htmlFor="model-api-key">
-                            {modelSettings?.api_key_saved
-                              ? 'Replace API key'
-                              : modelLocation === 'local'
-                                ? 'API key (optional)'
-                                : 'API key'}
+                            {modelLocation === 'local' ? 'API key (optional)' : 'API key'}
                           </label>
                           <input
                             autoComplete="off"
@@ -4310,13 +4461,18 @@ export default function App(): React.JSX.Element {
                             id="model-api-key"
                             onChange={(event) => setModelApiKey(event.target.value)}
                             placeholder={
-                              modelSettings?.api_key_saved
-                                ? 'Leave blank to keep the saved API key'
+                              isCurrentPresetApiKeySaved
+                                ? '••••••••••••••••••••••••'
                                 : modelLocation === 'local'
                                   ? 'Only if your local server requires one'
                                   : 'Enter API key'
                             }
                             spellCheck={false}
+                            title={
+                              isCurrentPresetApiKeySaved
+                                ? 'API key is saved in Keychain. Enter a new key to replace it.'
+                                : undefined
+                            }
                             type="password"
                             value={modelApiKey}
                           />
@@ -4339,7 +4495,7 @@ export default function App(): React.JSX.Element {
                         >
                           Save model settings
                         </button>
-                        {modelSettings?.configured ? (
+                        {isCurrentPresetConfigured ? (
                           <button
                             className="settings-button settings-button-danger"
                             disabled={isModelBusy}

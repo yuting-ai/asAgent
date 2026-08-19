@@ -98,3 +98,39 @@ async def test_conversation_workspace_settings_rejects_invalid_selected_paths(
             additional_roots=(),
             additional_files=(tmp_path / "missing",),
         )
+
+
+@pytest.mark.asyncio
+async def test_conversation_workspace_settings_model_context(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    folder_a = tmp_path / "folder_a"
+    folder_b = tmp_path / "folder_b"
+    file_a = tmp_path / "file_a.txt"
+    workspace_root.mkdir()
+    folder_a.mkdir()
+    folder_b.mkdir()
+    file_a.write_text("hello", encoding="utf-8")
+
+    settings = ConversationWorkspaceSettings(
+        scopes=InMemoryConversationFileScopeRepository(),
+        workspace_root=workspace_root,
+    )
+    conversation_id = ConversationId("conversation-1")
+
+    # Empty context when no additional paths attached
+    assert await settings.model_context(conversation_id) == ""
+
+    # Context with multiple folders and files
+    await settings.save(
+        conversation_id=conversation_id,
+        additional_roots=(folder_a, folder_b),
+        additional_files=(file_a,),
+    )
+    context = await settings.model_context(conversation_id)
+    assert f"- Folder: {folder_a.resolve()}" in context
+    assert f"- Folder: {folder_b.resolve()}" in context
+    assert f"- File: {file_a.resolve()}" in context
+    assert "inspect all relevant shared paths above" in context
+

@@ -42,6 +42,7 @@ from asagent.core.event_publisher import EventPublisher
 from asagent.core.file_change import FileChange
 from asagent.core.ids import (
     ApprovalId,
+    ConnectionId,
     ConversationId,
     EventId,
     FileChangeId,
@@ -1023,9 +1024,17 @@ async def _run_main(args: argparse.Namespace) -> None:
                         providers={MODEL_PROFILE_NAME: profile},
                     )
                     profile_name = MODEL_PROFILE_NAME
+                    secret_bindings: dict[str, ConnectionId] = {
+                        MODEL_SECRET_ID: MODEL_CONNECTION_ID,
+                    }
+                    if (
+                        profile.secret_id is not None
+                        and profile.secret_id != MODEL_SECRET_ID
+                    ):
+                        secret_bindings[profile.secret_id] = MODEL_CONNECTION_ID
                     secrets = CredentialStoreSecretProvider(
                         credential_store=credential_store,
-                        bindings={MODEL_SECRET_ID: MODEL_CONNECTION_ID},
+                        bindings=secret_bindings,
                     )
                 else:
                     profiles = load_provider_profiles(paths.config_dir)

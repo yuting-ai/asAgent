@@ -219,6 +219,7 @@ async def test_model_settings_save_status_and_delete_keep_api_key_private(
         "api_key_saved": False,
         "model": None,
         "base_url": None,
+        "saved_providers": {},
     }
 
     saved = await client.put(
@@ -239,6 +240,14 @@ async def test_model_settings_save_status_and_delete_keep_api_key_private(
         "api_key_saved": True,
         "model": "deepseek-chat",
         "base_url": "https://api.deepseek.com/v1",
+        "saved_providers": {
+            "deepseek": {
+                "location": "external",
+                "model": "deepseek-chat",
+                "base_url": "https://api.deepseek.com/v1",
+                "api_key_saved": True,
+            },
+        },
     }
     assert api_key not in saved.text
     assert (
@@ -259,6 +268,14 @@ async def test_model_settings_save_status_and_delete_keep_api_key_private(
         "api_key_saved": False,
         "model": None,
         "base_url": None,
+        "saved_providers": {
+            "deepseek": {
+                "location": "external",
+                "model": "deepseek-chat",
+                "base_url": "https://api.deepseek.com/v1",
+                "api_key_saved": True,
+            },
+        },
     }
 
 
@@ -310,6 +327,14 @@ async def test_local_model_settings_allow_loopback_without_api_key(
         "api_key_saved": False,
         "model": "qwen3:8b",
         "base_url": "http://localhost:11434/v1",
+        "saved_providers": {
+            "ollama": {
+                "location": "local",
+                "model": "qwen3:8b",
+                "base_url": "http://localhost:11434/v1",
+                "api_key_saved": False,
+            },
+        },
     }
 
 
@@ -327,6 +352,48 @@ async def test_local_model_settings_reject_non_loopback_base_url(
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_save_deepseek_then_ollama_preserves_deepseek_key_in_saved_providers(
+    tavily_api_context: TavilyApiContext,
+) -> None:
+    """Simulate: save DeepSeek with key → save Ollama without key → GET status.
+
+    The saved_providers must still report DeepSeek's api_key_saved as True.
+    """
+    client = tavily_api_context.client
+
+    # 1. Save DeepSeek
+    await client.put(
+        "/api/v1/settings/model",
+        json={
+            "location": "external",
+            "model": "deepseek-chat",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": "test-deepseek-key",
+        },
+    )
+
+    # 2. Save Ollama (local, no key)
+    await client.put(
+        "/api/v1/settings/model",
+        json={
+            "location": "local",
+            "model": "qwen3:8b",
+            "base_url": "http://localhost:11434/v1",
+        },
+    )
+
+    # 3. GET status — DeepSeek key must still be present in saved_providers
+    status = await client.get("/api/v1/settings/model")
+    body = status.json()
+    assert body["location"] == "local"
+    assert body["model"] == "qwen3:8b"
+    assert "deepseek" in body["saved_providers"]
+    assert body["saved_providers"]["deepseek"]["api_key_saved"] is True
+    assert body["saved_providers"]["deepseek"]["model"] == "deepseek-chat"
+    assert "ollama" in body["saved_providers"]
 
 
 @pytest.mark.asyncio

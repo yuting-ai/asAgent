@@ -372,6 +372,13 @@ class TavilySettingsResponse(BaseModel):
         )
 
 
+class SavedProviderConfigResponse(BaseModel):
+    location: ProviderLocation
+    model: str
+    base_url: str
+    api_key_saved: bool
+
+
 class ModelSettingsResponse(BaseModel):
     configured: bool
     active: bool
@@ -380,6 +387,9 @@ class ModelSettingsResponse(BaseModel):
     api_key_saved: bool
     model: str | None
     base_url: str | None
+    saved_providers: dict[str, SavedProviderConfigResponse] = Field(
+        default_factory=dict
+    )
 
     @classmethod
     def from_status(cls, status: ModelSettingsStatus) -> "ModelSettingsResponse":
@@ -391,6 +401,15 @@ class ModelSettingsResponse(BaseModel):
             api_key_saved=status.api_key_saved,
             model=status.model,
             base_url=status.base_url,
+            saved_providers={
+                k: SavedProviderConfigResponse(
+                    location=v.location,
+                    model=v.model,
+                    base_url=v.base_url,
+                    api_key_saved=v.api_key_saved,
+                )
+                for k, v in status.saved_providers.items()
+            },
         )
 
 

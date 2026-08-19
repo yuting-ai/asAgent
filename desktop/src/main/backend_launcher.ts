@@ -101,6 +101,13 @@ export type TavilySettingsStatus = {
   api_key_saved: boolean
 }
 
+export type SavedProviderConfigStatus = {
+  location: 'local' | 'external'
+  model: string
+  base_url: string
+  api_key_saved: boolean
+}
+
 export type ModelSettingsStatus = {
   configured: boolean
   active: boolean
@@ -109,6 +116,7 @@ export type ModelSettingsStatus = {
   api_key_saved: boolean
   model: string | null
   base_url: string | null
+  saved_providers?: Record<string, SavedProviderConfigStatus>
 }
 
 export type AgentSettingsStatus = {

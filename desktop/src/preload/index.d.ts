@@ -86,6 +86,13 @@ interface TavilySettingsStatus {
   api_key_saved: boolean
 }
 
+interface SavedProviderConfigStatus {
+  location: 'local' | 'external'
+  model: string
+  base_url: string
+  api_key_saved: boolean
+}
+
 interface ModelSettingsStatus {
   configured: boolean
   active: boolean
@@ -94,6 +101,7 @@ interface ModelSettingsStatus {
   api_key_saved: boolean
   model: string | null
   base_url: string | null
+  saved_providers?: Record<string, SavedProviderConfigStatus>
 }
 
 interface AgentSettingsStatus {
@@ -184,7 +192,7 @@ interface DesktopBridge {
   getAgentSettings(): Promise<AgentSettingsStatus>
   saveAgentSettings(input: AgentSettingsInput): Promise<AgentSettingsStatus>
   getConversationFileAccess(conversationId: string): Promise<WorkspaceSettingsStatus>
-  chooseWorkspacePath(): Promise<{ path: string; kind: 'directory' | 'file' } | null>
+  chooseWorkspacePath(): Promise<Array<{ path: string; kind: 'directory' | 'file' }>>
   saveConversationFileAccess(
     conversationId: string,
     input: WorkspaceSettingsInput

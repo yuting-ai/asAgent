@@ -94,6 +94,13 @@ type TavilySettingsStatus = {
   api_key_saved: boolean
 }
 
+type SavedProviderConfigStatus = {
+  location: 'local' | 'external'
+  model: string
+  base_url: string
+  api_key_saved: boolean
+}
+
 type ModelSettingsStatus = {
   configured: boolean
   active: boolean
@@ -102,6 +109,7 @@ type ModelSettingsStatus = {
   api_key_saved: boolean
   model: string | null
   base_url: string | null
+  saved_providers?: Record<string, SavedProviderConfigStatus>
 }
 
 type AgentSettingsStatus = {
@@ -214,7 +222,7 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:save-agent-settings', input),
   getConversationFileAccess: (conversationId: string): Promise<WorkspaceSettingsStatus> =>
     ipcRenderer.invoke('desktop:get-conversation-file-access', conversationId),
-  chooseWorkspacePath: (): Promise<{ path: string; kind: 'directory' | 'file' } | null> =>
+  chooseWorkspacePath: (): Promise<Array<{ path: string; kind: 'directory' | 'file' }>> =>
     ipcRenderer.invoke('desktop:choose-workspace-path'),
   saveConversationFileAccess: (
     conversationId: string,

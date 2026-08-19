@@ -1043,21 +1043,23 @@ app.whenReady().then(async () => {
 
     assertTrustedRenderer(frame.url)
     const selection = await dialog.showOpenDialog({
-      properties: ['openFile', 'openDirectory']
+      properties: ['openFile', 'openDirectory', 'multiSelections']
     })
-    const selectedPath = selection.filePaths[0]
-    if (selection.canceled || selectedPath === undefined) {
-      return null
+    if (selection.canceled || selection.filePaths.length === 0) {
+      return []
     }
 
-    const selectedPathStats = await stat(selectedPath)
-    if (!selectedPathStats.isDirectory() && !selectedPathStats.isFile()) {
-      throw new Error('Selected workspace path is invalid.')
+    const results: Array<{ path: string; kind: 'directory' | 'file' }> = []
+    for (const selectedPath of selection.filePaths) {
+      const selectedPathStats = await stat(selectedPath)
+      if (selectedPathStats.isDirectory() || selectedPathStats.isFile()) {
+        results.push({
+          path: selectedPath,
+          kind: selectedPathStats.isDirectory() ? 'directory' : 'file'
+        })
+      }
     }
-    return {
-      path: selectedPath,
-      kind: selectedPathStats.isDirectory() ? 'directory' : 'file'
-    }
+    return results
   })
 
   ipcMain.handle(

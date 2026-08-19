@@ -115,6 +115,7 @@ async def test_save_keeps_key_out_of_provider_config_and_preserves_other_profile
     assert await connections.get(MODEL_CONNECTION_ID) is not None
     assert set(load_provider_profiles(config_dir).providers) == {
         "other",
+        "deepseek",
         MODEL_PROFILE_NAME,
     }
     assert "secret-model-key" not in (config_dir / "providers.toml").read_text(
@@ -131,6 +132,106 @@ async def test_save_keeps_key_out_of_provider_config_and_preserves_other_profile
     reloaded_status = await reloaded.get_status()
     assert reloaded_status.location is ProviderLocation.EXTERNAL
     assert reloaded_status.active is True
+    assert "deepseek" in reloaded_status.saved_providers
+    assert reloaded_status.saved_providers["deepseek"].model == "deepseek-chat"
+    assert reloaded_status.saved_providers["deepseek"].api_key_saved is True
+
+
+@pytest.mark.asyncio
+async def test_switching_between_multiple_providers_preserves_all_configs_and_keys(
+    tmp_path: Path,
+) -> None:
+    settings, credentials, _connections = _settings(tmp_path)
+
+    # 1. Save DeepSeek with key
+    status1 = await settings.save(
+        location=ProviderLocation.EXTERNAL,
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com/v1",
+        api_key="deepseek-secret-key",
+    )
+    assert status1.saved_providers["deepseek"].model == "deepseek-chat"
+    assert status1.saved_providers["deepseek"].api_key_saved is True
+
+    # 2. Save Ollama (local) without key
+    status2 = await settings.save(
+        location=ProviderLocation.LOCAL,
+        model="qwen2.5:7b",
+        base_url="http://127.0.0.1:11434/v1",
+    )
+    assert status2.location is ProviderLocation.LOCAL
+    assert status2.model == "qwen2.5:7b"
+    assert status2.saved_providers["ollama"].model == "qwen2.5:7b"
+    assert status2.saved_providers["deepseek"].model == "deepseek-chat"
+    assert status2.saved_providers["deepseek"].api_key_saved is True
+
+    # 3. Switch back to DeepSeek without re-typing API key
+    status3 = await settings.save(
+        location=ProviderLocation.EXTERNAL,
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com/v1",
+    )
+    assert status3.location is ProviderLocation.EXTERNAL
+    assert status3.active is True
+    assert status3.api_key_saved is True
+    assert status3.saved_providers["ollama"].model == "qwen2.5:7b"
+    assert status3.saved_providers["deepseek"].model == "deepseek-chat"
+
+
+@pytest.mark.asyncio
+async def test_restart_between_saves_preserves_deepseek_key(
+    tmp_path: Path,
+) -> None:
+    """Simulate: save DeepSeek → restart → save Ollama → restart → switch back.
+
+    Credentials and config_dir persist across restarts; ModelSettings is re-created
+    each time (like the real app does).
+    """
+    config_dir = tmp_path / "config"
+    credentials = InMemoryCredentialStore()
+    connections = InMemoryConnectionRepository()
+
+    def make_settings() -> ModelSettings:
+        return ModelSettings(
+            config_dir=config_dir,
+            connections=connections,
+            credential_store=credentials,
+            clock=lambda: _NOW,
+        )
+
+    # ── Session 1: save DeepSeek with API key ──
+    s1 = make_settings()
+    await s1.save(
+        location=ProviderLocation.EXTERNAL,
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com/v1",
+        api_key="deepseek-secret-key",
+    )
+
+    # ── Session 2 (restart): save Ollama (local, no key) ──
+    s2 = make_settings()
+    status_before_save = await s2.get_status()
+    assert status_before_save.saved_providers["deepseek"].api_key_saved is True, (
+        "DeepSeek key should be visible after restart, before saving Ollama"
+    )
+
+    await s2.save(
+        location=ProviderLocation.LOCAL,
+        model="qwen2.5:7b",
+        base_url="http://127.0.0.1:11434/v1",
+    )
+
+    # ── Session 3 (restart): get_status and check DeepSeek key is still there ──
+    s3 = make_settings()
+    status3 = await s3.get_status()
+    assert status3.location is ProviderLocation.LOCAL
+    assert status3.model == "qwen2.5:7b"
+    assert "deepseek" in status3.saved_providers, (
+        "DeepSeek profile must survive in providers.toml across restarts"
+    )
+    assert status3.saved_providers["deepseek"].api_key_saved is True, (
+        "DeepSeek API key must remain in credential store after saving Ollama"
+    )
 
 
 @pytest.mark.asyncio

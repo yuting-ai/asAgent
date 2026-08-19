@@ -254,29 +254,50 @@ body.is-resizing-columns {
   padding-right: 0;
 }
 
-.rail-recents-new {
+.rail-item-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.rail-item-container .rail-item {
+  flex: 1;
+  padding-right: 32px;
+}
+
+.rail-action-button {
+  position: absolute;
+  right: 6px;
   display: grid;
   width: 22px;
   height: 22px;
-  margin: -4px 6px 4px 0;
   border-radius: 6px;
   place-items: center;
   color: var(--text-faint);
+  transition:
+    color 120ms ease-out,
+    background-color 120ms ease-out;
 }
 
-.rail-recents-new:hover:not(:disabled),
-.rail-recents-new:focus-visible {
-  background: var(--bg-inset);
+.rail-action-button:hover:not(:disabled),
+.rail-action-button:focus-visible {
+  background: var(--bg-raised);
   color: var(--brass);
 }
 
-.rail-recents-new:disabled {
+.rail-action-button:disabled {
   opacity: 0.4;
+  cursor: default;
 }
 
-.rail-recents-new svg {
-  width: 12px;
-  height: 12px;
+.rail-action-button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.app.rail-collapsed .rail-action-button {
+  display: none;
 }
 
 .rail-recents-list {
@@ -376,7 +397,7 @@ body.is-resizing-columns {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -945,11 +966,41 @@ body.is-resizing-columns {
   margin-top: 12px;
 }
 
+.settings-text-input::placeholder {
+  color: var(--text-faint);
+  letter-spacing: 0.5px;
+}
+
 .settings-text-input:disabled {
   opacity: 0.6;
 }
 
 .settings-text-input:focus {
+  border-color: var(--brass-dim);
+  outline: 2px solid color-mix(in srgb, var(--brass) 14%, transparent);
+  outline-offset: 1px;
+}
+
+.settings-select {
+  width: 100%;
+  max-width: 420px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+}
+
+.settings-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.settings-select:focus {
   border-color: var(--brass-dim);
   outline: 2px solid color-mix(in srgb, var(--brass) 14%, transparent);
   outline-offset: 1px;
@@ -1150,7 +1201,8 @@ body.is-resizing-columns {
   grid-column: 1 / -1;
 }
 
-.model-field .settings-text-input {
+.model-field .settings-text-input,
+.model-field .settings-select {
   max-width: none;
 }
 
@@ -2191,7 +2243,7 @@ body.is-resizing-columns {
 .chat-thread-name {
   overflow: hidden;
   color: var(--text);
-  font-size: 12.5px;
+  font-size: 14px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2205,7 +2257,7 @@ body.is-resizing-columns {
   margin-top: 3px;
   color: var(--text-faint);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
   transition: opacity 120ms ease-out;
 }
 
@@ -2347,7 +2399,7 @@ body.is-resizing-columns {
 .msg-bubble {
   padding: 10px 13px;
   border-radius: 12px;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
@@ -2460,7 +2512,7 @@ body.is-resizing-columns {
 
 .markdown-content h3,
 .markdown-content h4 {
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .markdown-content table {
@@ -2470,7 +2522,8 @@ body.is-resizing-columns {
   margin: 0 0 10px;
   overflow-x: auto;
   border: 1px solid var(--line-soft);
-  border-radius: 8px;
+  border-radius: 6px;
+  background: var(--bg-raised);
   border-spacing: 0;
   border-collapse: separate;
   font-size: 12px;
@@ -2507,7 +2560,6 @@ body.is-resizing-columns {
   background: var(--bg-inset);
   color: var(--text);
   font-family: var(--mono);
-  font-size: 0.9em;
 }
 
 .markdown-content pre {
@@ -2521,7 +2573,7 @@ body.is-resizing-columns {
 .markdown-content pre code {
   padding: 0;
   background: transparent;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -2995,6 +3047,90 @@ body.is-resizing-columns {
 .chat-attach-btn svg {
   width: 21px;
   height: 21px;
+}
+
+.chat-composer-context {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.chat-context-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  max-width: 100%;
+}
+
+.chat-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-inset);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  user-select: none;
+  max-width: 220px;
+  transition:
+    border-color 0.14s ease,
+    background-color 0.14s ease;
+}
+
+.chat-context-chip:hover {
+  border-color: var(--brass-dim);
+  background: var(--accent-soft);
+}
+
+.chat-context-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.chat-context-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-context-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition:
+    color 0.14s ease,
+    background-color 0.14s ease;
+}
+
+.chat-context-chip-remove:hover:not(:disabled) {
+  background: rgba(226, 87, 76, 0.14);
+  color: var(--red);
+}
+
+.chat-context-chip-remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-context-chip-remove svg {
+  width: 11px;
+  height: 11px;
 }
 
 .chat-composer-status {
@@ -3754,7 +3890,7 @@ body.is-resizing-columns {
   border-radius: 14px 14px 4px 14px;
   background: var(--bg-raised);
   color: var(--text);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -3955,7 +4091,7 @@ body.is-resizing-columns {
   background: none;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.45;
   overflow-y: auto;
   resize: none;

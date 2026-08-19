@@ -56,10 +56,13 @@ class ConversationWorkspaceSettings:
             "conversation:",
             *(f"- Folder: {path}" for path in status.additional_roots),
             *(f"- File: {path}" for path in status.additional_files),
-            "When the user refers to an attached or shared file or folder "
-            "without naming a path, use the matching path above. Use "
-            "filesystem.list for a folder and filesystem.read_file for a file. "
-            "Do not claim that a path is unavailable before using the relevant tool.",
+            "When the user refers to attached or shared folders or files without "
+            "naming a specific path, inspect all relevant shared paths above using "
+            "filesystem.list for folders and filesystem.read_file for files. If "
+            "the user asks a question that applies to shared folders or files in "
+            "general (e.g. counting files, listing contents, or searching), inspect "
+            "each shared path and summarize the findings per path. Do not claim "
+            "that a path is unavailable before using the relevant tool.",
         ]
         return "\n".join(lines)
 
