@@ -20,10 +20,8 @@ class _SqliteDbApiConnection(Protocol):
 
 
 def create_sqlite_async_engine(database_path: Path) -> AsyncEngine:
-    if isinstance(database_path, AsyncEngine):
-        raise TypeError(
-            "database_path must be a Path or str, not an AsyncEngine instance"
-        )
+    if not isinstance(database_path, Path):
+        raise TypeError("database_path must be a Path instance")
 
     database_url = URL.create(
         "sqlite+aiosqlite",
