@@ -1,7 +1,10 @@
 node_modules
 dist
 out
-build
-.DS_Store
+build/dist
+build/work
+build/spec
+build/temp_*
+scripts/
 .eslintcache
 *.log*

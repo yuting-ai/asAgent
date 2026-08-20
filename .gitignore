@@ -14,8 +14,11 @@ coverage.xml
 htmlcov/
 
 # Python build artifacts
-build/
-desktop/build/
+/build/
+desktop/build/dist/
+desktop/build/work/
+desktop/build/spec/
+desktop/scripts/
 dist/
 *.egg-info/
 

@@ -99,7 +99,7 @@ function createWindow(): void {
           trafficLightPosition: { x: 6, y: 12 }
         }
       : {}),
-    ...(process.platform === 'linux' ? { icon } : {}),
+    icon,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -422,6 +422,14 @@ function broadcastBrowserTabState(state: BrowserTabState): void {
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.asagent.desktop')
+
+  if (process.platform === 'darwin' && app.dock) {
+    try {
+      app.dock.setIcon(icon)
+    } catch {
+      // Ignore if dock icon cannot be set
+    }
+  }
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
