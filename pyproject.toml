@@ -10,6 +10,7 @@ dependencies = [
     "jsonschema>=4.26,<5",
     "keyring>=25,<26",
     "pydantic>=2,<3",
+    "send2trash>=2.1.0",
     "sqlalchemy[asyncio]>=2.0,<2.1",
     "uvicorn>=0.30,<1",
 ]
@@ -29,6 +30,7 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.1",
     "types-jsonschema>=4.26,<5",
+    "types-send2trash>=2.1.0.20260408",
 ]
 
 [tool.pytest.ini_options]

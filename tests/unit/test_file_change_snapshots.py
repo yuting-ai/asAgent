@@ -17,7 +17,7 @@ def test_saves_reads_and_deletes_private_snapshot(tmp_path: Path) -> None:
 
 def test_rejects_oversized_snapshot(tmp_path: Path) -> None:
     store = FileChangeSnapshotStore(tmp_path)
-    with pytest.raises(ValueError, match="5 MiB"):
+    with pytest.raises(ValueError, match="20 MiB"):
         store.save(FileChangeId("change-1"), b"x" * (store.max_snapshot_bytes + 1))
 
 

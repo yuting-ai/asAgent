@@ -747,6 +747,23 @@ function BrowserAgentToggleIcon({ expanded }: { expanded: boolean }): React.JSX.
   )
 }
 
+function GlobeIcon(): React.JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20" />
+    </svg>
+  )
+}
+
 export default function App(): React.JSX.Element {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
   const [backendStatus, setBackendStatus] = useState<'checking' | 'ready' | 'unavailable'>(
@@ -797,6 +814,12 @@ export default function App(): React.JSX.Element {
   const [isReplacingTavilyKey, setIsReplacingTavilyKey] = useState(false)
   const [isTavilyLoading, setIsTavilyLoading] = useState(true)
   const [isTavilyBusy, setIsTavilyBusy] = useState(false)
+  const [webSearchEnabled, setWebSearchEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('asagent.webSearchEnabled')
+    return saved !== null ? saved === 'true' : true
+  })
+  const webSearchEnabledRef = useRef(webSearchEnabled)
+  webSearchEnabledRef.current = webSearchEnabled
   const [modelSettings, setModelSettings] = useState<ModelSettingsStatus | null>(null)
   const [modelLoadError, setModelLoadError] = useState<string | null>(null)
   const [modelActionError, setModelActionError] = useState<string | null>(null)
@@ -1395,6 +1418,16 @@ export default function App(): React.JSX.Element {
     })
 
     const removeApprovalListener = window.desktop.onToolApprovalRequested((approval) => {
+      if (
+        webSearchEnabledRef.current &&
+        (approval.tool_id.includes('tavily') ||
+          approval.display_name.toLowerCase().includes('search'))
+      ) {
+        void window.desktop
+          .decideToolApproval(approval.approval_id, 'allow_conversation')
+          .catch(() => undefined)
+        return
+      }
       setPendingApproval(approval)
       setIsDecidingApproval(false)
       setRunActivityWaiting(approval.run_id, `Waiting for approval: ${approval.display_name}`, null)
@@ -2165,6 +2198,18 @@ export default function App(): React.JSX.Element {
     setTavilyApiKey('')
     setShowTavilyKeyInput(false)
     setIsReplacingTavilyKey(false)
+  }
+
+  function handleToggleWebSearch(): void {
+    if (tavilySettings !== null && !tavilySettings.enabled && !tavilySettings.api_key_saved) {
+      setErrorMessage('Web search requires a Tavily API key. Configure it in Preferences.')
+      return
+    }
+    setWebSearchEnabled((prev) => {
+      const next = !prev
+      localStorage.setItem('asagent.webSearchEnabled', String(next))
+      return next
+    })
   }
 
   async function handleTavilyToggle(enabled: boolean): Promise<void> {
@@ -3565,36 +3610,52 @@ export default function App(): React.JSX.Element {
                               )
                             })}
                           </div>
-                        ) : (
+                        ) : chatRunIsActive || activeRun !== null ? (
                           <span className="chat-composer-status">
                             {chatRunIsActive
                               ? 'asAgent is working'
-                              : activeRun === null
-                                ? 'Add a file or folder to this conversation'
-                                : 'Another conversation is running'}
+                              : 'Another conversation is running'}
                           </span>
-                        )}
+                        ) : null}
                       </div>
-                      {!chatRunIsActive ? (
+                      <div className="chat-composer-actions">
                         <button
-                          aria-label={isSubmittingMessage ? 'Sending' : 'Send message'}
-                          className="composer-send"
-                          disabled={selectedConversationId === null || !draft.trim() || isBusy}
-                          title={isSubmittingMessage ? 'Sending…' : 'Send message'}
-                          type="submit"
-                        >
-                          <Icon path="M12 19V5m-6 6 6-6 6 6" />
-                        </button>
-                      ) : (
-                        <button
-                          className="composer-stop"
-                          disabled={isCancellingRun}
-                          onClick={() => void cancelActiveRun()}
+                          aria-label="Toggle web search"
+                          aria-pressed={webSearchEnabled}
+                          className={`chat-search-btn${webSearchEnabled ? ' active' : ''}`}
+                          disabled={backendStatus !== 'ready'}
+                          onClick={handleToggleWebSearch}
+                          title={
+                            webSearchEnabled
+                              ? 'Web search enabled (auto-allows search tools)'
+                              : 'Enable web search'
+                          }
                           type="button"
                         >
-                          {isCancellingRun ? 'Stopping…' : 'Stop'}
+                          <GlobeIcon />
+                          <span className="chat-search-btn-label">Search</span>
                         </button>
-                      )}
+                        {!chatRunIsActive ? (
+                          <button
+                            aria-label={isSubmittingMessage ? 'Sending' : 'Send message'}
+                            className="composer-send"
+                            disabled={selectedConversationId === null || !draft.trim() || isBusy}
+                            title={isSubmittingMessage ? 'Sending…' : 'Send message'}
+                            type="submit"
+                          >
+                            <Icon path="M12 19V5m-6 6 6-6 6 6" />
+                          </button>
+                        ) : (
+                          <button
+                            className="composer-stop"
+                            disabled={isCancellingRun}
+                            onClick={() => void cancelActiveRun()}
+                            type="button"
+                          >
+                            {isCancellingRun ? 'Stopping…' : 'Stop'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </form>

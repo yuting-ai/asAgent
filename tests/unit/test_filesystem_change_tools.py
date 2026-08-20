@@ -63,9 +63,11 @@ async def test_filesystem_change_tools_apply_reversible_run_linked_changes(
     }
     assert all(
         tool.definition.required_permissions == frozenset({"filesystem.write"})
-        and tool.definition.requires_approval
         for tool in (create, replace, delete)
     )
+    assert create.definition.requires_approval is True
+    assert replace.definition.requires_approval is True
+    assert delete.definition.requires_approval is False
 
     created = json.loads(
         await create.execute({"path": str(workspace / "created.txt"), "content": "new"})

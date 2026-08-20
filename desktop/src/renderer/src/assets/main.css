@@ -3045,8 +3045,8 @@ body.is-resizing-columns {
 }
 
 .chat-attach-btn svg {
-  width: 21px;
-  height: 21px;
+  width: 20px;
+  height: 20px;
 }
 
 .chat-composer-context {
@@ -3167,9 +3167,60 @@ body.is-resizing-columns {
   color: var(--text-faint);
 }
 
+.chat-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.chat-search-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease;
+  user-select: none;
+}
+
+.chat-search-btn:hover:not(:disabled) {
+  border-color: var(--line);
+  background: var(--bg-inset);
+  color: var(--text);
+}
+
+.chat-search-btn.active {
+  border-color: color-mix(in srgb, var(--brass) 24%, transparent);
+  background: var(--accent-soft);
+  color: var(--brass);
+  font-weight: 550;
+}
+
+.chat-search-btn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.chat-search-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .chat-composer .composer-send {
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background: var(--brass);
   box-shadow: none;
@@ -3186,7 +3237,9 @@ body.is-resizing-columns {
 
 .chat-composer .composer-stop {
   height: 36px;
+  padding: 0 14px;
   border-radius: 18px;
+  font-size: 13px;
 }
 
 .chat-error {

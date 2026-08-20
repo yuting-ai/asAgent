@@ -113,6 +113,28 @@ async def test_deletes_and_reverts_utf8_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_deletes_and_reverts_binary_file(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "installer.dmg"
+    binary_data = b"\x00\xff\xfe\x00\x89PNG\r\n\x1a\n" + b"binary data" * 100
+    target.write_bytes(binary_data)
+    repository = Repository()
+    service = _service(workspace, tmp_path / "data", repository)
+
+    change = await service.delete_file(
+        run_id=RunId("run-1"), path=Path("installer.dmg")
+    )
+    assert not target.exists()
+    assert change.operation is FileChangeOperation.DELETE
+    assert change.snapshot_ref == "change-1.before"
+
+    reverted = await service.revert(change.file_change_id)
+    assert target.read_bytes() == binary_data
+    assert reverted.status is FileChangeStatus.REVERTED
+
+
+@pytest.mark.asyncio
 async def test_revert_detects_later_user_change(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

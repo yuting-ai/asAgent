@@ -289,7 +289,7 @@ class ToolApprovalResponse(BaseModel):
                 "Replace this UTF-8 text file and save a private undo snapshot."
             ),
             "filesystem.delete_file": (
-                "Delete this UTF-8 text file and save a private undo snapshot."
+                "Delete this file and move it to the Trash with an undo snapshot."
             ),
         }
         if request.definition.tool_id in summaries:

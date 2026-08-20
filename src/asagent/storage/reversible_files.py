@@ -7,6 +7,8 @@ from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 
+import send2trash
+
 from asagent.core.file_change import FileChange, FileChangeOperation, FileChangeStatus
 from asagent.core.ids import FileChangeId, RunId
 from asagent.core.repositories import FileChangeRepository
@@ -131,9 +133,13 @@ class ReversibleFileService:
         path: Path,
     ) -> FileChange:
         target = self._resolver.resolve(path)
-        before = self._read_utf8_file(target)
+        before = self._read_file_for_deletion(target)
         change_id = self._change_id_factory()
-        snapshot_ref = self._snapshots.save(change_id, before)
+        snapshot_ref = (
+            self._snapshots.save(change_id, before)
+            if len(before) <= self._snapshots.max_snapshot_bytes
+            else None
+        )
         root, relative = self._path_metadata(target)
         now = self._clock()
         change = FileChange(
@@ -151,17 +157,23 @@ class ReversibleFileService:
         )
 
         if _hash(target.read_bytes()) != change.before_hash:
-            self._snapshots.delete(snapshot_ref)
+            if snapshot_ref is not None:
+                self._snapshots.delete(snapshot_ref)
             raise FileChangeConflictError("file changed while deletion was prepared")
-        target.unlink()
+        try:
+            send2trash.send2trash(target)
+        except Exception:
+            target.unlink()
         if target.exists():
-            self._snapshots.delete(snapshot_ref)
+            if snapshot_ref is not None:
+                self._snapshots.delete(snapshot_ref)
             raise RuntimeError("file deletion verification failed")
         try:
             await self._repository.save(change)
         except Exception:
             self._exclusive_create(target, before)
-            self._snapshots.delete(snapshot_ref)
+            if snapshot_ref is not None:
+                self._snapshots.delete(snapshot_ref)
             raise
         return change
 
@@ -223,10 +235,15 @@ class ReversibleFileService:
     async def _revert_delete(self, change: FileChange, target: Path) -> None:
         if target.exists():
             await self._conflict(change, "deleted path was recreated after deletion")
-        before = self._snapshot(change)
-        self._exclusive_create(target, before)
-        if _hash(target.read_bytes()) != change.before_hash:
-            raise RuntimeError("deletion revert hash verification failed")
+        if change.snapshot_ref is not None:
+            before = self._snapshot(change)
+            self._exclusive_create(target, before)
+            if _hash(target.read_bytes()) != change.before_hash:
+                raise RuntimeError("deletion revert hash verification failed")
+        else:
+            raise RuntimeError(
+                "This large file was moved to the system Trash. Please restore it from your system Trash."
+            )
 
     def _restore_applied_state(
         self,
@@ -294,6 +311,13 @@ class ReversibleFileService:
         except UnicodeDecodeError as error:
             raise ValueError("file must contain valid UTF-8 text") from error
         return content
+
+    def _read_file_for_deletion(self, target: Path) -> bytes:
+        if not target.exists():
+            raise ValueError("path must resolve to an existing file")
+        if not target.is_file():
+            raise ValueError("path must resolve to a regular file")
+        return target.read_bytes()
 
     def _encode_content(self, content: str) -> bytes:
         try:

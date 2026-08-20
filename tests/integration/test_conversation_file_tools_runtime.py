@@ -147,8 +147,7 @@ async def test_runtime_uses_only_the_current_conversations_file_scope(
             provider.requests[0].system_prompt
         )
         assert (
-            "attached or shared folders or files"
-            in provider.requests[0].system_prompt
+            "attached or shared folders or files" in provider.requests[0].system_prompt
         )
         assert str(external_file.resolve()) not in provider.requests[2].system_prompt
         assert provider.requests[1].messages[-1].role is ModelMessageRole.TOOL

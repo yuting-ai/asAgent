@@ -133,4 +133,3 @@ async def test_conversation_workspace_settings_model_context(
     assert f"- Folder: {folder_b.resolve()}" in context
     assert f"- File: {file_a.resolve()}" in context
     assert "inspect all relevant shared paths above" in context
-

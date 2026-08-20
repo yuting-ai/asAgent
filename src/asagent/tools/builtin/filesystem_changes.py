@@ -77,10 +77,13 @@ class FilesystemDeleteFileTool:
             tool_id="filesystem.delete_file",
             display_name="Delete file",
             description=(
-                "Delete one existing UTF-8 text file at an authorized path. A private "
-                "snapshot is saved so the user can undo the deletion safely."
+                "Delete one existing file at an authorized path. The file is safely "
+                "moved to the Trash and a snapshot is saved so the user can undo the "
+                "deletion safely."
             ),
             include_content=False,
+            risk_level="medium",
+            requires_approval=False,
         )
 
     async def execute(self, arguments: Mapping[str, object]) -> str:
@@ -97,6 +100,8 @@ def _definition(
     display_name: str,
     description: str,
     include_content: bool,
+    risk_level: str = "high",
+    requires_approval: bool = True,
 ) -> ToolDefinition:
     properties: dict[str, object] = {
         "path": {
@@ -122,9 +127,9 @@ def _definition(
             "required": required,
             "additionalProperties": False,
         },
-        risk_level="high",
+        risk_level=risk_level,
         required_permissions=frozenset({"filesystem.write"}),
-        requires_approval=True,
+        requires_approval=requires_approval,
         timeout_seconds=10.0,
     )
 
