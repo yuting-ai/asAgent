@@ -142,6 +142,21 @@ interface BrowserSessionSnapshot {
   tabs: BrowserSessionTab[]
 }
 
+interface StorageSettingsStatus {
+  snapshot_retention_days: number
+  usage_bytes: number
+  snapshot_count: number
+}
+
+interface StorageSettingsInput {
+  snapshot_retention_days: number
+}
+
+interface ClearStorageResult {
+  freed_bytes: number
+  deleted_count: number
+}
+
 interface DesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>
   showBrowser(
@@ -191,6 +206,9 @@ interface DesktopBridge {
   deleteModelSettings(): Promise<ModelSettingsStatus>
   getAgentSettings(): Promise<AgentSettingsStatus>
   saveAgentSettings(input: AgentSettingsInput): Promise<AgentSettingsStatus>
+  getStorageSettings(): Promise<StorageSettingsStatus>
+  saveStorageSettings(input: StorageSettingsInput): Promise<StorageSettingsStatus>
+  clearStorageSnapshots(): Promise<ClearStorageResult>
   getConversationFileAccess(conversationId: string): Promise<WorkspaceSettingsStatus>
   chooseWorkspacePath(): Promise<Array<{ path: string; kind: 'directory' | 'file' }>>
   saveConversationFileAccess(

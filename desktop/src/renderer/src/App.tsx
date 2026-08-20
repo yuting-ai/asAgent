@@ -143,6 +143,12 @@ type AgentSettingsStatus = {
   max_steps: number
 }
 
+type StorageSettingsStatus = {
+  snapshot_retention_days: number
+  usage_bytes: number
+  snapshot_count: number
+}
+
 type WorkspaceSettingsStatus = {
   workspace_root: string
   additional_roots: string[]
@@ -180,6 +186,19 @@ const MODEL_SETTINGS_EXTERNAL_KEY_REQUIRED = 'Enter an API key for the external 
 const AGENT_SETTINGS_LOAD_ERROR = 'Agent settings could not be loaded.'
 const AGENT_SETTINGS_UPDATE_ERROR = 'Agent settings could not be updated.'
 const AGENT_SETTINGS_REQUIRED = 'Enter a whole number from 1 to 50.'
+const STORAGE_SETTINGS_LOAD_ERROR = 'Storage settings could not be loaded.'
+const STORAGE_SETTINGS_UPDATE_ERROR = 'Storage settings could not be updated.'
+const STORAGE_CLEAR_CONFIRM =
+  'Clear all undo snapshots? This will immediately free disk space, but existing file changes cannot be undone from the chat.'
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
+}
+
 const MODEL_DELETE_CONFIRM = 'Remove the saved model configuration and API key?'
 const CONVERSATION_DELETE_CONFIRM = 'Delete this conversation? This cannot be undone.'
 const BROWSER_ADDRESS_ERROR =
@@ -857,6 +876,13 @@ export default function App(): React.JSX.Element {
   const [agentActionError, setAgentActionError] = useState<string | null>(null)
   const [isAgentLoading, setIsAgentLoading] = useState(true)
   const [isAgentBusy, setIsAgentBusy] = useState(false)
+  const [storageSettings, setStorageSettings] = useState<StorageSettingsStatus | null>(null)
+  const [storageRetentionDays, setStorageRetentionDays] = useState(7)
+  const [storageLoadError, setStorageLoadError] = useState<string | null>(null)
+  const [storageActionError, setStorageActionError] = useState<string | null>(null)
+  const [storageActionSuccess, setStorageActionSuccess] = useState<string | null>(null)
+  const [isStorageLoading, setIsStorageLoading] = useState(true)
+  const [isStorageBusy, setIsStorageBusy] = useState(false)
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettingsStatus | null>(null)
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(true)
   const [isWorkspaceBusy, setIsWorkspaceBusy] = useState(false)
@@ -1246,6 +1272,35 @@ export default function App(): React.JSX.Element {
     }
 
     void loadAgentSettings()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadStorageSettings(): Promise<void> {
+      setIsStorageLoading(true)
+      try {
+        const status = await window.desktop.getStorageSettings()
+        if (!cancelled) {
+          setStorageSettings(status)
+          setStorageRetentionDays(status.snapshot_retention_days)
+          setStorageLoadError(null)
+        }
+      } catch {
+        if (!cancelled) {
+          setStorageLoadError(STORAGE_SETTINGS_LOAD_ERROR)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsStorageLoading(false)
+        }
+      }
+    }
+
+    void loadStorageSettings()
     return () => {
       cancelled = true
     }
@@ -2453,6 +2508,52 @@ export default function App(): React.JSX.Element {
       setAgentActionError(AGENT_SETTINGS_UPDATE_ERROR)
     } finally {
       setIsAgentBusy(false)
+    }
+  }
+
+  async function handleSaveStorageRetention(days: number): Promise<void> {
+    if (isStorageBusy) {
+      return
+    }
+
+    setIsStorageBusy(true)
+    setStorageActionError(null)
+    setStorageActionSuccess(null)
+    try {
+      const status = await window.desktop.saveStorageSettings({ snapshot_retention_days: days })
+      setStorageSettings(status)
+      setStorageRetentionDays(status.snapshot_retention_days)
+      setStorageActionSuccess('Snapshot retention saved.')
+    } catch {
+      setStorageActionError(STORAGE_SETTINGS_UPDATE_ERROR)
+    } finally {
+      setIsStorageBusy(false)
+    }
+  }
+
+  async function handleClearStorageSnapshots(): Promise<void> {
+    if (isStorageBusy) {
+      return
+    }
+
+    if (!window.confirm(STORAGE_CLEAR_CONFIRM)) {
+      return
+    }
+
+    setIsStorageBusy(true)
+    setStorageActionError(null)
+    setStorageActionSuccess(null)
+    try {
+      const result = await window.desktop.clearStorageSnapshots()
+      const status = await window.desktop.getStorageSettings()
+      setStorageSettings(status)
+      setStorageActionSuccess(
+        `Cleared ${formatBytes(result.freed_bytes)} (${result.deleted_count} snapshot${result.deleted_count === 1 ? '' : 's'} removed).`
+      )
+    } catch {
+      setStorageActionError('Failed to clear snapshots.')
+    } finally {
+      setIsStorageBusy(false)
     }
   }
 
@@ -4745,6 +4846,84 @@ export default function App(): React.JSX.Element {
 
                 {tavilyActionError !== null ? (
                   <p className="settings-section-error">{tavilyActionError}</p>
+                ) : null}
+              </section>
+
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div>
+                    <div className="settings-section-eyebrow">Data & Space</div>
+                    <div className="settings-section-title">Storage & Snapshots</div>
+                    <p className="settings-section-copy">
+                      Manage undo snapshots for reversible file edits and deletions. Automatic
+                      cleanup purges older snapshots to keep disk space lean.
+                    </p>
+                  </div>
+                </div>
+
+                {isStorageLoading ? (
+                  <p className="settings-section-status">Loading storage settings…</p>
+                ) : null}
+
+                {storageLoadError !== null ? (
+                  <p className="settings-section-error">{storageLoadError}</p>
+                ) : null}
+
+                {!isStorageLoading && storageLoadError === null && storageSettings !== null ? (
+                  <div className="settings-key-form">
+                    <div className="storage-usage-row">
+                      <span className="settings-field-label">Current snapshot usage</span>
+                      <span className="storage-usage-value">
+                        {formatBytes(storageSettings.usage_bytes)} ({storageSettings.snapshot_count}{' '}
+                        snapshot{storageSettings.snapshot_count === 1 ? '' : 's'})
+                      </span>
+                    </div>
+
+                    <label className="settings-field-label" htmlFor="storage-retention">
+                      Snapshot retention
+                    </label>
+                    <select
+                      className="settings-text-input settings-select"
+                      disabled={isStorageBusy}
+                      id="storage-retention"
+                      onChange={(event) => {
+                        void handleSaveStorageRetention(Number(event.target.value))
+                      }}
+                      value={storageRetentionDays}
+                    >
+                      <option value={1}>24 hours (1 day)</option>
+                      <option value={3}>3 days</option>
+                      <option value={7}>7 days (Recommended)</option>
+                      <option value={30}>30 days</option>
+                      <option value={0}>Never delete automatically</option>
+                    </select>
+
+                    <div className="settings-card-actions" style={{ marginTop: '12px' }}>
+                      <button
+                        className="settings-button settings-button-danger"
+                        disabled={isStorageBusy || storageSettings.snapshot_count === 0}
+                        onClick={() => {
+                          void handleClearStorageSnapshots()
+                        }}
+                        type="button"
+                      >
+                        Clear all snapshots now
+                      </button>
+                    </div>
+
+                    {storageActionSuccess !== null ? (
+                      <p
+                        className="settings-section-status"
+                        style={{ color: 'var(--success, #2e7d32)', marginTop: '8px' }}
+                      >
+                        {storageActionSuccess}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {storageActionError !== null ? (
+                  <p className="settings-section-error">{storageActionError}</p>
                 ) : null}
               </section>
             </div>

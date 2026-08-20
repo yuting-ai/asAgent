@@ -17,6 +17,7 @@ import icon from '../../resources/icon.png?asset'
 import {
   BackendLauncher,
   isToolApprovalDecision,
+  type StorageSettingsInput,
   type SubmittedMessage,
   type ToolApproval
 } from './backend_launcher'
@@ -214,6 +215,28 @@ function parseAgentSettingsInput(value: unknown): { maxSteps: number } {
   }
 
   return { maxSteps }
+}
+
+function parseStorageSettingsInput(value: unknown): StorageSettingsInput {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('Storage settings are invalid.')
+  }
+
+  const input = value as Record<string, unknown>
+  if (Object.keys(input).length !== 1 || !('snapshot_retention_days' in input)) {
+    throw new Error('Storage settings are invalid.')
+  }
+
+  const retentionDays = input['snapshot_retention_days']
+  if (
+    typeof retentionDays !== 'number' ||
+    !Number.isInteger(retentionDays) ||
+    ![0, 1, 3, 7, 30].includes(retentionDays)
+  ) {
+    throw new Error('Storage settings are invalid.')
+  }
+
+  return { snapshot_retention_days: retentionDays }
 }
 
 function parseWorkspaceSettings(value: unknown): {
@@ -1020,6 +1043,36 @@ app.whenReady().then(async () => {
 
     assertTrustedRenderer(frame.url)
     return getReadyBackendLauncher().saveAgentSettings(parseAgentSettingsInput(input))
+  })
+
+  ipcMain.handle('desktop:get-storage-settings', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().getStorageSettings()
+  })
+
+  ipcMain.handle('desktop:save-storage-settings', (event, input: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().saveStorageSettings(parseStorageSettingsInput(input))
+  })
+
+  ipcMain.handle('desktop:clear-storage-snapshots', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().clearStorageSnapshots()
   })
 
   ipcMain.handle('desktop:get-conversation-file-access', (event, conversationId: unknown) => {

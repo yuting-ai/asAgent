@@ -34,6 +34,7 @@ from asagent.bootstrap.model_settings import (
     ModelSettings,
 )
 from asagent.bootstrap.provider_factory import create_model_provider
+from asagent.bootstrap.storage_settings import StorageSettingsStore
 from asagent.bootstrap.tavily_settings import TavilySettings
 from asagent.chat.service import ChatService
 from asagent.core.connection import CredentialStore
@@ -954,6 +955,9 @@ async def _run_main(args: argparse.Namespace) -> None:
         )
         agent_settings_store = AgentSettingsStore(paths.config_dir)
         agent_settings = agent_settings_store.get()
+        storage_settings_store = StorageSettingsStore(paths.config_dir)
+        storage_settings = storage_settings_store.get()
+        file_change_snapshots.prune(storage_settings.snapshot_retention_days)
         workspace_settings = ConversationWorkspaceSettings(
             scopes=conversation_file_scopes,
             workspace_root=paths.workspace_dir,
@@ -1126,6 +1130,8 @@ async def _run_main(args: argparse.Namespace) -> None:
                     tavily_settings=tavily_settings,
                     model_settings=model_settings,
                     agent_settings=agent_settings_store,
+                    storage_settings=storage_settings_store,
+                    file_change_snapshots=file_change_snapshots,
                     workspace_settings=workspace_settings,
                     file_changes=file_changes,
                     revert_file_change=revert_file_change,

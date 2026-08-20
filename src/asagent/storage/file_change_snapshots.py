@@ -39,6 +39,52 @@ class FileChangeSnapshotStore:
         path.unlink()
         return True
 
+    def get_usage(self) -> tuple[int, int]:
+        """Return (total_bytes, snapshot_count) for all stored snapshots."""
+        if not self._root.exists():
+            return 0, 0
+        total_size = 0
+        count = 0
+        for path in self._root.iterdir():
+            if path.is_file():
+                total_size += path.stat().st_size
+                count += 1
+        return total_size, count
+
+    def clear(self) -> tuple[int, int]:
+        """Delete all stored snapshots. Return (freed_bytes, deleted_count)."""
+        if not self._root.exists():
+            return 0, 0
+        freed = 0
+        count = 0
+        for path in list(self._root.iterdir()):
+            if path.is_file():
+                try:
+                    freed += path.stat().st_size
+                    path.unlink()
+                    count += 1
+                except OSError:
+                    continue
+        return freed, count
+
+    def prune(self, max_age_days: int) -> int:
+        """Delete snapshots older than max_age_days. Return pruned count."""
+        if max_age_days <= 0 or not self._root.exists():
+            return 0
+        import time
+
+        cutoff = time.time() - (max_age_days * 86400)
+        pruned_count = 0
+        for path in list(self._root.iterdir()):
+            if path.is_file():
+                try:
+                    if path.stat().st_mtime < cutoff:
+                        path.unlink()
+                        pruned_count += 1
+                except OSError:
+                    continue
+        return pruned_count
+
     def _path_for(self, snapshot_ref: str) -> Path:
         path = self._root / snapshot_ref
         if not snapshot_ref or path.parent != self._root:

@@ -962,6 +962,34 @@ body.is-resizing-columns {
   font-size: 12.5px;
 }
 
+select.settings-select {
+  font-family: var(--sans);
+  cursor: pointer;
+}
+
+.storage-usage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 420px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
+.storage-usage-row .settings-field-label {
+  margin-bottom: 0;
+}
+
+.storage-usage-value {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--brass);
+}
+
 .settings-text-input + .settings-field-label {
   margin-top: 12px;
 }

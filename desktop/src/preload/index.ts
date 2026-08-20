@@ -127,6 +127,21 @@ type AgentSettingsInput = {
   maxSteps: number
 }
 
+type StorageSettingsStatus = {
+  snapshot_retention_days: number
+  usage_bytes: number
+  snapshot_count: number
+}
+
+type StorageSettingsInput = {
+  snapshot_retention_days: number
+}
+
+type ClearStorageResult = {
+  freed_bytes: number
+  deleted_count: number
+}
+
 type WorkspaceSettingsStatus = {
   workspace_root: string
   additional_roots: string[]
@@ -220,6 +235,12 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:get-agent-settings'),
   saveAgentSettings: (input: AgentSettingsInput): Promise<AgentSettingsStatus> =>
     ipcRenderer.invoke('desktop:save-agent-settings', input),
+  getStorageSettings: (): Promise<StorageSettingsStatus> =>
+    ipcRenderer.invoke('desktop:get-storage-settings'),
+  saveStorageSettings: (input: StorageSettingsInput): Promise<StorageSettingsStatus> =>
+    ipcRenderer.invoke('desktop:save-storage-settings', input),
+  clearStorageSnapshots: (): Promise<ClearStorageResult> =>
+    ipcRenderer.invoke('desktop:clear-storage-snapshots'),
   getConversationFileAccess: (conversationId: string): Promise<WorkspaceSettingsStatus> =>
     ipcRenderer.invoke('desktop:get-conversation-file-access', conversationId),
   chooseWorkspacePath: (): Promise<Array<{ path: string; kind: 'directory' | 'file' }>> =>

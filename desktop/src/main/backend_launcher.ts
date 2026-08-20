@@ -134,6 +134,21 @@ export type AgentSettingsInput = {
   maxSteps: number
 }
 
+export type StorageSettingsStatus = {
+  snapshot_retention_days: number
+  usage_bytes: number
+  snapshot_count: number
+}
+
+export type StorageSettingsInput = {
+  snapshot_retention_days: number
+}
+
+export type ClearStorageResult = {
+  freed_bytes: number
+  deleted_count: number
+}
+
 export type WorkspaceSettingsStatus = {
   workspace_root: string
   additional_roots: string[]
@@ -486,6 +501,20 @@ export class BackendLauncher {
     return this.requestJson('/api/v1/agent-settings', 'PUT', {
       max_steps: input.maxSteps
     })
+  }
+
+  async getStorageSettings(): Promise<StorageSettingsStatus> {
+    return this.requestJson('/api/v1/settings/storage', 'GET')
+  }
+
+  async saveStorageSettings(input: StorageSettingsInput): Promise<StorageSettingsStatus> {
+    return this.requestJson('/api/v1/settings/storage', 'PUT', {
+      snapshot_retention_days: input.snapshot_retention_days
+    })
+  }
+
+  async clearStorageSnapshots(): Promise<ClearStorageResult> {
+    return this.requestJson('/api/v1/settings/storage/clear', 'POST')
   }
 
   async getConversationFileAccess(conversationId: string): Promise<WorkspaceSettingsStatus> {

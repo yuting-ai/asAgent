@@ -38,6 +38,10 @@ from asagent.bootstrap.model_settings import (
     ModelSettingsIssue,
     ModelSettingsStatus,
 )
+from asagent.bootstrap.storage_settings import (
+    StorageSettings,
+    StorageSettingsStore,
+)
 from asagent.bootstrap.tavily_settings import (
     TavilyApiKeyMissingError,
     TavilySettings,
@@ -56,6 +60,7 @@ from asagent.core.run import Run
 from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
 from asagent.models.config import ProviderLocation
+from asagent.storage.file_change_snapshots import FileChangeSnapshotStore
 from asagent.storage.reversible_files import (
     FileChangeConflictError,
     FileChangeNotFoundError,
@@ -507,6 +512,23 @@ class UpdateWorkspaceSettingsRequest(BaseModel):
         return value
 
 
+class StorageSettingsResponse(BaseModel):
+    snapshot_retention_days: int
+    usage_bytes: int
+    snapshot_count: int
+
+
+class UpdateStorageSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot_retention_days: int
+
+
+class ClearStorageResponse(BaseModel):
+    freed_bytes: int
+    deleted_count: int
+
+
 def create_app(
     *,
     access_token: LocalApiToken,
@@ -519,6 +541,8 @@ def create_app(
     tavily_settings: TavilySettings | None = None,
     model_settings: ModelSettings | None = None,
     agent_settings: AgentSettingsStore | None = None,
+    storage_settings: StorageSettingsStore | None = None,
+    file_change_snapshots: FileChangeSnapshotStore | None = None,
     workspace_settings: ConversationWorkspaceSettings | None = None,
     file_changes: FileChangeRepository | None = None,
     revert_file_change: (
@@ -1199,6 +1223,63 @@ def create_app(
                     detail="agent settings are invalid",
                 ) from error
             return AgentSettingsResponse.from_settings(saved)
+
+    if storage_settings is not None and file_change_snapshots is not None:
+
+        @app.get(
+            "/api/v1/settings/storage",
+            response_model=StorageSettingsResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def get_storage_settings() -> StorageSettingsResponse:
+            try:
+                settings = storage_settings.get()
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="storage settings are invalid",
+                ) from error
+            usage_bytes, count = file_change_snapshots.get_usage()
+            return StorageSettingsResponse(
+                snapshot_retention_days=settings.snapshot_retention_days,
+                usage_bytes=usage_bytes,
+                snapshot_count=count,
+            )
+
+        @app.put(
+            "/api/v1/settings/storage",
+            response_model=StorageSettingsResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def update_storage_settings(
+            request: UpdateStorageSettingsRequest,
+        ) -> StorageSettingsResponse:
+            try:
+                saved = storage_settings.save(
+                    StorageSettings(
+                        snapshot_retention_days=request.snapshot_retention_days
+                    )
+                )
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="storage settings are invalid",
+                ) from error
+            usage_bytes, count = file_change_snapshots.get_usage()
+            return StorageSettingsResponse(
+                snapshot_retention_days=saved.snapshot_retention_days,
+                usage_bytes=usage_bytes,
+                snapshot_count=count,
+            )
+
+        @app.post(
+            "/api/v1/settings/storage/clear",
+            response_model=ClearStorageResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def clear_storage_snapshots() -> ClearStorageResponse:
+            freed, count = file_change_snapshots.clear()
+            return ClearStorageResponse(freed_bytes=freed, deleted_count=count)
 
     if workspace_settings is not None:
 
