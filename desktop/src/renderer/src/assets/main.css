@@ -708,12 +708,12 @@ body.is-resizing-columns {
   gap: 0;
   align-content: start;
   min-height: 0;
-  padding: 20px clamp(36px, 7vw, 96px) 48px;
+  padding: 20px max(32px, calc(50% - 320px)) 48px;
   overflow-y: auto;
 }
 
 .settings-section {
-  padding: 24px 0;
+  padding: 20px 0;
   border: none;
   border-bottom: 1px solid var(--line);
   border-radius: 0;
@@ -722,7 +722,7 @@ body.is-resizing-columns {
 }
 
 .settings-section:first-child {
-  padding-top: 8px;
+  padding-top: 6px;
   border-top: none;
 }
 
@@ -736,7 +736,7 @@ body.is-resizing-columns {
   gap: 18px;
   align-items: center;
   justify-content: space-between;
-  padding: 18px clamp(36px, 7vw, 96px) 14px;
+  padding: 18px max(32px, calc(50% - 320px)) 14px;
 }
 
 .settings-header-eyebrow,
@@ -3643,22 +3643,83 @@ select.settings-select {
   white-space: nowrap;
 }
 
-.browser-address-input {
+.browser-address-box {
+  display: flex;
   flex: 1;
+  align-items: center;
   min-width: 0;
-  padding: 8px 12px;
+  height: 36px;
+  padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--bg-raised);
-  color: var(--text);
-  font-family: var(--mono);
-  font-size: 12.5px;
+  transition:
+    border-color 140ms ease-out,
+    box-shadow 140ms ease-out;
 }
 
-.browser-address-input:focus {
+.browser-address-box:focus-within {
   border-color: var(--brass-dim);
   outline: 2px solid color-mix(in srgb, var(--brass) 14%, transparent);
   outline-offset: 1px;
+}
+
+.browser-search-engine-btn {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: -2px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.browser-search-engine-btn:hover {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.browser-search-engine-btn:active {
+  transform: scale(0.92);
+}
+
+.browser-search-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.browser-search-divider {
+  flex-shrink: 0;
+  width: 1px;
+  height: 14px;
+  margin: 0 10px 0 8px;
+  background: color-mix(in srgb, var(--text-faint) 45%, var(--line));
+}
+
+.browser-address-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.browser-address-input::placeholder {
+  color: var(--text-faint);
+  font-family: var(--sans);
+  font-size: 13px;
 }
 
 .browser-go {

@@ -877,6 +877,94 @@ function BrowserNavIcon({
   )
 }
 
+function GoogleSearchIcon(): React.JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      className="browser-search-icon"
+      height="14"
+      viewBox="0 0 24 24"
+      width="14"
+    >
+      <path
+        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+        fill="#4285F4"
+      />
+      <path
+        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+        fill="#34A853"
+      />
+      <path
+        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+        fill="#FBBC05"
+      />
+      <path
+        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+        fill="#EA4335"
+      />
+    </svg>
+  )
+}
+
+function BingSearchIcon(): React.JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      className="browser-search-icon"
+      fill="none"
+      height="14"
+      stroke="#0078D4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2.75"
+      viewBox="0 0 24 24"
+      width="14"
+    >
+      <circle cx="10.5" cy="10.5" r="7" />
+      <line x1="15.5" x2="21" y1="15.5" y2="21" />
+    </svg>
+  )
+}
+
+const SEARCH_ENGINE_STORAGE_KEY = 'asagent:browser_search_engine'
+type BrowserSearchEngine = 'google' | 'bing'
+
+function getStoredSearchEngine(): BrowserSearchEngine {
+  try {
+    const saved = window.localStorage.getItem(SEARCH_ENGINE_STORAGE_KEY)
+    if (saved === 'bing' || saved === 'google') {
+      return saved
+    }
+  } catch {
+    // Ignore storage read error
+  }
+  return 'google'
+}
+
+const LOCALHOST_OR_IP_PATTERN =
+  /^(localhost|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[[0-9a-fA-F:]+\])(:\d+)?(\/.*)?$/i
+const DOMAIN_PATTERN = /^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(:\d+)?(\/.*)?$/
+const EXPLICIT_WEB_SCHEME = /^https?:/i
+
+function isLikelyWebAddress(value: string): boolean {
+  const trimmed = value.trim()
+  if (!trimmed || /\s/.test(trimmed)) {
+    return false
+  }
+  if (EXPLICIT_WEB_SCHEME.test(trimmed) || trimmed.startsWith('//')) {
+    return true
+  }
+  return LOCALHOST_OR_IP_PATTERN.test(trimmed) || DOMAIN_PATTERN.test(trimmed)
+}
+
+function resolveSearchQuery(query: string, engine: BrowserSearchEngine): string {
+  const trimmed = query.trim()
+  if (engine === 'bing') {
+    return `https://www.bing.com/search?q=${encodeURIComponent(trimmed)}`
+  }
+  return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`
+}
+
 function Icon({ path, className }: { path: string; className?: string }): React.JSX.Element {
   return (
     <svg
@@ -1081,6 +1169,8 @@ export default function App(): React.JSX.Element {
   const [isWorkspaceBusy, setIsWorkspaceBusy] = useState(false)
   const [visibleScrollbar, setVisibleScrollbar] = useState<ScrollArea | null>(null)
   const [desktopLayout, setDesktopLayout] = useState<DesktopLayout>(storedDesktopLayout)
+  const [browserSearchEngine, setBrowserSearchEngine] =
+    useState<BrowserSearchEngine>(getStoredSearchEngine)
   const [isRailCollapsed, setIsRailCollapsed] = useState(false)
   const [resizingColumn, setResizingColumn] = useState<ResizableColumn | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
@@ -1962,10 +2052,16 @@ export default function App(): React.JSX.Element {
 
   async function openBrowserAddress(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
-    const address = activeBrowserTab?.address ?? ''
+    const address = (activeBrowserTab?.address ?? '').trim()
+    if (!address) {
+      return
+    }
     setBrowserError(null)
+    const targetUrl = isLikelyWebAddress(address)
+      ? address
+      : resolveSearchQuery(address, browserSearchEngine)
     try {
-      const opened = await window.desktop.navigateBrowser(activeBrowserTabId, address)
+      const opened = await window.desktop.navigateBrowser(activeBrowserTabId, targetUrl)
       setBrowserTabs((current) =>
         current.map((tab) =>
           tab.id === activeBrowserTabId
@@ -4461,22 +4557,40 @@ export default function App(): React.JSX.Element {
                       <BrowserNavIcon name="home" />
                     </button>
                   </div>
-                  <label className="browser-address-label" htmlFor="browser-address">
-                    Address
-                  </label>
-                  <input
-                    autoCapitalize="off"
-                    autoComplete="off"
-                    autoCorrect="off"
-                    className="browser-address-input"
-                    id="browser-address"
-                    onChange={(event) => updateActiveBrowserAddress(event.target.value)}
-                    placeholder="example.com"
-                    ref={browserAddressRef}
-                    spellCheck={false}
-                    type="text"
-                    value={activeBrowserTab?.address ?? ''}
-                  />
+                  <div className="browser-address-box">
+                    <button
+                      aria-label={`Search engine: ${browserSearchEngine === 'google' ? 'Google' : 'Bing'}. Click to switch.`}
+                      className="browser-search-engine-btn"
+                      onClick={() => {
+                        const nextEngine: BrowserSearchEngine =
+                          browserSearchEngine === 'google' ? 'bing' : 'google'
+                        setBrowserSearchEngine(nextEngine)
+                        try {
+                          window.localStorage.setItem(SEARCH_ENGINE_STORAGE_KEY, nextEngine)
+                        } catch {
+                          // Ignore storage write error
+                        }
+                      }}
+                      title={`Search engine: ${browserSearchEngine === 'google' ? 'Google' : 'Bing'} (Click to switch to ${browserSearchEngine === 'google' ? 'Bing' : 'Google'})`}
+                      type="button"
+                    >
+                      {browserSearchEngine === 'google' ? <GoogleSearchIcon /> : <BingSearchIcon />}
+                    </button>
+                    <span aria-hidden="true" className="browser-search-divider" />
+                    <input
+                      autoCapitalize="off"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      className="browser-address-input"
+                      id="browser-address"
+                      onChange={(event) => updateActiveBrowserAddress(event.target.value)}
+                      placeholder={`Search ${browserSearchEngine === 'google' ? 'Google' : 'Bing'} or enter URL`}
+                      ref={browserAddressRef}
+                      spellCheck={false}
+                      type="text"
+                      value={activeBrowserTab?.address ?? ''}
+                    />
+                  </div>
                   <button aria-label="Go" className="browser-go" title="Go" type="submit">
                     <Icon path="M5 12h14M13 6l6 6-6 6" />
                   </button>
@@ -5023,32 +5137,10 @@ export default function App(): React.JSX.Element {
         <div className={`view${activeView === 'preferences' ? ' active' : ''}`}>
           <section className="center">
             <div className="center-header settings-page-header">
-              <div>
-                <div className="settings-header-eyebrow">Preferences</div>
-                <div className="center-title">Agent preferences</div>
-                <div className="center-sub">Manage model access, tools, and local file scope.</div>
-              </div>
-              <div className="center-header-actions">
-                <div
-                  className={`settings-mode-card${usesExternalModel ? ' external' : ''}${
-                    configuredExternalProviderUnavailable ? ' unavailable' : ''
-                  }`}
-                >
-                  <span>Processing</span>
-                  <strong>
-                    {configuredExternalProviderUnavailable
-                      ? 'Provider unavailable'
-                      : usesExternalModel
-                        ? 'External model'
-                        : 'Local mode'}
-                  </strong>
-                  <small>
-                    {configuredExternalProviderUnavailable
-                      ? 'Using offline fallback. Check the saved credential.'
-                      : usesExternalModel
-                        ? 'Conversation content may leave this device.'
-                        : 'No model data is sent externally.'}
-                  </small>
+              <div className="center-header-main">
+                <div className="center-title">General</div>
+                <div className="center-sub">
+                  Manage model access, agent runtime, tools, and local storage.
                 </div>
               </div>
             </div>

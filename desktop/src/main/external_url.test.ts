@@ -40,6 +40,20 @@ describe('parseBrowserWebUrl', () => {
     expect(parseBrowserWebUrl('localhost:3000/health')).toBe('https://localhost:3000/health')
   })
 
+  it('converts search keywords and phrases to Google search queries', () => {
+    expect(parseBrowserWebUrl('react hooks tutorial')).toBe(
+      'https://www.google.com/search?q=react%20hooks%20tutorial'
+    )
+    expect(parseBrowserWebUrl('deepseek')).toBe('https://www.google.com/search?q=deepseek')
+    expect(parseBrowserWebUrl('agent architecture 101')).toBe(
+      'https://www.google.com/search?q=agent%20architecture%20101'
+    )
+    expect(parseBrowserWebUrl('what is an agent?')).toBe(
+      'https://www.google.com/search?q=what%20is%20an%20agent%3F'
+    )
+    expect(parseBrowserWebUrl('c++')).toBe('https://www.google.com/search?q=c%2B%2B')
+  })
+
   it.each([
     '',
     'file:///tmp/test',
