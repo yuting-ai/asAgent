@@ -737,9 +737,9 @@ body.is-resizing-columns {
 }
 
 .settings-section {
-  padding: 20px 0;
+  padding: 24px 0;
   border: none;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
   border-radius: 0;
   background: transparent;
   box-shadow: none;
@@ -752,7 +752,7 @@ body.is-resizing-columns {
 
 .settings-section:last-child {
   border-bottom: none;
-  padding-bottom: 8px;
+  padding-bottom: 16px;
 }
 
 .settings-page-header {
@@ -760,56 +760,59 @@ body.is-resizing-columns {
   gap: 18px;
   align-items: center;
   justify-content: space-between;
-  padding: 18px max(32px, calc(50% - 320px)) 14px;
+  padding: 20px max(32px, calc(50% - 320px)) 16px;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .settings-header-eyebrow,
 .settings-section-eyebrow {
   margin-bottom: 4px;
   color: var(--brass);
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .settings-mode-card {
   display: grid;
   flex: 0 0 190px;
-  gap: 2px;
-  padding: 9px 11px;
-  border: 1px solid color-mix(in srgb, var(--green) 24%, var(--line));
-  border-radius: 9px;
-  background: var(--green-dim);
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--brass) 24%, var(--line-soft));
+  border-radius: 10px;
+  background: var(--accent-soft);
 }
 
 .settings-mode-card.external {
-  border-color: color-mix(in srgb, var(--amber) 28%, var(--line));
+  border-color: color-mix(in srgb, var(--amber) 28%, var(--line-soft));
   background: var(--amber-dim);
 }
 
 .settings-mode-card.unavailable {
-  border-color: color-mix(in srgb, var(--red) 28%, var(--line));
+  border-color: color-mix(in srgb, var(--red) 28%, var(--line-soft));
   background: var(--red-dim);
 }
 
 .settings-mode-card span {
-  color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 9.5px;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
 }
 
 .settings-mode-card strong {
   color: var(--text);
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 600;
 }
 
 .settings-mode-card small {
   color: var(--text-dim);
-  font-size: 10.5px;
-  line-height: 1.35;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .restart-modal-backdrop {
@@ -834,10 +837,10 @@ body.is-resizing-columns {
 
 .restart-modal-eyebrow {
   color: var(--brass);
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-weight: 650;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
@@ -845,6 +848,7 @@ body.is-resizing-columns {
   margin: 8px 0;
   color: var(--text);
   font-size: 19px;
+  font-weight: 650;
 }
 
 .restart-modal p {
@@ -869,32 +873,37 @@ body.is-resizing-columns {
 }
 
 .settings-section-title {
-  font-size: 14px;
-  font-weight: 600;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
 .settings-state {
   flex-shrink: 0;
-  padding: 3px 7px;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
   border: 1px solid var(--line-soft);
-  border-radius: 999px;
+  border-radius: 9999px;
   background: var(--bg-inset);
-  color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 9.5px;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 550;
   white-space: nowrap;
 }
 
 .settings-state.configured {
-  border-color: color-mix(in srgb, var(--green) 24%, var(--line));
-  background: var(--green-dim);
-  color: var(--green);
+  border-color: color-mix(in srgb, var(--brass) 30%, transparent);
+  background: var(--accent-soft);
+  color: var(--brass);
 }
 
 .settings-state.issue {
-  border-color: color-mix(in srgb, var(--amber) 28%, var(--line));
-  background: var(--amber-dim);
-  color: var(--amber);
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #b45309;
 }
 
 .settings-section-copy,
@@ -903,7 +912,7 @@ body.is-resizing-columns {
 .settings-section-error,
 .settings-section-placeholder {
   margin-top: 8px;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -917,10 +926,11 @@ body.is-resizing-columns {
 .settings-section-hint {
   margin-top: 12px;
   color: var(--brass);
+  font-weight: 500;
 }
 
 .settings-section-error {
-  color: #b42318;
+  color: var(--red);
 }
 
 .settings-toggle {
@@ -993,14 +1003,17 @@ body.is-resizing-columns {
 
 .settings-text-input {
   width: 100%;
-  max-width: 420px;
-  padding: 8px 10px;
+  max-width: 440px;
+  padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-raised);
   color: var(--text);
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: 13px;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 select.settings-select {
@@ -1012,13 +1025,12 @@ select.settings-select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  max-width: 420px;
+  max-width: 440px;
   margin-bottom: 14px;
-  padding: 6px 0;
-  background: transparent;
-  border-radius: 0;
-  border: none;
-  border-bottom: 1px dashed var(--line-soft);
+  padding: 10px 14px;
+  background: var(--bg-inset);
+  border-radius: 8px;
+  border: 1px solid var(--line-soft);
 }
 
 .storage-usage-row .settings-field-label {
@@ -1027,7 +1039,7 @@ select.settings-select {
 
 .storage-usage-value {
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--brass);
 }
@@ -1046,15 +1058,15 @@ select.settings-select {
 }
 
 .settings-text-input:focus {
-  border-color: var(--brass-dim);
-  outline: 2px solid color-mix(in srgb, var(--brass) 14%, transparent);
-  outline-offset: 1px;
+  border-color: var(--brass);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brass) 16%, transparent);
 }
 
 .settings-select {
   width: 100%;
-  max-width: 420px;
-  padding: 8px 10px;
+  max-width: 440px;
+  padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-raised);
@@ -1063,6 +1075,9 @@ select.settings-select {
   font-family: inherit;
   outline: none;
   cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .settings-select:disabled {
@@ -1071,9 +1086,9 @@ select.settings-select {
 }
 
 .settings-select:focus {
-  border-color: var(--brass-dim);
-  outline: 2px solid color-mix(in srgb, var(--brass) 14%, transparent);
-  outline-offset: 1px;
+  border-color: var(--brass);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brass) 16%, transparent);
 }
 
 .model-settings-flow {
@@ -1085,7 +1100,7 @@ select.settings-select {
 .model-settings-step {
   margin-bottom: 8px;
   color: var(--text-faint);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 650;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1094,18 +1109,18 @@ select.settings-select {
 .model-location-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .model-location-option {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 18px;
-  gap: 10px;
+  grid-template-columns: 36px minmax(0, 1fr) 20px;
+  gap: 12px;
   align-items: center;
-  min-height: 76px;
-  padding: 12px;
+  min-height: 78px;
+  padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 11px;
+  border-radius: 12px;
   background: var(--bg-raised);
   color: var(--text-dim);
   text-align: left;
@@ -1116,14 +1131,14 @@ select.settings-select {
 }
 
 .model-location-option:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--brass) 28%, var(--line));
-  background: color-mix(in srgb, var(--accent-soft) 36%, var(--bg-raised));
+  border-color: color-mix(in srgb, var(--brass) 36%, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 40%, var(--bg-raised));
 }
 
 .model-location-option.selected {
-  border-color: color-mix(in srgb, var(--brass) 55%, var(--line));
+  border-color: var(--brass);
   background: var(--accent-soft);
-  box-shadow: 0 0 0 2px var(--brass-glow);
+  box-shadow: 0 0 0 1.5px var(--brass);
 }
 
 .model-location-option:focus-visible {
@@ -1138,22 +1153,26 @@ select.settings-select {
 
 .model-location-icon {
   display: grid;
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
   background: var(--bg-inset);
   color: var(--text-dim);
   place-items: center;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
 }
 
 .model-location-icon svg {
-  width: 17px;
-  height: 17px;
+  width: 18px;
+  height: 18px;
 }
 
 .model-location-option.selected .model-location-icon {
-  background: color-mix(in srgb, var(--brass) 12%, var(--bg-raised));
+  background: #ffffff;
   color: var(--brass);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 6%);
 }
 
 .model-location-copy {
@@ -1164,25 +1183,27 @@ select.settings-select {
 
 .model-location-copy strong {
   color: var(--text);
-  font-size: 12.5px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .model-location-copy small {
-  color: var(--text-faint);
-  font-size: 11px;
+  color: var(--text-dim);
+  font-size: 11.5px;
   line-height: 1.4;
 }
 
 .model-location-check {
   display: grid;
-  width: 18px;
-  height: 18px;
-  border: 1px solid var(--line);
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--line);
   border-radius: 50%;
   color: transparent;
   font-size: 11px;
   font-weight: 700;
   place-items: center;
+  transition: all 140ms ease;
 }
 
 .model-location-option.selected .model-location-check {
@@ -1208,17 +1229,17 @@ select.settings-select {
 
 .model-privacy-badge {
   flex-shrink: 0;
-  padding: 2.5px 7px;
-  border: 1px solid color-mix(in srgb, var(--green) 24%, var(--line));
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--brass) 28%, var(--line-soft));
   border-radius: 999px;
-  background: var(--green-dim);
-  color: var(--green);
-  font-size: 9.5px;
+  background: var(--accent-soft);
+  color: var(--brass);
+  font-size: 10.5px;
   font-weight: 650;
 }
 
 .model-privacy-badge.external {
-  border-color: color-mix(in srgb, var(--amber) 28%, var(--line));
+  border-color: color-mix(in srgb, var(--amber) 28%, var(--line-soft));
   background: var(--amber-dim);
   color: var(--amber);
 }
@@ -1227,26 +1248,26 @@ select.settings-select {
   max-width: 580px;
   margin: 0;
   color: var(--text-dim);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
 .model-provider-warning {
   display: grid;
-  gap: 2px;
-  margin-bottom: 10px;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--amber) 28%, var(--line));
-  border-radius: 7px;
+  gap: 3px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--amber) 28%, var(--line-soft));
+  border-radius: 8px;
   background: var(--amber-dim);
   color: var(--text-dim);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
 .model-provider-warning strong {
   color: var(--amber);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .model-fields-grid {
@@ -1299,7 +1320,7 @@ select.settings-select {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 14px;
 }
 
 .settings-section-status code {
@@ -1309,12 +1330,13 @@ select.settings-select {
 }
 
 .settings-button {
-  padding: 7px 12px;
+  padding: 8px 14px;
   border: 1px solid transparent;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
+  transition: all 120ms ease;
 }
 
 .settings-button:disabled {
@@ -1328,19 +1350,29 @@ select.settings-select {
 }
 
 .settings-button-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--brass) 88%, #000);
+  background: #2ea378;
+  box-shadow: 0 2px 6px rgb(57 183 137 / 25%);
 }
 
 .settings-button-secondary {
-  border-color: var(--line);
+  border-color: var(--line-soft);
   background: var(--bg-inset);
-  color: var(--text-dim);
+  color: var(--text);
+}
+
+.settings-button-secondary:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--line);
 }
 
 .settings-button-danger {
   border-color: #f2c7c2;
   background: #fff5f4;
-  color: #b42318;
+  color: var(--red);
+}
+
+.settings-button-danger:hover:not(:disabled) {
+  background: #fee4e2;
 }
 
 .filters {

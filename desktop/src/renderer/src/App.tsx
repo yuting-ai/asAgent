@@ -12,6 +12,7 @@ import remarkGfm from 'remark-gfm'
 
 import { TOOL_APPROVAL_BANNER_ACTIONS, type ToolApprovalDecision } from './tool_approval'
 import { detectProviderPreset, getProviderPreset, MODEL_PROVIDER_PRESETS } from './model_presets'
+import { type AppLanguage, getStoredAppLanguage, LANGUAGE_STORAGE_KEY, t } from './i18n'
 
 type AppInfo = {
   appName: string
@@ -424,12 +425,12 @@ const MAX_RAIL_WIDTH = 360
 const MIN_THREAD_WIDTH = 160
 const MAX_THREAD_WIDTH = 360
 const MIN_ATTENTION_WIDTH = 240
-const MAX_ATTENTION_WIDTH = 460
-const DEFAULT_BROWSER_AGENT_WIDTH = 300
-const MIN_BROWSER_AGENT_WIDTH = 240
-const MAX_BROWSER_AGENT_WIDTH = 480
-const MIN_CHAT_CONTENT_WIDTH = 360
-const MIN_BROWSER_SURFACE_WIDTH = 360
+const MAX_ATTENTION_WIDTH = 600
+const DEFAULT_BROWSER_AGENT_WIDTH = 340
+const MIN_BROWSER_AGENT_WIDTH = 200
+const MAX_BROWSER_AGENT_WIDTH = 1200
+const MIN_CHAT_CONTENT_WIDTH = 320
+const MIN_BROWSER_SURFACE_WIDTH = 260
 const MIN_CENTER_WIDTH = MIN_THREAD_WIDTH + MIN_CHAT_CONTENT_WIDTH
 const DESKTOP_LAYOUT_STORAGE_KEY = 'asagent.desktop.layout.v1'
 
@@ -1171,6 +1172,7 @@ export default function App(): React.JSX.Element {
   const [desktopLayout, setDesktopLayout] = useState<DesktopLayout>(storedDesktopLayout)
   const [browserSearchEngine, setBrowserSearchEngine] =
     useState<BrowserSearchEngine>(getStoredSearchEngine)
+  const [appLanguage, setAppLanguage] = useState<AppLanguage>(getStoredAppLanguage)
   const [isRailCollapsed, setIsRailCollapsed] = useState(false)
   const [resizingColumn, setResizingColumn] = useState<ResizableColumn | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
@@ -2583,6 +2585,15 @@ export default function App(): React.JSX.Element {
     setIsReplacingTavilyKey(false)
   }
 
+  function handleAppLanguageChange(lang: AppLanguage): void {
+    setAppLanguage(lang)
+    try {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, lang)
+    } catch {
+      // Ignore storage write error
+    }
+  }
+
   function handleToggleWebSearch(): void {
     if (tavilySettings !== null && !tavilySettings.enabled && !tavilySettings.api_key_saved) {
       setErrorMessage('Web search requires a Tavily API key. Configure it in Preferences.')
@@ -3486,17 +3497,17 @@ export default function App(): React.JSX.Element {
               className="rail-new-btn is-chat"
               disabled={backendStatus !== 'ready' || isCreatingConversation}
               onClick={createNewChatSession}
-              title="New chat"
+              title={t(appLanguage, 'newChat')}
               type="button"
             >
               <Icon className="rail-icon" path="M12 5v14M5 12h14" />
-              <span className="rail-item-label">New chat</span>
+              <span className="rail-item-label">{t(appLanguage, 'newChat')}</span>
             </button>
             <button
               className="rail-new-btn is-browser"
               disabled={backendStatus !== 'ready' || isCreatingConversation}
               onClick={createNewBrowserSession}
-              title="New browser"
+              title={t(appLanguage, 'newBrowser')}
               type="button"
             >
               <svg
@@ -3509,13 +3520,13 @@ export default function App(): React.JSX.Element {
                 <circle cx="12" cy="12" r="9" />
                 <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" />
               </svg>
-              <span className="rail-item-label">New browser</span>
+              <span className="rail-item-label">{t(appLanguage, 'newBrowser')}</span>
             </button>
           </div>
 
           <div className="rail-section rail-recents">
             <div className="rail-recents-header">
-              <div className="rail-label">Recents</div>
+              <div className="rail-label">{t(appLanguage, 'recents')}</div>
             </div>
             <div
               className={`rail-recents-list${
@@ -3524,7 +3535,7 @@ export default function App(): React.JSX.Element {
               onWheel={() => revealScrollbar('recents')}
             >
               {recentConversations.length === 0 ? (
-                <p className="rail-recents-empty">No conversations yet</p>
+                <p className="rail-recents-empty">{t(appLanguage, 'noRecents')}</p>
               ) : (
                 recentConversations.map(({ kind, conversation }) => {
                   const selected =
@@ -3611,17 +3622,17 @@ export default function App(): React.JSX.Element {
                           <div className="rail-recent-actions">
                             {kind === 'chat' ? (
                               <button
-                                aria-label="Rename conversation"
+                                aria-label={t(appLanguage, 'rename')}
                                 disabled={backendStatus !== 'ready'}
                                 onClick={() => startRename(conversation)}
-                                title="Rename"
+                                title={t(appLanguage, 'rename')}
                                 type="button"
                               >
                                 <Icon path="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
                               </button>
                             ) : null}
                             <button
-                              aria-label="Delete conversation"
+                              aria-label={t(appLanguage, 'delete')}
                               className="danger"
                               disabled={
                                 backendStatus !== 'ready' ||
@@ -3632,7 +3643,7 @@ export default function App(): React.JSX.Element {
                                   ? deleteConversation(conversation.conversation_id)
                                   : deleteBrowserConversation(conversation.conversation_id))
                               }
-                              title="Delete"
+                              title={t(appLanguage, 'delete')}
                               type="button"
                             >
                               <Icon path="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
@@ -3651,7 +3662,7 @@ export default function App(): React.JSX.Element {
             <button
               className={railItemClass('preferences')}
               onClick={() => setActiveView('preferences')}
-              title="Settings"
+              title={t(appLanguage, 'settings')}
               type="button"
             >
               <svg
@@ -3664,15 +3675,23 @@ export default function App(): React.JSX.Element {
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
-              <span className="rail-item-label">Settings</span>
+              <span className="rail-item-label">{t(appLanguage, 'settings')}</span>
             </button>
             <button
               aria-controls="primary-sidebar"
               aria-expanded={!isRailCollapsed}
-              aria-label={isRailCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-label={
+                isRailCollapsed
+                  ? t(appLanguage, 'expandSidebar')
+                  : t(appLanguage, 'collapseSidebar')
+              }
               className="rail-toggle"
               onClick={() => setIsRailCollapsed((collapsed) => !collapsed)}
-              title={isRailCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              title={
+                isRailCollapsed
+                  ? t(appLanguage, 'expandSidebar')
+                  : t(appLanguage, 'collapseSidebar')
+              }
               type="button"
             >
               <svg
@@ -3685,7 +3704,9 @@ export default function App(): React.JSX.Element {
                 <path d={isRailCollapsed ? 'm9 18 6-6-6-6' : 'm15 18-6-6 6-6'} />
               </svg>
               <span className="rail-item-label">
-                {isRailCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                {isRailCollapsed
+                  ? t(appLanguage, 'expandSidebar')
+                  : t(appLanguage, 'collapseSidebar')}
               </span>
             </button>
           </div>
@@ -3884,13 +3905,17 @@ export default function App(): React.JSX.Element {
                 >
                   {selectedConversationId === null ? (
                     <p className="chat-empty">
-                      Create or select a conversation to view its history and send messages.
+                      {appLanguage === 'zh-Hans'
+                        ? '请创建或选择一个对话以查看历史并发送消息。'
+                        : 'Create or select a conversation to view its history and send messages.'}
                     </p>
                   ) : visibleMessages.length === 0 &&
                     fileChanges.length === 0 &&
                     runActivity?.conversationId !== selectedConversationId ? (
                     <p className="chat-empty">
-                      No messages yet. Say hello below to start this conversation.
+                      {appLanguage === 'zh-Hans'
+                        ? '暂无消息。在下方打个招呼以开启对话吧。'
+                        : 'No messages yet. Say hello below to start this conversation.'}
                     </p>
                   ) : (
                     <>
@@ -4179,15 +4204,15 @@ export default function App(): React.JSX.Element {
                       }}
                       placeholder={
                         selectedConversationId === null
-                          ? 'Create or select a conversation first.'
-                          : 'Chat freely, or ask about a file…'
+                          ? t(appLanguage, 'composerPlaceholderEmpty')
+                          : t(appLanguage, 'composerPlaceholder')
                       }
                       rows={1}
                       value={draft}
                     />
                     <div className="chat-composer-footer">
                       <button
-                        aria-label="Add a file or folder to local file access"
+                        aria-label={t(appLanguage, 'attachFileOrFolder')}
                         className="chat-attach-btn"
                         disabled={
                           selectedConversationId === null ||
@@ -4196,7 +4221,7 @@ export default function App(): React.JSX.Element {
                           workspaceSettings === null
                         }
                         onClick={() => void handleAddWorkspacePath()}
-                        title="Add a file or folder to local file access"
+                        title={t(appLanguage, 'attachFileOrFolder')}
                         type="button"
                       >
                         <Icon path="M12 5v14m-7-7h14" />
@@ -4252,34 +4277,60 @@ export default function App(): React.JSX.Element {
                         ) : chatRunIsActive || activeRun !== null ? (
                           <span className="chat-composer-status">
                             {chatRunIsActive
-                              ? 'asAgent is working'
-                              : 'Another conversation is running'}
+                              ? appLanguage === 'zh-Hans'
+                                ? 'asAgent 正在执行'
+                                : 'asAgent is working'
+                              : appLanguage === 'zh-Hans'
+                                ? '另一对话正在执行'
+                                : 'Another conversation is running'}
                           </span>
                         ) : null}
                       </div>
                       <div className="chat-composer-actions">
                         <button
-                          aria-label="Toggle web search"
+                          aria-label={
+                            webSearchEnabled
+                              ? t(appLanguage, 'webSearchEnabled')
+                              : t(appLanguage, 'webSearchDisabled')
+                          }
                           aria-pressed={webSearchEnabled}
                           className={`chat-search-btn${webSearchEnabled ? ' active' : ''}`}
                           disabled={backendStatus !== 'ready'}
                           onClick={handleToggleWebSearch}
                           title={
                             webSearchEnabled
-                              ? 'Web search enabled (auto-allows search tools)'
-                              : 'Enable web search'
+                              ? t(appLanguage, 'webSearchEnabled')
+                              : t(appLanguage, 'webSearchDisabled')
                           }
                           type="button"
                         >
                           <GlobeIcon />
-                          <span className="chat-search-btn-label">Search</span>
+                          <span className="chat-search-btn-label">
+                            {appLanguage === 'zh-Hans' ? '联网' : 'Search'}
+                          </span>
                         </button>
                         {!chatRunIsActive ? (
                           <button
-                            aria-label={isSubmittingMessage ? 'Sending' : 'Send message'}
+                            aria-label={
+                              isSubmittingMessage
+                                ? appLanguage === 'zh-Hans'
+                                  ? '发送中'
+                                  : 'Sending'
+                                : appLanguage === 'zh-Hans'
+                                  ? '发送消息'
+                                  : 'Send message'
+                            }
                             className="composer-send"
                             disabled={selectedConversationId === null || !draft.trim() || isBusy}
-                            title={isSubmittingMessage ? 'Sending…' : 'Send message'}
+                            title={
+                              isSubmittingMessage
+                                ? appLanguage === 'zh-Hans'
+                                  ? '发送中…'
+                                  : 'Sending…'
+                                : appLanguage === 'zh-Hans'
+                                  ? '发送消息'
+                                  : 'Send message'
+                            }
                             type="submit"
                           >
                             <Icon path="M12 19V5m-6 6 6-6 6 6" />
@@ -4291,7 +4342,11 @@ export default function App(): React.JSX.Element {
                             onClick={() => void cancelActiveRun()}
                             type="button"
                           >
-                            {isCancellingRun ? 'Stopping…' : 'Stop'}
+                            {isCancellingRun
+                              ? appLanguage === 'zh-Hans'
+                                ? '正在停止…'
+                                : 'Stopping…'
+                              : t(appLanguage, 'stopGenerating')}
                           </button>
                         )}
                       </div>
@@ -4506,7 +4561,7 @@ export default function App(): React.JSX.Element {
                     )
                   })}
                   <button
-                    aria-label="New tab"
+                    aria-label={t(appLanguage, 'newTab')}
                     className="browser-tab-new"
                     disabled={browserTabs.length >= MAX_BROWSER_TABS}
                     onClick={addBrowserTab}
@@ -4521,7 +4576,7 @@ export default function App(): React.JSX.Element {
                 >
                   <div className="browser-nav">
                     <button
-                      aria-label="Back"
+                      aria-label={t(appLanguage, 'back')}
                       className="browser-nav-button"
                       disabled={!(activeBrowserTab?.canGoBack ?? false)}
                       onClick={() => controlBrowser('back')}
@@ -4530,7 +4585,7 @@ export default function App(): React.JSX.Element {
                       <BrowserNavIcon name="back" />
                     </button>
                     <button
-                      aria-label="Forward"
+                      aria-label={t(appLanguage, 'forward')}
                       className="browser-nav-button"
                       disabled={!(activeBrowserTab?.canGoForward ?? false)}
                       onClick={() => controlBrowser('forward')}
@@ -4539,7 +4594,7 @@ export default function App(): React.JSX.Element {
                       <BrowserNavIcon name="forward" />
                     </button>
                     <button
-                      aria-label="Reload"
+                      aria-label={t(appLanguage, 'reload')}
                       className="browser-nav-button"
                       disabled={(activeBrowserTab?.address ?? '') === ''}
                       onClick={() => controlBrowser('reload')}
@@ -4548,7 +4603,7 @@ export default function App(): React.JSX.Element {
                       <BrowserNavIcon name="reload" />
                     </button>
                     <button
-                      aria-label="Home"
+                      aria-label={t(appLanguage, 'home')}
                       className="browser-nav-button"
                       onClick={() => controlBrowser('home')}
                       type="button"
@@ -4583,7 +4638,11 @@ export default function App(): React.JSX.Element {
                       className="browser-address-input"
                       id="browser-address"
                       onChange={(event) => updateActiveBrowserAddress(event.target.value)}
-                      placeholder={`Search ${browserSearchEngine === 'google' ? 'Google' : 'Bing'} or enter URL`}
+                      placeholder={
+                        appLanguage === 'zh-Hans'
+                          ? `在 ${browserSearchEngine === 'google' ? 'Google' : 'Bing'} 中搜索或输入网址`
+                          : `Search ${browserSearchEngine === 'google' ? 'Google' : 'Bing'} or enter URL`
+                      }
                       ref={browserAddressRef}
                       spellCheck={false}
                       type="text"
@@ -4597,15 +4656,23 @@ export default function App(): React.JSX.Element {
                     aria-expanded={desktopLayout.browserAgentPanelOpen}
                     aria-label={
                       desktopLayout.browserAgentPanelOpen
-                        ? 'Collapse page assistant'
-                        : 'Expand page assistant'
+                        ? appLanguage === 'zh-Hans'
+                          ? '收起网页助手'
+                          : 'Collapse page assistant'
+                        : appLanguage === 'zh-Hans'
+                          ? '展开网页助手'
+                          : 'Expand page assistant'
                     }
                     className="browser-agent-toggle"
                     onClick={() => setBrowserAgentPanelOpen(!desktopLayout.browserAgentPanelOpen)}
                     title={
                       desktopLayout.browserAgentPanelOpen
-                        ? 'Collapse page assistant'
-                        : 'Expand page assistant'
+                        ? appLanguage === 'zh-Hans'
+                          ? '收起网页助手'
+                          : 'Collapse page assistant'
+                        : appLanguage === 'zh-Hans'
+                          ? '展开网页助手'
+                          : 'Expand page assistant'
                     }
                     type="button"
                   >
@@ -4626,11 +4693,11 @@ export default function App(): React.JSX.Element {
                     />
                     <div className="browser-agent-toolbar">
                       <button
-                        aria-label="New conversation"
+                        aria-label={t(appLanguage, 'newConversation')}
                         className="browser-agent-toolbar-button"
                         disabled={backendStatus !== 'ready' || isCreatingConversation}
                         onClick={() => void createBrowserConversationForActiveTab()}
-                        title="New conversation"
+                        title={t(appLanguage, 'newConversation')}
                         type="button"
                       >
                         <Icon path="M12 5v14M5 12h14" />
@@ -4647,9 +4714,11 @@ export default function App(): React.JSX.Element {
                           <div aria-hidden="true" className="browser-agent-empty-icon">
                             <Icon path="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
                           </div>
-                          <p className="browser-agent-empty-title">Talk with asAgent</p>
+                          <p className="browser-agent-empty-title">
+                            {appLanguage === 'zh-Hans' ? '与 asAgent 对话' : 'Talk with asAgent'}
+                          </p>
                           <p className="browser-agent-empty-copy">
-                            Start a Browser conversation to read or operate the current page.
+                            {t(appLanguage, 'browserAssistantEmpty')}
                           </p>
                         </div>
                       ) : (
@@ -5146,10 +5215,8 @@ export default function App(): React.JSX.Element {
           <section className="center">
             <div className="center-header settings-page-header">
               <div className="center-header-main">
-                <div className="center-title">General</div>
-                <div className="center-sub">
-                  Manage model access, agent runtime, tools, and local storage.
-                </div>
+                <div className="center-title">{t(appLanguage, 'settingsTitle')}</div>
+                <div className="center-sub">{t(appLanguage, 'settingsSub')}</div>
               </div>
             </div>
 
@@ -5160,12 +5227,47 @@ export default function App(): React.JSX.Element {
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
-                    <div className="settings-section-eyebrow">Model &amp; privacy</div>
-                    <div className="settings-section-title">Model provider</div>
-                    <p className="settings-section-copy">
-                      Connect any OpenAI-compatible local server or external provider. API keys stay
-                      in your system credential store and are never shown here.
-                    </p>
+                    <div className="settings-section-eyebrow">
+                      {t(appLanguage, 'generalCategory')}
+                    </div>
+                    <div className="settings-section-title">
+                      {t(appLanguage, 'languageSectionTitle')}
+                    </div>
+                    <p className="settings-section-copy">{t(appLanguage, 'languageSectionCopy')}</p>
+                  </div>
+                  <span className="settings-state configured">
+                    {appLanguage === 'zh-Hans' ? '中文' : 'English'}
+                  </span>
+                </div>
+
+                <div className="settings-key-form">
+                  <label className="settings-field-label" htmlFor="settings-app-language">
+                    {t(appLanguage, 'interfaceLanguageLabel')}
+                  </label>
+                  <select
+                    className="settings-select"
+                    id="settings-app-language"
+                    onChange={(event) => {
+                      handleAppLanguageChange(event.target.value as AppLanguage)
+                    }}
+                    value={appLanguage}
+                  >
+                    <option value="en">{t(appLanguage, 'languageEnglish')}</option>
+                    <option value="zh-Hans">{t(appLanguage, 'languageChinese')}</option>
+                  </select>
+                </div>
+              </section>
+
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div>
+                    <div className="settings-section-eyebrow">
+                      {t(appLanguage, 'modelPrivacyCategory')}
+                    </div>
+                    <div className="settings-section-title">
+                      {t(appLanguage, 'modelProviderTitle')}
+                    </div>
+                    <p className="settings-section-copy">{t(appLanguage, 'modelProviderCopy')}</p>
                   </div>
                   <span
                     className={`settings-state${
@@ -5178,9 +5280,9 @@ export default function App(): React.JSX.Element {
                   >
                     {modelSettings?.configured
                       ? modelSettings.active
-                        ? `${modelSettings.location === 'local' ? 'Local' : 'External'} active`
-                        : `${modelSettings.location === 'local' ? 'Local' : 'External'} needs attention`
-                      : 'Not configured'}
+                        ? `${modelSettings.location === 'local' ? (appLanguage === 'zh-Hans' ? '本地' : 'Local') : appLanguage === 'zh-Hans' ? '外部' : 'External'} ${t(appLanguage, 'activeBadge')}`
+                        : `${modelSettings.location === 'local' ? (appLanguage === 'zh-Hans' ? '本地' : 'Local') : appLanguage === 'zh-Hans' ? '外部' : 'External'} ${t(appLanguage, 'needsAttentionBadge')}`
+                      : t(appLanguage, 'notConfiguredBadge')}
                   </span>
                 </div>
 
@@ -5344,7 +5446,7 @@ export default function App(): React.JSX.Element {
                           }}
                           type="button"
                         >
-                          Save model settings
+                          {t(appLanguage, 'saveModelSettings')}
                         </button>
                         {isCurrentPresetConfigured ? (
                           <button
@@ -5355,7 +5457,7 @@ export default function App(): React.JSX.Element {
                             }}
                             type="button"
                           >
-                            Remove model settings
+                            {appLanguage === 'zh-Hans' ? '移除模型配置' : 'Remove model settings'}
                           </button>
                         ) : null}
                       </div>
@@ -5367,15 +5469,18 @@ export default function App(): React.JSX.Element {
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
-                    <div className="settings-section-eyebrow">Agent runtime</div>
-                    <div className="settings-section-title">Maximum agent steps per request</div>
-                    <p className="settings-section-copy">
-                      A step is one model decision. Higher limits can take longer and use more model
-                      tokens.
-                    </p>
+                    <div className="settings-section-eyebrow">
+                      {t(appLanguage, 'agentRuntimeCategory')}
+                    </div>
+                    <div className="settings-section-title">
+                      {t(appLanguage, 'maxAgentStepsTitle')}
+                    </div>
+                    <p className="settings-section-copy">{t(appLanguage, 'maxAgentStepsCopy')}</p>
                   </div>
                   <span className="settings-state configured">
-                    {agentSettings === null ? '—' : `${agentSettings.max_steps} steps`}
+                    {agentSettings === null
+                      ? '—'
+                      : `${agentSettings.max_steps} ${appLanguage === 'zh-Hans' ? '步' : 'steps'}`}
                   </span>
                 </div>
 
@@ -5388,7 +5493,7 @@ export default function App(): React.JSX.Element {
                 {!isAgentLoading && agentLoadError === null ? (
                   <div className="settings-key-form">
                     <label className="settings-field-label" htmlFor="agent-max-steps">
-                      Steps (1–50)
+                      {t(appLanguage, 'maxAgentStepsLabel')}
                     </label>
                     <input
                       className="settings-text-input"
@@ -5411,7 +5516,7 @@ export default function App(): React.JSX.Element {
                         }}
                         type="button"
                       >
-                        Save agent settings
+                        {t(appLanguage, 'saveAgentSettings')}
                       </button>
                     </div>
                   </div>
@@ -5424,12 +5529,13 @@ export default function App(): React.JSX.Element {
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
-                    <div className="settings-section-eyebrow">Connected tool</div>
-                    <div className="settings-section-title">Tavily Web Search</div>
-                    <p className="settings-section-copy">
-                      Tavily lets asAgent search the web through a configured MCP server. Your API
-                      key is stored in the macOS Keychain and is never shown in this window.
-                    </p>
+                    <div className="settings-section-eyebrow">
+                      {t(appLanguage, 'connectedToolCategory')}
+                    </div>
+                    <div className="settings-section-title">
+                      {t(appLanguage, 'tavilySearchTitle')}
+                    </div>
+                    <p className="settings-section-copy">{t(appLanguage, 'tavilySearchCopy')}</p>
                   </div>
                   <label className="settings-toggle">
                     <input
@@ -5456,10 +5562,10 @@ export default function App(): React.JSX.Element {
                   <>
                     <p className="settings-section-status">
                       {tavilySettings.enabled
-                        ? 'Tavily web search is enabled.'
+                        ? t(appLanguage, 'tavilyEnabledStatus')
                         : tavilySettings.api_key_saved
-                          ? 'Tavily is disabled. Your API key is still saved.'
-                          : 'Tavily is not configured.'}
+                          ? t(appLanguage, 'tavilyDisabledStatus')
+                          : t(appLanguage, 'tavilyNotConfiguredStatus')}
                     </p>
 
                     {showTavilyKeyInput ? (
@@ -5487,7 +5593,11 @@ export default function App(): React.JSX.Element {
                             }}
                             type="button"
                           >
-                            {isReplacingTavilyKey ? 'Save new API key' : 'Save and enable'}
+                            {isReplacingTavilyKey
+                              ? t(appLanguage, 'saveApiKey')
+                              : appLanguage === 'zh-Hans'
+                                ? '保存并启用'
+                                : 'Save and enable'}
                           </button>
                           {isReplacingTavilyKey ? (
                             <button
@@ -5501,7 +5611,7 @@ export default function App(): React.JSX.Element {
                               }}
                               type="button"
                             >
-                              Cancel
+                              {t(appLanguage, 'cancel')}
                             </button>
                           ) : null}
                         </div>
@@ -5516,7 +5626,7 @@ export default function App(): React.JSX.Element {
                           onClick={handleStartReplaceTavilyKey}
                           type="button"
                         >
-                          Replace API key
+                          {t(appLanguage, 'changeApiKey')}
                         </button>
                         <button
                           className="settings-button settings-button-danger"
@@ -5526,7 +5636,7 @@ export default function App(): React.JSX.Element {
                           }}
                           type="button"
                         >
-                          Remove saved API key
+                          {t(appLanguage, 'removeSavedApiKey')}
                         </button>
                       </div>
                     ) : null}
@@ -5541,11 +5651,14 @@ export default function App(): React.JSX.Element {
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
-                    <div className="settings-section-eyebrow">Data & Space</div>
-                    <div className="settings-section-title">Storage & Snapshots</div>
+                    <div className="settings-section-eyebrow">
+                      {t(appLanguage, 'dataSpaceCategory')}
+                    </div>
+                    <div className="settings-section-title">
+                      {t(appLanguage, 'storageSnapshotsTitle')}
+                    </div>
                     <p className="settings-section-copy">
-                      Manage undo snapshots for reversible file edits and deletions. Automatic
-                      cleanup purges older snapshots to keep disk space lean.
+                      {t(appLanguage, 'storageSnapshotsCopy')}
                     </p>
                   </div>
                 </div>
@@ -5561,15 +5674,20 @@ export default function App(): React.JSX.Element {
                 {!isStorageLoading && storageLoadError === null && storageSettings !== null ? (
                   <div className="settings-key-form">
                     <div className="storage-usage-row">
-                      <span className="settings-field-label">Current snapshot usage</span>
+                      <span className="settings-field-label">
+                        {t(appLanguage, 'currentSnapshotUsage')}
+                      </span>
                       <span className="storage-usage-value">
                         {formatBytes(storageSettings.usage_bytes)} ({storageSettings.snapshot_count}{' '}
-                        snapshot{storageSettings.snapshot_count === 1 ? '' : 's'})
+                        {appLanguage === 'zh-Hans'
+                          ? '个快照'
+                          : `snapshot${storageSettings.snapshot_count === 1 ? '' : 's'}`}
+                        )
                       </span>
                     </div>
 
                     <label className="settings-field-label" htmlFor="storage-retention">
-                      Snapshot retention
+                      {appLanguage === 'zh-Hans' ? '快照保留策略' : 'Snapshot retention'}
                     </label>
                     <select
                       className="settings-text-input settings-select"
@@ -5580,11 +5698,17 @@ export default function App(): React.JSX.Element {
                       }}
                       value={storageRetentionDays}
                     >
-                      <option value={1}>24 hours (1 day)</option>
-                      <option value={3}>3 days</option>
-                      <option value={7}>7 days (Recommended)</option>
-                      <option value={30}>30 days</option>
-                      <option value={0}>Never delete automatically</option>
+                      <option value={1}>
+                        {appLanguage === 'zh-Hans' ? '24 小时 (1 天)' : '24 hours (1 day)'}
+                      </option>
+                      <option value={3}>{appLanguage === 'zh-Hans' ? '3 天' : '3 days'}</option>
+                      <option value={7}>
+                        {appLanguage === 'zh-Hans' ? '7 天 (推荐)' : '7 days (Recommended)'}
+                      </option>
+                      <option value={30}>{appLanguage === 'zh-Hans' ? '30 天' : '30 days'}</option>
+                      <option value={0}>
+                        {appLanguage === 'zh-Hans' ? '永久保留' : 'Never delete automatically'}
+                      </option>
                     </select>
 
                     <div className="settings-card-actions" style={{ marginTop: '12px' }}>
@@ -5596,7 +5720,7 @@ export default function App(): React.JSX.Element {
                         }}
                         type="button"
                       >
-                        Clear all snapshots now
+                        {t(appLanguage, 'clearAllSnapshotsNow')}
                       </button>
                     </div>
 
@@ -5622,12 +5746,11 @@ export default function App(): React.JSX.Element {
       {restartRequested ? (
         <div aria-modal="true" className="restart-modal-backdrop" role="dialog">
           <section aria-labelledby="restart-modal-title" className="restart-modal">
-            <div className="restart-modal-eyebrow">Settings saved</div>
-            <h2 id="restart-modal-title">Restart asAgent now?</h2>
-            <p>
-              Your changes are saved. Restarting applies the updated model and integrations to a new
-              Sidecar.
-            </p>
+            <div className="restart-modal-eyebrow">{t(appLanguage, 'restartNoticeTitle')}</div>
+            <h2 id="restart-modal-title">
+              {appLanguage === 'zh-Hans' ? '立即重启 asAgent？' : 'Restart asAgent now?'}
+            </h2>
+            <p>{t(appLanguage, 'restartNoticeBody')}</p>
             <div className="restart-modal-actions">
               <button
                 className="settings-button settings-button-secondary"
@@ -5635,7 +5758,7 @@ export default function App(): React.JSX.Element {
                 onClick={() => setRestartRequested(false)}
                 type="button"
               >
-                Later
+                {t(appLanguage, 'restartLater')}
               </button>
               <button
                 autoFocus
@@ -5646,7 +5769,11 @@ export default function App(): React.JSX.Element {
                 }}
                 type="button"
               >
-                {isRestarting ? 'Restarting…' : 'Restart now'}
+                {isRestarting
+                  ? appLanguage === 'zh-Hans'
+                    ? '正在重启…'
+                    : 'Restarting…'
+                  : t(appLanguage, 'restartNow')}
               </button>
             </div>
           </section>
