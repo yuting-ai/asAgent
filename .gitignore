@@ -31,4 +31,7 @@ dist/
 # macOS metadata
 .DS_Store
 
+# Agent development rules
+AGENTS.md
+
 docs/
