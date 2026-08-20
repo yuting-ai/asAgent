@@ -3080,14 +3080,37 @@ export default function App(): React.JSX.Element {
       return
     }
     setActiveView('browser')
-    if (browserTabsRef.current.length >= MAX_BROWSER_TABS) {
-      setErrorMessage('Close a browser tab before creating a new one.')
-      return
+    const currentTabs = browserTabsRef.current
+    for (const tab of currentTabs) {
+      void window.desktop.closeBrowserTab(tab.id).catch(() => undefined)
     }
+
     const created = createBrowserTab()
-    setBrowserTabs([...browserTabsRef.current, created])
+    setBrowserTabs([created])
     setActiveBrowserTabId(created.id)
-    void createBrowserConversationForActiveTab()
+    setBrowserConversationByTabId({})
+    setBrowserError(null)
+
+    setIsCreatingConversation(true)
+    setErrorMessage(null)
+    void window.desktop
+      .createBrowserConversation()
+      .then((newConv) => {
+        setBrowserConversations((current) => orderConversations([newConv, ...current]))
+        browserMessageLoadIdRef.current += 1
+        setBrowserMessages([])
+        setBrowserConversationByTabId({ [created.id]: newConv.conversation_id })
+        void window.desktop
+          .setBrowserTabConversation(created.id, newConv.conversation_id)
+          .catch(() => undefined)
+        setBrowserDraft('')
+      })
+      .catch(() => {
+        setErrorMessage('The conversation could not be created.')
+      })
+      .finally(() => {
+        setIsCreatingConversation(false)
+      })
   }
 
   function setAttentionPanelOpen(open: boolean): void {
@@ -3137,9 +3160,8 @@ export default function App(): React.JSX.Element {
       return
     }
 
-    if (currentTabs.length >= MAX_BROWSER_TABS) {
-      setErrorMessage('Close a browser tab before opening this conversation.')
-      return
+    for (const tab of currentTabs) {
+      void window.desktop.closeBrowserTab(tab.id).catch(() => undefined)
     }
 
     const created = createBrowserTab()
@@ -3147,11 +3169,10 @@ export default function App(): React.JSX.Element {
       created.address = conversation.last_page_url
       created.title = conversation.last_page_title ?? browserTabTitle(conversation.last_page_url)
     }
-    setBrowserTabs([...currentTabs, created])
-    setBrowserConversationByTabId((current) => ({
-      ...current,
+    setBrowserTabs([created])
+    setBrowserConversationByTabId({
       [created.id]: conversationId
-    }))
+    })
     setActiveBrowserTabId(created.id)
     setBrowserError(null)
     void window.desktop
