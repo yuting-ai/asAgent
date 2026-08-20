@@ -69,8 +69,8 @@ button {
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -78,12 +78,13 @@ button {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--line);
-  border-radius: 4px;
+  background: transparent;
+  border-radius: 999px;
+  transition: background-color 160ms ease-out;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-faint);
+  background: color-mix(in srgb, var(--text-faint) 50%, transparent);
 }
 
 @keyframes pulse {

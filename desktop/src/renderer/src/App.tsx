@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/static-components -- layout helpers intentionally share App state. */
 import {
   type CSSProperties,
   type FormEvent,
@@ -155,6 +154,25 @@ type WorkspaceSettingsStatus = {
   additional_files: string[]
 }
 
+type WorkspaceFileNode = {
+  name: string
+  path: string
+  relativePath: string
+  kind: 'file' | 'directory'
+  size?: number
+  extension?: string
+  children?: WorkspaceFileNode[]
+}
+
+type FilePreviewResult = {
+  path: string
+  name: string
+  size: number
+  content: string
+  isTruncated: boolean
+  isBinary: boolean
+}
+
 type BrowserTab = {
   id: string
   title: string
@@ -164,7 +182,8 @@ type BrowserTab = {
 }
 
 type ActivityTab = 'approvals' | 'schedule'
-type ScrollArea = 'threads' | 'messages' | 'recents'
+type ScrollArea =
+  'threads' | 'messages' | 'recents' | 'settings' | 'workspaceTree' | 'workspacePreview'
 type ResizableColumn = 'rail' | 'threads' | 'attention' | 'browserAgent'
 type DesktopLayout = {
   railWidth: number
@@ -244,6 +263,156 @@ function resizeBrowserAgentInput(textarea: HTMLTextAreaElement | null): void {
 
   textarea.style.height = 'auto'
   textarea.style.height = `${Math.min(textarea.scrollHeight, BROWSER_AGENT_INPUT_MAX_HEIGHT)}px`
+}
+
+function TreeChevron({ isExpanded }: { isExpanded: boolean }): React.JSX.Element {
+  return (
+    <svg
+      className={`tree-chevron${isExpanded ? ' is-expanded' : ''}`}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  )
+}
+
+function TreeIcon({
+  extension,
+  isExpanded,
+  kind
+}: {
+  extension?: string
+  isExpanded?: boolean
+  kind: 'file' | 'directory'
+}): React.JSX.Element {
+  if (kind === 'directory') {
+    return isExpanded ? (
+      <svg
+        className="tree-icon tree-icon-folder"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        viewBox="0 0 24 24"
+      >
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        <path d="M2 10h20" />
+      </svg>
+    ) : (
+      <svg
+        className="tree-icon tree-icon-folder"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        viewBox="0 0 24 24"
+      >
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+      </svg>
+    )
+  }
+
+  const ext = extension?.toLowerCase()
+  if (
+    ext === 'ts' ||
+    ext === 'tsx' ||
+    ext === 'js' ||
+    ext === 'jsx' ||
+    ext === 'py' ||
+    ext === 'rs' ||
+    ext === 'go' ||
+    ext === 'c' ||
+    ext === 'cpp' ||
+    ext === 'java' ||
+    ext === 'sh'
+  ) {
+    return (
+      <svg
+        className="tree-icon tree-icon-code"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        viewBox="0 0 24 24"
+      >
+        <polyline points="16 18 22 12 16 6" />
+        <polyline points="8 6 2 12 8 18" />
+      </svg>
+    )
+  }
+  if (
+    ext === 'json' ||
+    ext === 'yaml' ||
+    ext === 'yml' ||
+    ext === 'toml' ||
+    ext === 'xml' ||
+    ext === 'env'
+  ) {
+    return (
+      <svg
+        className="tree-icon tree-icon-config"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        viewBox="0 0 24 24"
+      >
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </svg>
+    )
+  }
+  if (ext === 'md' || ext === 'txt' || ext === 'rst') {
+    return (
+      <svg
+        className="tree-icon tree-icon-doc"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        viewBox="0 0 24 24"
+      >
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" x2="8" y1="13" y2="13" />
+        <line x1="16" x2="8" y1="17" y2="17" />
+      </svg>
+    )
+  }
+  if (
+    ext === 'png' ||
+    ext === 'jpg' ||
+    ext === 'jpeg' ||
+    ext === 'gif' ||
+    ext === 'svg' ||
+    ext === 'webp'
+  ) {
+    return (
+      <svg
+        className="tree-icon tree-icon-media"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        viewBox="0 0 24 24"
+      >
+        <rect height="18" rx="2" ry="2" width="18" x="3" y="3" />
+        <circle cx="8.5" cy="8.5" r="1.5" />
+        <polyline points="21 15 16 10 5 21" />
+      </svg>
+    )
+  }
+  return (
+    <svg
+      className="tree-icon tree-icon-file"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      viewBox="0 0 24 24"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+    </svg>
+  )
 }
 
 const DEFAULT_RAIL_WIDTH = 226
@@ -736,11 +905,35 @@ function CopyIcon({ copied }: { copied: boolean }): React.JSX.Element {
 }
 
 function ContextPanelIcon({ direction }: { direction: 'collapse' | 'expand' }): React.JSX.Element {
+  if (direction === 'collapse') {
+    return (
+      <svg
+        aria-hidden="true"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.75"
+        viewBox="0 0 24 24"
+      >
+        <path d="m11 17-5-5 5-5" />
+        <path d="m18 17-5-5 5-5" />
+      </svg>
+    )
+  }
+
   return (
-    <svg aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-      <rect height="14" rx="2" width="18" x="3" y="5" />
-      <path d="M15 5v14" />
-      <path d={direction === 'expand' ? 'm18 12-3-3 3-3' : 'm12 12 3 3 3-3'} />
+    <svg
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.75"
+      viewBox="0 0 24 24"
+    >
+      <path d="m13 17 5-5-5-5" />
+      <path d="m6 17 5-5-5-5" />
     </svg>
   )
 }
@@ -912,9 +1105,29 @@ export default function App(): React.JSX.Element {
   activeBrowserTabIdRef.current = activeBrowserTabId
   selectedConversationIdRef.current = selectedConversationId
   selectedBrowserConversationIdRef.current = selectedBrowserConversationId
+  const [workspaceTrees, setWorkspaceTrees] = useState<Record<string, WorkspaceFileNode | null>>({})
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
+  const [selectedPreviewFile, setSelectedPreviewFile] = useState<string | null>(null)
+  const [filePreview, setFilePreview] = useState<FilePreviewResult | null>(null)
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false)
+  const [isTreeLoading, setIsTreeLoading] = useState(false)
+  const [workspaceTreeVersion, setWorkspaceTreeVersion] = useState(0)
+
+  const refreshWorkspaceTree = useCallback((): void => {
+    setWorkspaceTreeVersion((v) => v + 1)
+  }, [])
+
+  const attachedFolders = workspaceSettings?.additional_roots ?? []
+  const attachedFiles = workspaceSettings?.additional_files ?? []
+  const hasAttachedWorkspace = attachedFolders.length > 0 || attachedFiles.length > 0
   activeViewRef.current = activeView
+
   const isAttentionPanelVisible =
-    activeView !== 'chat' && activeView !== 'browser' && desktopLayout.attentionPanelOpen
+    (activeView === 'chat' && hasAttachedWorkspace && desktopLayout.attentionPanelOpen) ||
+    (activeView !== 'chat' &&
+      activeView !== 'browser' &&
+      activeView !== 'preferences' &&
+      desktopLayout.attentionPanelOpen)
 
   const addBrowserTab = useCallback((): void => {
     const current = browserTabsRef.current
@@ -1437,6 +1650,7 @@ export default function App(): React.JSX.Element {
           .then(([nextMessages, changes]) => {
             setMessages(nextMessages)
             setFileChanges(changes)
+            refreshWorkspaceTree()
           })
           .catch(() => setErrorMessage('Messages could not be refreshed.'))
       }
@@ -2629,6 +2843,97 @@ export default function App(): React.JSX.Element {
     }
   }
 
+  useEffect(() => {
+    if (!workspaceSettings || workspaceSettings.additional_roots.length === 0) {
+      setWorkspaceTrees({})
+      setSelectedPreviewFile(null)
+      setFilePreview(null)
+      return
+    }
+
+    const roots = workspaceSettings.additional_roots
+    let cancelled = false
+
+    setExpandedFolders((current) => {
+      const next = new Set(current)
+      for (const root of roots) {
+        next.add(root)
+      }
+      return next
+    })
+
+    async function loadTrees(): Promise<void> {
+      setIsTreeLoading(true)
+      const results: Record<string, WorkspaceFileNode | null> = {}
+      for (const root of roots) {
+        try {
+          const tree = await window.desktop.listWorkspaceTree(root, 3)
+          if (!cancelled) {
+            results[root] = tree
+          }
+        } catch {
+          if (!cancelled) {
+            results[root] = null
+          }
+        }
+      }
+      if (!cancelled) {
+        setWorkspaceTrees(results)
+        setIsTreeLoading(false)
+      }
+    }
+
+    void loadTrees()
+
+    if (selectedPreviewFile) {
+      void window.desktop.readFilePreview(selectedPreviewFile, 100 * 1024).then((result) => {
+        if (!cancelled && result) {
+          setFilePreview(result)
+        }
+      })
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [workspaceSettings, workspaceTreeVersion, fileChanges, selectedPreviewFile])
+
+  async function handleSelectFileForPreview(filePath: string): Promise<void> {
+    if (selectedPreviewFile === filePath) {
+      setSelectedPreviewFile(null)
+      setFilePreview(null)
+      return
+    }
+
+    setSelectedPreviewFile(filePath)
+    setIsPreviewLoading(true)
+    try {
+      const result = await window.desktop.readFilePreview(filePath, 100 * 1024)
+      setFilePreview(result)
+    } catch {
+      setFilePreview(null)
+    } finally {
+      setIsPreviewLoading(false)
+    }
+  }
+
+  function handleToggleFolder(folderPath: string): void {
+    setExpandedFolders((current) => {
+      const next = new Set(current)
+      if (next.has(folderPath)) {
+        next.delete(folderPath)
+      } else {
+        next.add(folderPath)
+      }
+      return next
+    })
+  }
+
+  function handleQuoteInChat(fileName: string): void {
+    setDraft((prev) => (prev ? `${prev} @${fileName}` : `@${fileName} `))
+    composerInputRef.current?.focus()
+  }
+
   async function handleRestartApp(): Promise<void> {
     if (isRestarting) {
       return
@@ -2840,9 +3145,11 @@ export default function App(): React.JSX.Element {
   }
 
   function AttentionAside({
+    actions,
     children,
     header
   }: {
+    actions?: React.ReactNode
     children: React.ReactNode
     header?: React.ReactNode
   }): React.JSX.Element {
@@ -2850,18 +3157,111 @@ export default function App(): React.JSX.Element {
       <aside className="attn">
         <div className="attn-top">
           {header !== undefined ? <div className="attn-top-main">{header}</div> : null}
-          <button
-            aria-label="Collapse context panel"
-            className="attention-panel-close"
-            onClick={closeAttentionPanel}
-            title="Collapse context panel"
-            type="button"
-          >
-            <ContextPanelIcon direction="collapse" />
-          </button>
+          <div className="attn-top-actions">
+            {actions}
+            <button
+              aria-label="Collapse context panel"
+              className="attention-panel-close"
+              onClick={closeAttentionPanel}
+              title="Collapse context panel"
+              type="button"
+            >
+              <ContextPanelIcon direction="collapse" />
+            </button>
+          </div>
         </div>
         {children}
       </aside>
+    )
+  }
+
+  function WorkspaceTreeNodeItem({
+    node,
+    depth = 0
+  }: {
+    node: WorkspaceFileNode
+    depth?: number
+  }): React.JSX.Element {
+    const isExpanded = expandedFolders.has(node.path)
+    const isSelected = selectedPreviewFile === node.path
+
+    if (node.kind === 'directory') {
+      return (
+        <div className="workspace-tree-dir" key={node.path}>
+          <button
+            className="workspace-tree-row workspace-tree-dir-btn"
+            onClick={() => handleToggleFolder(node.path)}
+            style={{ paddingLeft: `${6 + depth * 12}px` }}
+            title={node.path}
+            type="button"
+          >
+            <TreeChevron isExpanded={isExpanded} />
+            <TreeIcon isExpanded={isExpanded} kind="directory" />
+            <span className="workspace-tree-name">{node.name}</span>
+          </button>
+          {isExpanded && node.children && node.children.length > 0 ? (
+            <div className="workspace-tree-children">
+              {node.children.map((child) => (
+                <WorkspaceTreeNodeItem depth={depth + 1} key={child.path} node={child} />
+              ))}
+            </div>
+          ) : isExpanded && node.children && node.children.length === 0 ? (
+            <div
+              className="workspace-tree-empty-sub"
+              style={{ paddingLeft: `${22 + depth * 12}px` }}
+            >
+              Empty
+            </div>
+          ) : null}
+        </div>
+      )
+    }
+
+    return (
+      <div
+        className={`workspace-tree-row workspace-tree-file-row${isSelected ? ' is-selected' : ''}`}
+        key={node.path}
+        style={{ paddingLeft: `${18 + depth * 12}px` }}
+      >
+        <button
+          className="workspace-tree-file-btn"
+          onClick={() => void handleSelectFileForPreview(node.path)}
+          title={`Preview ${node.name}`}
+          type="button"
+        >
+          <TreeIcon extension={node.extension} kind="file" />
+          <span className="workspace-tree-name">{node.name}</span>
+          {node.size !== undefined ? (
+            <span className="workspace-tree-size">{formatBytes(node.size)}</span>
+          ) : null}
+        </button>
+        <div className="workspace-tree-actions">
+          <button
+            aria-label="Quote in chat"
+            className="workspace-tree-action-btn"
+            onClick={() => handleQuoteInChat(node.name)}
+            title="Quote in prompt"
+            type="button"
+          >
+            <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+          <button
+            aria-label="Reveal in Finder"
+            className="workspace-tree-action-btn"
+            onClick={() => void window.desktop.revealInFinder(node.path)}
+            title="Reveal in Finder"
+            type="button"
+          >
+            <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" x2="21" y1="14" y2="3" />
+            </svg>
+          </button>
+        </div>
+      </div>
     )
   }
 
@@ -3336,6 +3736,49 @@ export default function App(): React.JSX.Element {
                       ? conversationLabel(selectedConversation.title)
                       : 'No conversation selected'}
                   </div>
+                  {hasAttachedWorkspace ? (
+                    <button
+                      aria-label="Toggle workspace files panel"
+                      className={`chat-workspace-toggle-btn${desktopLayout.attentionPanelOpen ? ' is-active' : ''}`}
+                      onClick={() => setAttentionPanelOpen(!desktopLayout.attentionPanelOpen)}
+                      title={
+                        desktopLayout.attentionPanelOpen
+                          ? 'Hide workspace files'
+                          : 'Show workspace files'
+                      }
+                      type="button"
+                    >
+                      <svg
+                        className="chat-workspace-toggle-svg"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        viewBox="0 0 24 24"
+                      >
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                      </svg>
+                      <span>Files</span>
+                      <span className="chat-workspace-toggle-count">
+                        {(workspaceSettings?.additional_roots.length ?? 0) +
+                          (workspaceSettings?.additional_files.length ?? 0)}
+                      </span>
+                      {!desktopLayout.attentionPanelOpen ? (
+                        <svg
+                          aria-hidden="true"
+                          className="chat-workspace-toggle-arrow"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="m13 17 5-5-5-5" />
+                          <path d="m6 17 5-5-5-5" />
+                        </svg>
+                      ) : null}
+                    </button>
+                  ) : null}
                 </div>
 
                 {errorMessage ? <p className="chat-error">{errorMessage}</p> : null}
@@ -3763,6 +4206,157 @@ export default function App(): React.JSX.Element {
               </div>
             </div>
           </section>
+          {hasAttachedWorkspace ? (
+            <AttentionAside
+              actions={
+                <div className="workspace-header-actions">
+                  <button
+                    aria-label="Add folder or file"
+                    className="workspace-ghost-btn"
+                    disabled={isWorkspaceBusy}
+                    onClick={() => void handleAddWorkspacePath()}
+                    title="Add folder or file"
+                    type="button"
+                  >
+                    <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path d="M12 5v14m-7-7h14" />
+                    </svg>
+                  </button>
+                  <button
+                    aria-label="Refresh files"
+                    className="workspace-ghost-btn"
+                    disabled={isTreeLoading}
+                    onClick={refreshWorkspaceTree}
+                    title="Refresh workspace files"
+                    type="button"
+                  >
+                    <svg
+                      className={isTreeLoading ? 'is-spinning' : ''}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                    </svg>
+                  </button>
+                </div>
+              }
+              header={
+                <div className="workspace-panel-title">
+                  <span className="workspace-panel-label">Workspace</span>
+                  <span className="workspace-panel-count">
+                    {(workspaceSettings?.additional_roots.length ?? 0) +
+                      (workspaceSettings?.additional_files.length ?? 0)}
+                  </span>
+                </div>
+              }
+            >
+              <div className="workspace-inspector">
+                <div
+                  className={`workspace-tree-container${visibleScrollbar === 'workspaceTree' ? ' scrollbar-visible' : ''}`}
+                  onWheel={() => revealScrollbar('workspaceTree')}
+                >
+                  {isTreeLoading && Object.keys(workspaceTrees).length === 0 ? (
+                    <div className="workspace-tree-status">Scanning workspace…</div>
+                  ) : attachedFolders.length > 0 || attachedFiles.length > 0 ? (
+                    <div className="workspace-tree">
+                      {attachedFolders.map((rootPath) => {
+                        const tree = workspaceTrees[rootPath]
+                        if (!tree) {
+                          const folderName =
+                            rootPath.split(/[\\/]/).filter(Boolean).at(-1) ?? rootPath
+                          return (
+                            <div className="workspace-tree-row" key={rootPath}>
+                              <TreeIcon isExpanded={false} kind="directory" />
+                              <span className="workspace-tree-name">{folderName}</span>
+                              <span className="workspace-tree-size">Loading…</span>
+                            </div>
+                          )
+                        }
+                        return <WorkspaceTreeNodeItem key={rootPath} node={tree} />
+                      })}
+                      {attachedFiles.map((filePath) => {
+                        const fileName = filePath.split(/[\\/]/).filter(Boolean).at(-1) ?? filePath
+                        const ext = fileName.split('.').at(-1)
+                        const fileNode: WorkspaceFileNode = {
+                          name: fileName,
+                          path: filePath,
+                          relativePath: fileName,
+                          kind: 'file',
+                          extension: ext
+                        }
+                        return <WorkspaceTreeNodeItem key={filePath} node={fileNode} />
+                      })}
+                    </div>
+                  ) : (
+                    <div className="workspace-tree-empty">No files available</div>
+                  )}
+                </div>
+
+                {selectedPreviewFile !== null ? (
+                  <div className="workspace-preview-panel">
+                    <div className="workspace-preview-header">
+                      <div className="workspace-preview-info">
+                        <span className="workspace-preview-name">
+                          {selectedPreviewFile.split(/[\\/]/).filter(Boolean).at(-1)}
+                        </span>
+                        {filePreview && !filePreview.isBinary ? (
+                          <span className="workspace-preview-meta">
+                            {formatBytes(filePreview.size)}
+                            {filePreview.isTruncated ? ' (previewing 100KB)' : ''}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="workspace-preview-actions">
+                        <button
+                          aria-label="Reveal in Finder"
+                          className="workspace-preview-action-btn"
+                          onClick={() => void window.desktop.revealInFinder(selectedPreviewFile)}
+                          title="Reveal in Finder"
+                          type="button"
+                        >
+                          ↗
+                        </button>
+                        <button
+                          aria-label="Close preview"
+                          className="workspace-preview-action-btn"
+                          onClick={() => {
+                            setSelectedPreviewFile(null)
+                            setFilePreview(null)
+                          }}
+                          title="Close preview"
+                          type="button"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                    <div
+                      className={`workspace-preview-body${visibleScrollbar === 'workspacePreview' ? ' scrollbar-visible' : ''}`}
+                      onWheel={() => revealScrollbar('workspacePreview')}
+                    >
+                      {isPreviewLoading ? (
+                        <div className="workspace-preview-status">Loading preview…</div>
+                      ) : filePreview?.isBinary ? (
+                        <div className="workspace-preview-binary">
+                          <span>📦</span>
+                          <strong>Binary file</strong>
+                          <small>{formatBytes(filePreview.size)}</small>
+                        </div>
+                      ) : filePreview ? (
+                        <pre className="workspace-preview-code">
+                          <code>{filePreview.content}</code>
+                        </pre>
+                      ) : (
+                        <div className="workspace-preview-status">Preview unavailable</div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </AttentionAside>
+          ) : null}
         </div>
 
         <div className={`view${activeView === 'browser' ? ' active' : ''}`}>
@@ -4456,11 +5050,13 @@ export default function App(): React.JSX.Element {
                         : 'No model data is sent externally.'}
                   </small>
                 </div>
-                <ContextPanelExpandButton />
               </div>
             </div>
 
-            <div className="settings-panel">
+            <div
+              className={`settings-panel${visibleScrollbar === 'settings' ? ' scrollbar-visible' : ''}`}
+              onScroll={() => revealScrollbar('settings')}
+            >
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
@@ -4498,20 +5094,13 @@ export default function App(): React.JSX.Element {
                   <div className="model-settings-flow">
                     <div className="model-connection-panel">
                       <div className="model-connection-header">
-                        <div>
-                          <strong>
-                            {modelLocation === 'local'
-                              ? 'Local server connection'
-                              : 'External provider connection'}
-                          </strong>
-                          <p className="model-connection-copy">
-                            {selectedProviderId === 'custom'
-                              ? modelLocation === 'local'
-                                ? 'The endpoint must use localhost or a loopback IP address. An API key is optional.'
-                                : 'Conversation content and required tool results may be sent to this provider. An API key is required.'
-                              : getProviderPreset(selectedProviderId).description}
-                          </p>
-                        </div>
+                        <p className="model-connection-copy">
+                          {selectedProviderId === 'custom'
+                            ? modelLocation === 'local'
+                              ? 'Local server connection (localhost or loopback IP). API key is optional.'
+                              : 'External provider connection. API key is required.'
+                            : getProviderPreset(selectedProviderId).description}
+                        </p>
                         <span
                           className={`model-privacy-badge${
                             modelLocation === 'external' ? ' external' : ''
@@ -4928,23 +5517,6 @@ export default function App(): React.JSX.Element {
               </section>
             </div>
           </section>
-
-          <AttentionAside header={<div className="attn-header">Settings guide</div>}>
-            <div className="settings-guide">
-              <section className="settings-guide-item">
-                <div className="settings-guide-title">Your credentials</div>
-                <p>API keys are stored in the system Keychain and are never displayed here.</p>
-              </section>
-              <section className="settings-guide-item">
-                <div className="settings-guide-title">File access</div>
-                <p>Extra paths apply only to the selected conversation and remain read-only.</p>
-              </section>
-              <section className="settings-guide-item restart">
-                <div className="settings-guide-title">Restart required</div>
-                <p>Model, agent, and Tavily changes take effect after restarting asAgent.</p>
-              </section>
-            </div>
-          </AttentionAside>
         </div>
       </div>
       {restartRequested ? (

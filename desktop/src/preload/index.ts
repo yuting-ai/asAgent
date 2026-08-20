@@ -153,6 +153,25 @@ type WorkspaceSettingsInput = {
   additionalFiles: string[]
 }
 
+type WorkspaceFileNode = {
+  name: string
+  path: string
+  relativePath: string
+  kind: 'file' | 'directory'
+  size?: number
+  extension?: string
+  children?: WorkspaceFileNode[]
+}
+
+type FilePreviewResult = {
+  path: string
+  name: string
+  size: number
+  content: string
+  isTruncated: boolean
+  isBinary: boolean
+}
+
 const desktopBridge = {
   getAppInfo: (): Promise<{
     appName: string
@@ -250,6 +269,12 @@ const desktopBridge = {
     input: WorkspaceSettingsInput
   ): Promise<WorkspaceSettingsStatus> =>
     ipcRenderer.invoke('desktop:save-conversation-file-access', conversationId, input),
+  listWorkspaceTree: (folderPath: string, maxDepth?: number): Promise<WorkspaceFileNode | null> =>
+    ipcRenderer.invoke('desktop:list-workspace-tree', folderPath, maxDepth),
+  readFilePreview: (filePath: string, maxBytes?: number): Promise<FilePreviewResult | null> =>
+    ipcRenderer.invoke('desktop:read-file-preview', filePath, maxBytes),
+  revealInFinder: (targetPath: string): Promise<void> =>
+    ipcRenderer.invoke('desktop:reveal-in-finder', targetPath),
   onRunEvent: (callback: (update: RunUpdate) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, update: RunUpdate): void => {
       callback(update)

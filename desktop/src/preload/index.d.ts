@@ -157,6 +157,25 @@ interface ClearStorageResult {
   deleted_count: number
 }
 
+interface WorkspaceFileNode {
+  name: string
+  path: string
+  relativePath: string
+  kind: 'file' | 'directory'
+  size?: number
+  extension?: string
+  children?: WorkspaceFileNode[]
+}
+
+interface FilePreviewResult {
+  path: string
+  name: string
+  size: number
+  content: string
+  isTruncated: boolean
+  isBinary: boolean
+}
+
 interface DesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>
   showBrowser(
@@ -215,6 +234,9 @@ interface DesktopBridge {
     conversationId: string,
     input: WorkspaceSettingsInput
   ): Promise<WorkspaceSettingsStatus>
+  listWorkspaceTree(folderPath: string, maxDepth?: number): Promise<WorkspaceFileNode | null>
+  readFilePreview(filePath: string, maxBytes?: number): Promise<FilePreviewResult | null>
+  revealInFinder(targetPath: string): Promise<void>
   onRunEvent(callback: (update: RunUpdate) => void): () => void
   onRunStreamError(callback: (error: RunStreamError) => void): () => void
   onToolApprovalRequested(callback: (approval: ToolApproval) => void): () => void

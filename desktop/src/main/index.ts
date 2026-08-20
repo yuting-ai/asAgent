@@ -31,6 +31,7 @@ import {
   type BrowserHostWindow,
   type BrowserTabState
 } from './browser_view'
+import { listWorkspaceTree, readFilePreview } from './workspace_tree'
 import { parseExternalWebUrl } from './external_url'
 
 let backendLauncher: BackendLauncher | undefined
@@ -1133,6 +1134,47 @@ app.whenReady().then(async () => {
       )
     }
   )
+
+  ipcMain.handle('desktop:list-workspace-tree', (event, folderPath: unknown, maxDepth: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    if (typeof folderPath !== 'string' || !folderPath.trim()) {
+      throw new Error('Folder path is invalid.')
+    }
+    const depth = typeof maxDepth === 'number' && Number.isInteger(maxDepth) ? maxDepth : 3
+    return listWorkspaceTree(folderPath.trim(), depth)
+  })
+
+  ipcMain.handle('desktop:read-file-preview', (event, filePath: unknown, maxBytes: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    if (typeof filePath !== 'string' || !filePath.trim()) {
+      throw new Error('File path is invalid.')
+    }
+    const limit = typeof maxBytes === 'number' && Number.isInteger(maxBytes) ? maxBytes : 100 * 1024
+    return readFilePreview(filePath.trim(), limit)
+  })
+
+  ipcMain.handle('desktop:reveal-in-finder', (event, targetPath: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    if (typeof targetPath !== 'string' || !targetPath.trim()) {
+      throw new Error('Target path is invalid.')
+    }
+    shell.showItemInFolder(targetPath.trim())
+  })
 
   createWindow()
 

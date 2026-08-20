@@ -25,6 +25,8 @@ class FilesystemCreateFileTool:
                 "directory must already exist, and the change can be undone by the user."
             ),
             include_content=True,
+            risk_level="medium",
+            requires_approval=False,
         )
 
     async def execute(self, arguments: Mapping[str, object]) -> str:
@@ -53,6 +55,8 @@ class FilesystemReplaceFileTool:
                 "snapshot is saved so the user can undo the change safely."
             ),
             include_content=True,
+            risk_level="medium",
+            requires_approval=False,
         )
 
     async def execute(self, arguments: Mapping[str, object]) -> str:
