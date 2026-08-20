@@ -29,6 +29,13 @@ export type BrowserClickResult = {
   page?: BrowserPageContent
 }
 
+export type BrowserNavigateResult = {
+  action: 'navigated'
+  url: string
+  title: string
+  page?: BrowserPageContent
+}
+
 export type BrowserFillResult = {
   action: 'filled'
   url: string
@@ -1347,6 +1354,26 @@ export class VisibleBrowser {
     return {
       url: browserDisplayUrl(view.webContents.getURL()),
       elements
+    }
+  }
+
+  async navigateCurrentPage(tabId: string, url: string): Promise<BrowserNavigateResult> {
+    this.assertNotDisposed()
+    const id = parseBrowserTabId(tabId)
+    if (this.visibleTabId !== id) {
+      throw new Error('current browser tab is not visible')
+    }
+
+    const view = this.ensureView(id)
+    const safeUrl = parseBrowserWebUrl(url)
+    await loadTabUrl(view, safeUrl)
+    const displayUrl = browserDisplayUrl(safeUrl)
+    const page = await this.readCurrentPage(id).catch(() => undefined)
+    return {
+      action: 'navigated',
+      url: displayUrl,
+      title: view.webContents.getTitle() || titleFromUrl(displayUrl),
+      ...(page !== undefined ? { page } : {})
     }
   }
 

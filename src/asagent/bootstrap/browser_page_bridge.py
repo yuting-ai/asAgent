@@ -45,6 +45,14 @@ class BrowserClickResult:
 
 
 @dataclass(frozen=True, slots=True)
+class BrowserNavigateResult:
+    action: str
+    url: str
+    title: str
+    page: BrowserPageContent | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class BrowserFillResult:
     action: str
     url: str
@@ -109,6 +117,19 @@ class BrowserPageBridgeClient:
             failure_message="current browser tab is not visible",
         )
         return _interactive_snapshot_from_payload(payload)
+
+    async def navigate_current_page(
+        self,
+        tab_id: str,
+        url: str,
+    ) -> BrowserNavigateResult:
+        payload = await self._post_json(
+            "/navigate-current-page",
+            {"tab_id": tab_id, "url": url},
+            failure_message="current browser tab is not visible",
+            timeout_seconds=15.0,
+        )
+        return _navigate_result_from_payload(payload)
 
     async def click_current_page(
         self,
@@ -302,6 +323,29 @@ def _click_result_from_payload(payload: object) -> BrowserClickResult:
             raise BrowserPageBridgeError("target was not found") from error
 
     return BrowserClickResult(action=action, url=url, title=title, page=page)
+
+
+def _navigate_result_from_payload(payload: object) -> BrowserNavigateResult:
+    if not isinstance(payload, dict):
+        raise BrowserPageBridgeError("current browser tab is not visible")
+
+    action = payload.get("action")
+    url = payload.get("url")
+    title = payload.get("title")
+    if action != "navigated" or not isinstance(url, str) or not isinstance(title, str):
+        raise BrowserPageBridgeError("current browser tab is not visible")
+
+    page_payload = payload.get("page")
+    page = None
+    if page_payload is not None:
+        try:
+            page = _page_content_from_payload(page_payload)
+        except BrowserPageBridgeError as error:
+            raise BrowserPageBridgeError(
+                "current browser tab is not visible"
+            ) from error
+
+    return BrowserNavigateResult(action=action, url=url, title=title, page=page)
 
 
 def _fill_result_from_payload(payload: object) -> BrowserFillResult:

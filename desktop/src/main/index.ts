@@ -453,6 +453,12 @@ app.whenReady().then(async () => {
       }
       return visibleBrowser.inspectInteractive(tabId)
     },
+    navigateCurrentPage: (tabId, url) => {
+      if (visibleBrowser === undefined) {
+        throw new Error('current browser tab is not visible')
+      }
+      return visibleBrowser.navigateCurrentPage(tabId, url)
+    },
     clickCurrentPage: (tabId, targetId) => {
       if (visibleBrowser === undefined) {
         throw new Error('current browser tab is not visible')

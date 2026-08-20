@@ -131,6 +131,16 @@ describe('BrowserPageBridge', () => {
         text: 'Message sent'
       }
     }))
+    const navigateCurrentPage = vi.fn(async () => ({
+      action: 'navigated' as const,
+      url: 'https://example.com/search?q=asAgent',
+      title: 'Search results',
+      page: {
+        title: 'Search results',
+        url: 'https://example.com/search?q=asAgent',
+        text: 'Found 10 results'
+      }
+    }))
     const waitForCurrentPage = vi.fn(async () => ({
       changed: true,
       page: {
@@ -143,6 +153,7 @@ describe('BrowserPageBridge', () => {
     const bridge = new BrowserPageBridge({
       readCurrentPage,
       inspectInteractive,
+      navigateCurrentPage,
       clickCurrentPage,
       fillCurrentPage,
       selectCurrentPage,
@@ -404,6 +415,61 @@ describe('BrowserPageBridge', () => {
         title: 'Thanks',
         url: 'https://example.com/thanks',
         text: 'Message sent'
+      }
+    })
+
+    const navigateUnauthorized = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/navigate-current-page',
+        {},
+        JSON.stringify({ tab_id: 'tab-1', url: 'https://example.com' })
+      ),
+      navigateUnauthorized
+    )
+    await vi.waitFor(() => expect(navigateUnauthorized.end).toHaveBeenCalled())
+    expect(navigateUnauthorized.statusCode).toBe(401)
+    expect(navigateCurrentPage).not.toHaveBeenCalled()
+
+    const navigateMissingUrl = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/navigate-current-page',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1' })
+      ),
+      navigateMissingUrl
+    )
+    await vi.waitFor(() => expect(navigateMissingUrl.end).toHaveBeenCalled())
+    expect(navigateMissingUrl.statusCode).toBe(400)
+    expect(navigateCurrentPage).not.toHaveBeenCalled()
+
+    const navigateAuthorized = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/navigate-current-page',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1', url: 'https://example.com/search?q=asAgent' })
+      ),
+      navigateAuthorized
+    )
+    await vi.waitFor(() => expect(navigateAuthorized.end).toHaveBeenCalled())
+    expect(navigateAuthorized.statusCode).toBe(200)
+    expect(navigateCurrentPage).toHaveBeenCalledWith(
+      'tab-1',
+      'https://example.com/search?q=asAgent'
+    )
+    expect(JSON.parse(navigateAuthorized.body ?? '')).toEqual({
+      action: 'navigated',
+      url: 'https://example.com/search?q=asAgent',
+      title: 'Search results',
+      page: {
+        title: 'Search results',
+        url: 'https://example.com/search?q=asAgent',
+        text: 'Found 10 results'
       }
     })
 

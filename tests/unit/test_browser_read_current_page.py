@@ -161,12 +161,17 @@ async def test_browser_read_tool_registers_only_for_bound_browser_runs() -> None
     assert browser_permissions == frozenset(
         {
             "browser.read",
+            "browser.navigate",
             "browser.inspect",
             "browser.click",
             "browser.fill",
             "browser.select",
             "browser.wait",
         }
+    )
+    assert (
+        browser_registry.get("browser.navigate").definition.tool_id
+        == "browser.navigate"
     )
     assert (
         browser_registry.get("browser.read_current_page").definition.tool_id

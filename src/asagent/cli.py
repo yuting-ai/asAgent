@@ -96,6 +96,7 @@ from asagent.tools.approval import PendingToolApprovalPolicy, ToolApprovalPolicy
 from asagent.tools.browser_click import BrowserClickTool
 from asagent.tools.browser_fill import BrowserFillTool
 from asagent.tools.browser_inspect_interactive import BrowserInspectInteractiveTool
+from asagent.tools.browser_navigate import BrowserNavigateTool
 from asagent.tools.browser_read_current_page import BrowserReadCurrentPageTool
 from asagent.tools.browser_run_bindings import BrowserRunBindings
 from asagent.tools.browser_select import BrowserSelectTool
@@ -123,6 +124,7 @@ _BUILTIN_TOOL_PERMISSIONS = frozenset({"tool.execute"})
 _FILESYSTEM_READ_PERMISSIONS = frozenset({"filesystem.read"})
 _FILESYSTEM_WRITE_PERMISSIONS = frozenset({"filesystem.write"})
 _BROWSER_READ_PERMISSIONS = frozenset({"browser.read"})
+_BROWSER_NAVIGATE_PERMISSIONS = frozenset({"browser.navigate"})
 _BROWSER_INSPECT_PERMISSIONS = frozenset({"browser.inspect"})
 _BROWSER_CLICK_PERMISSIONS = frozenset({"browser.click"})
 _BROWSER_FILL_PERMISSIONS = frozenset({"browser.fill"})
@@ -130,6 +132,7 @@ _BROWSER_SELECT_PERMISSIONS = frozenset({"browser.select"})
 _BROWSER_WAIT_PERMISSIONS = frozenset({"browser.wait"})
 _BROWSER_TOOL_PERMISSIONS = (
     _BROWSER_READ_PERMISSIONS
+    | _BROWSER_NAVIGATE_PERMISSIONS
     | _BROWSER_INSPECT_PERMISSIONS
     | _BROWSER_CLICK_PERMISSIONS
     | _BROWSER_WAIT_PERMISSIONS
@@ -275,6 +278,12 @@ async def _register_browser_tools(
 
     registry.register(
         BrowserReadCurrentPageTool(
+            client=browser_page_client,
+            tab_id=tab_id,
+        ),
+    )
+    registry.register(
+        BrowserNavigateTool(
             client=browser_page_client,
             tab_id=tab_id,
         ),

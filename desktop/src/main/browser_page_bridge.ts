@@ -10,6 +10,7 @@ import {
   type BrowserClickResult,
   type BrowserFillResult,
   type BrowserInteractiveSnapshot,
+  type BrowserNavigateResult,
   type BrowserPageContent,
   type BrowserSelectResult,
   type BrowserSubmitResult,
@@ -19,6 +20,7 @@ import {
 export type BrowserPageBridgeOptions = {
   readCurrentPage: (tabId: string) => Promise<BrowserPageContent>
   inspectInteractive: (tabId: string) => Promise<BrowserInteractiveSnapshot>
+  navigateCurrentPage: (tabId: string, url: string) => Promise<BrowserNavigateResult>
   clickCurrentPage: (tabId: string, targetId: string) => Promise<BrowserClickResult>
   fillCurrentPage: (tabId: string, targetId: string, value: string) => Promise<BrowserFillResult>
   selectCurrentPage: (
@@ -85,6 +87,10 @@ function isKnownOperationError(detail: string): boolean {
 export class BrowserPageBridge {
   private readonly readCurrentPage: (tabId: string) => Promise<BrowserPageContent>
   private readonly inspectInteractive: (tabId: string) => Promise<BrowserInteractiveSnapshot>
+  private readonly navigateCurrentPage: (
+    tabId: string,
+    url: string
+  ) => Promise<BrowserNavigateResult>
   private readonly clickCurrentPage: (
     tabId: string,
     targetId: string
@@ -115,6 +121,7 @@ export class BrowserPageBridge {
   constructor(options: BrowserPageBridgeOptions) {
     this.readCurrentPage = options.readCurrentPage
     this.inspectInteractive = options.inspectInteractive
+    this.navigateCurrentPage = options.navigateCurrentPage
     this.clickCurrentPage = options.clickCurrentPage
     this.fillCurrentPage = options.fillCurrentPage
     this.selectCurrentPage = options.selectCurrentPage
@@ -187,6 +194,7 @@ export class BrowserPageBridge {
         request.method !== 'POST' ||
         (request.url !== '/read-current-page' &&
           request.url !== '/inspect-interactive' &&
+          request.url !== '/navigate-current-page' &&
           request.url !== '/click-current-page' &&
           request.url !== '/fill-current-page' &&
           request.url !== '/select-current-page' &&
@@ -232,6 +240,17 @@ export class BrowserPageBridge {
       if (request.url === '/inspect-interactive') {
         const snapshot = await this.inspectInteractive(tabId.trim())
         writeJson(response, 200, snapshot)
+        return
+      }
+
+      if (request.url === '/navigate-current-page') {
+        const url = record['url']
+        if (typeof url !== 'string' || url.trim() === '') {
+          writeJson(response, 400, { detail: 'invalid request' })
+          return
+        }
+        const result = await this.navigateCurrentPage(tabId.trim(), url.trim())
+        writeJson(response, 200, result)
         return
       }
 
