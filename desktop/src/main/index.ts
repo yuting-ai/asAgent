@@ -96,7 +96,7 @@ function createWindow(): void {
     ...(process.platform === 'darwin'
       ? {
           titleBarStyle: 'hidden' as const,
-          trafficLightPosition: { x: 20, y: 16 }
+          trafficLightPosition: { x: 6, y: 12 }
         }
       : {}),
     ...(process.platform === 'linux' ? { icon } : {}),

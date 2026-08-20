@@ -592,15 +592,20 @@ body.is-resizing-columns {
 }
 
 .app.rail-collapsed .rail {
-  padding: 0 8px 16px;
+  padding: 0 8px 14px;
 }
 
 .app.rail-collapsed .rail-window-controls {
+  height: 40px;
   margin: 0 -8px 8px;
 }
 
 .app.rail-collapsed .rail-section {
-  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 6px;
 }
 
 .app.rail-collapsed .rail-recents {
@@ -618,17 +623,20 @@ body.is-resizing-columns {
 .app.rail-collapsed .rail-item,
 .app.rail-collapsed .rail-settings,
 .app.rail-collapsed .rail-toggle {
-  justify-content: center;
-  min-height: 40px;
-  padding: 10px;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
   border-radius: 10px;
 }
 
 .app.rail-collapsed .rail-icon,
 .app.rail-collapsed .rail-settings svg,
 .app.rail-collapsed .rail-toggle svg {
-  width: 20px;
-  height: 20px;
+  width: 23px;
+  height: 23px;
 }
 
 .view {
