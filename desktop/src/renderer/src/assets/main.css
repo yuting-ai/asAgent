@@ -254,50 +254,59 @@ body.is-resizing-columns {
   padding-right: 0;
 }
 
-.rail-item-container {
-  position: relative;
+.rail-actions-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.rail-new-btn {
   display: flex;
   align-items: center;
+  gap: 9px;
   width: 100%;
-}
-
-.rail-item-container .rail-item {
-  flex: 1;
-  padding-right: 32px;
-}
-
-.rail-action-button {
-  position: absolute;
-  right: 6px;
-  display: grid;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  place-items: center;
-  color: var(--text-faint);
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--line-soft);
+  cursor: pointer;
   transition:
     color 120ms ease-out,
-    background-color 120ms ease-out;
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    box-shadow 120ms ease-out;
 }
 
-.rail-action-button:hover:not(:disabled),
-.rail-action-button:focus-visible {
-  background: var(--bg-raised);
+.rail-new-btn .rail-icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.rail-new-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--line);
+  color: var(--brass);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 4%);
+}
+
+.rail-new-btn.is-chat:hover:not(:disabled) {
   color: var(--brass);
 }
 
-.rail-action-button:disabled {
-  opacity: 0.4;
+.rail-new-btn.is-browser:hover:not(:disabled) {
+  color: #10b981;
+}
+
+.rail-new-btn:disabled {
+  opacity: 0.45;
   cursor: default;
-}
-
-.rail-action-button svg {
-  width: 14px;
-  height: 14px;
-}
-
-.app.rail-collapsed .rail-action-button {
-  display: none;
 }
 
 .rail-recents-list {
@@ -342,25 +351,27 @@ body.is-resizing-columns {
   display: flex;
   align-items: center;
   min-width: 0;
-  border-radius: 6px;
+  border-radius: 9999px;
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out;
 }
 
 .rail-recent-item:hover:not(.renaming) {
-  background: var(--bg-inset);
+  background: #eeeff2;
 }
 
 .rail-recent-item.active {
-  background: var(--accent-soft);
-  color: var(--brass);
+  background: #e2e3e7;
 }
 
 .rail-recent-body {
   display: flex;
   flex: 1;
-  gap: 9px;
+  gap: 10px;
   align-items: center;
   min-width: 0;
-  padding: 7px 9px;
+  padding: 8px 12px;
   color: var(--text-dim);
   text-align: left;
 }
@@ -372,25 +383,30 @@ body.is-resizing-columns {
 
 .rail-recent-kind {
   flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-  opacity: 0.65;
+  width: 15px;
+  height: 15px;
+  color: inherit;
+  opacity: 0.7;
 }
 
-.rail-recent-kind.is-chat {
-  color: var(--brass);
+.rail-recent-item:hover .rail-recent-body,
+.rail-recent-item:hover .rail-recent-title {
+  color: var(--text);
 }
 
-.rail-recent-kind.is-browser {
-  color: #7b61c9;
+.rail-recent-item:hover .rail-recent-kind {
+  opacity: 0.9;
+}
+
+.rail-recent-item.active .rail-recent-body,
+.rail-recent-item.active .rail-recent-title {
+  color: var(--text);
+  font-weight: 550;
 }
 
 .rail-recent-item.active .rail-recent-kind {
+  color: var(--text);
   opacity: 1;
-}
-
-.rail-recent-item.active .rail-recent-title {
-  color: var(--brass);
 }
 
 .rail-recent-title {
@@ -413,10 +429,10 @@ body.is-resizing-columns {
 
 .rail-recent-actions {
   position: absolute;
-  right: 4px;
+  right: 6px;
   display: flex;
-  gap: 1px;
-  padding-left: 10px;
+  gap: 2px;
+  padding-left: 12px;
   background: linear-gradient(90deg, transparent, var(--rail-bg) 24%);
   opacity: 0;
   pointer-events: none;
@@ -424,11 +440,11 @@ body.is-resizing-columns {
 }
 
 .rail-recent-item:hover .rail-recent-actions {
-  background: linear-gradient(90deg, transparent, var(--bg-inset) 24%);
+  background: linear-gradient(90deg, transparent, #eeeff2 24%);
 }
 
 .rail-recent-item.active .rail-recent-actions {
-  background: linear-gradient(90deg, transparent, var(--accent-soft) 24%);
+  background: linear-gradient(90deg, transparent, #e2e3e7 24%);
 }
 
 .rail-recent-item:hover .rail-recent-actions,
@@ -441,7 +457,7 @@ body.is-resizing-columns {
   display: grid;
   width: 22px;
   height: 22px;
-  border-radius: 5px;
+  border-radius: 9999px;
   place-items: center;
   color: var(--text-faint);
 }
@@ -464,14 +480,14 @@ body.is-resizing-columns {
 
 .rail-recent-rename {
   width: 100%;
-  margin: 3px 4px;
-  padding: 5px 7px;
+  margin: 2px 4px;
+  padding: 6px 12px;
   border: 1px solid color-mix(in srgb, var(--brass) 45%, var(--line));
-  border-radius: 6px;
+  border-radius: 9999px;
   outline: none;
   background: var(--bg-raised);
   color: var(--text);
-  font-size: 12px;
+  font-size: 13.5px;
 }
 
 .rail-recent-rename:focus {
@@ -621,6 +637,7 @@ body.is-resizing-columns {
 }
 
 .app.rail-collapsed .rail-item,
+.app.rail-collapsed .rail-new-btn,
 .app.rail-collapsed .rail-settings,
 .app.rail-collapsed .rail-toggle {
   display: grid;
@@ -629,10 +646,17 @@ body.is-resizing-columns {
   height: 44px;
   min-height: 44px;
   padding: 0;
+  border: none;
   border-radius: 10px;
+  background: transparent;
+}
+
+.app.rail-collapsed .rail-new-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
 }
 
 .app.rail-collapsed .rail-icon,
+.app.rail-collapsed .rail-new-btn .rail-icon,
 .app.rail-collapsed .rail-settings svg,
 .app.rail-collapsed .rail-toggle svg {
   width: 23px;
@@ -4115,6 +4139,12 @@ select.settings-select {
 
 .browser-agent-turn.is-assistant {
   align-items: flex-start;
+}
+
+.browser-agent-turn .run-activity-msg {
+  align-self: flex-start;
+  width: 100%;
+  margin: 6px 0;
 }
 
 .browser-agent-bubble {

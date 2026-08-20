@@ -1184,6 +1184,7 @@ export default function App(): React.JSX.Element {
   const activeBrowserTabIdRef = useRef(activeBrowserTabId)
   const selectedConversationIdRef = useRef(selectedConversationId)
   const selectedBrowserConversationIdRef = useRef(selectedBrowserConversationId)
+  const createNewChatSessionRef = useRef<() => void>(() => undefined)
   const browserMessageLoadIdRef = useRef(0)
   const scrollbarHideTimerRef = useRef<number | null>(null)
   const copyFeedbackTimerRef = useRef<number | null>(null)
@@ -1917,6 +1918,23 @@ export default function App(): React.JSX.Element {
         )
       })
     })
+  }, [])
+
+  useEffect(() => {
+    function onGlobalShortcut(event: KeyboardEvent): void {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) {
+        return
+      }
+      if (event.key.toLowerCase() === 'n') {
+        event.preventDefault()
+        createNewChatSessionRef.current()
+      }
+    }
+
+    window.addEventListener('keydown', onGlobalShortcut)
+    return () => {
+      window.removeEventListener('keydown', onGlobalShortcut)
+    }
   }, [])
 
   useEffect(() => {
@@ -3048,6 +3066,30 @@ export default function App(): React.JSX.Element {
     return `rail-item${activeView === view ? ' active' : ''}`
   }
 
+  function createNewChatSession(): void {
+    if (backendStatus !== 'ready' || isCreatingConversation) {
+      return
+    }
+    setActiveView('chat')
+    void createConversation()
+  }
+  createNewChatSessionRef.current = createNewChatSession
+
+  function createNewBrowserSession(): void {
+    if (backendStatus !== 'ready' || isCreatingConversation) {
+      return
+    }
+    setActiveView('browser')
+    if (browserTabsRef.current.length >= MAX_BROWSER_TABS) {
+      setErrorMessage('Close a browser tab before creating a new one.')
+      return
+    }
+    const created = createBrowserTab()
+    setBrowserTabs([...browserTabsRef.current, created])
+    setActiveBrowserTabId(created.id)
+    void createBrowserConversationForActiveTab()
+  }
+
   function setAttentionPanelOpen(open: boolean): void {
     const next = { ...desktopLayoutRef.current, attentionPanelOpen: open }
     desktopLayoutRef.current = next
@@ -3418,37 +3460,22 @@ export default function App(): React.JSX.Element {
 
         <nav aria-label="Primary" className="rail" id="primary-sidebar">
           <div aria-hidden="true" className="rail-window-controls" />
-          <div className="rail-section">
-            <div className="rail-item-container">
-              <button
-                className={railItemClass('chat')}
-                onClick={() => setActiveView('chat')}
-                type="button"
-              >
-                <Icon
-                  className="rail-icon"
-                  path="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"
-                />
-                <span className="rail-item-label">Chat</span>
-              </button>
-              <button
-                aria-label="New chat"
-                className="rail-action-button"
-                disabled={backendStatus !== 'ready' || isCreatingConversation}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setActiveView('chat')
-                  void createConversation()
-                }}
-                title="New chat"
-                type="button"
-              >
-                <Icon path="M12 5v14M5 12h14" />
-              </button>
-            </div>
+          <div className="rail-section rail-actions-section">
             <button
-              className={railItemClass('browser')}
-              onClick={() => setActiveView('browser')}
+              className="rail-new-btn is-chat"
+              disabled={backendStatus !== 'ready' || isCreatingConversation}
+              onClick={createNewChatSession}
+              title="New chat"
+              type="button"
+            >
+              <Icon className="rail-icon" path="M12 5v14M5 12h14" />
+              <span className="rail-item-label">New chat</span>
+            </button>
+            <button
+              className="rail-new-btn is-browser"
+              disabled={backendStatus !== 'ready' || isCreatingConversation}
+              onClick={createNewBrowserSession}
+              title="New browser"
               type="button"
             >
               <svg
@@ -3461,66 +3488,7 @@ export default function App(): React.JSX.Element {
                 <circle cx="12" cy="12" r="9" />
                 <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" />
               </svg>
-              <span className="rail-item-label">Browser</span>
-            </button>
-            <button
-              className={railItemClass('activity')}
-              onClick={() => setActiveView('activity')}
-              type="button"
-            >
-              <Icon className="rail-icon" path="M13 2 3 14h7l-1 8 10-12h-7l1-8z" />
-              <span className="rail-item-label">Activity</span>
-              {activeRun !== null ? (
-                <span className="rail-live">
-                  <span className="rail-live-dot" />1 running
-                </span>
-              ) : null}
-            </button>
-            <button
-              className={railItemClass('scheduled')}
-              onClick={() => setActiveView('scheduled')}
-              type="button"
-            >
-              <svg
-                className="rail-icon"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-              >
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 7v5l3 3" />
-              </svg>
-              <span className="rail-item-label">Scheduled</span>
-              <span className="rail-count">—</span>
-            </button>
-            <button
-              className={railItemClass('automations')}
-              onClick={() => setActiveView('automations')}
-              type="button"
-            >
-              <Icon className="rail-icon" path="M4 5h16M4 12h10M4 19h13" />
-              <span className="rail-item-label">Automations</span>
-              <span className="rail-count">—</span>
-            </button>
-            <button
-              className={railItemClass('privacy')}
-              onClick={() => setActiveView('privacy')}
-              type="button"
-            >
-              <Icon
-                className="rail-icon"
-                path="M12 2 3 6v6c0 5 4 8.5 9 10 5-1.5 9-5 9-10V6l-9-4Z"
-              />
-              <span className="rail-item-label">Privacy &amp; Permissions</span>
-            </button>
-            <button
-              className={railItemClass('history')}
-              onClick={() => setActiveView('history')}
-              type="button"
-            >
-              <Icon className="rail-icon" path="M3 3v18h18M7 15l4-5 3 3 5-7" />
-              <span className="rail-item-label">History</span>
+              <span className="rail-item-label">New browser</span>
             </button>
           </div>
 
@@ -3660,12 +3628,22 @@ export default function App(): React.JSX.Element {
 
           <div className="rail-footer">
             <button
-              className="rail-settings"
+              className={railItemClass('preferences')}
               onClick={() => setActiveView('preferences')}
+              title="Settings"
               type="button"
             >
-              <Icon path="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              <span className="rail-item-label">Agent preferences</span>
+              <svg
+                className="rail-icon"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+              <span className="rail-item-label">Settings</span>
             </button>
             <button
               aria-controls="primary-sidebar"
@@ -4654,147 +4632,156 @@ export default function App(): React.JSX.Element {
                           </p>
                         </div>
                       ) : (
-                        <>
-                          {browserMessages.map((message) => (
-                            <div
-                              className={`browser-agent-turn ${message.role === 'user' ? 'is-user' : 'is-assistant'}`}
-                              key={message.message_id}
-                            >
-                              {message.role === 'assistant'
-                                ? (browserRunHistoryByMessage.get(message.message_id) ?? []).map(
-                                    (history) => {
-                                      const activity = persistedRunActivity(history)
-                                      return (
-                                        <RunActivityCard
-                                          activity={activity}
-                                          expanded={expandedHistoryRunIds.has(activity.runId)}
-                                          key={activity.runId}
-                                          onExpandedChange={(expanded) =>
-                                            setExpandedHistoryRunIds((current) => {
-                                              const next = new Set(current)
-                                              if (expanded) next.add(activity.runId)
-                                              else next.delete(activity.runId)
-                                              return next
-                                            })
-                                          }
-                                        />
-                                      )
+                        (() => {
+                          const visibleBrowserActivity =
+                            runActivity?.conversationId === selectedBrowserConversationId &&
+                            !browserRunHistory.some(
+                              (history) => history.run.run_id === runActivity.runId
+                            )
+                              ? runActivity
+                              : null
+                          const browserActivityAnchorIndex =
+                            visibleBrowserActivity === null
+                              ? -1
+                              : browserMessages.reduce(
+                                  (lastIndex, message, index) =>
+                                    message.role === 'user' ? index : lastIndex,
+                                  -1
+                                )
+
+                          return (
+                            <>
+                              {browserMessages.map((message, index) => (
+                                <div
+                                  className={`browser-agent-turn ${message.role === 'user' ? 'is-user' : 'is-assistant'}`}
+                                  key={message.message_id}
+                                >
+                                  {message.role === 'assistant'
+                                    ? (
+                                        browserRunHistoryByMessage.get(message.message_id) ?? []
+                                      ).map((history) => {
+                                        const activity = persistedRunActivity(history)
+                                        return (
+                                          <RunActivityCard
+                                            activity={activity}
+                                            expanded={expandedHistoryRunIds.has(activity.runId)}
+                                            key={activity.runId}
+                                            onExpandedChange={(expanded) =>
+                                              setExpandedHistoryRunIds((current) => {
+                                                const next = new Set(current)
+                                                if (expanded) next.add(activity.runId)
+                                                else next.delete(activity.runId)
+                                                return next
+                                              })
+                                            }
+                                          />
+                                        )
+                                      })
+                                    : null}
+                                  <div className="browser-agent-bubble">
+                                    {message.role === 'assistant' ? (
+                                      <div className="markdown-content">
+                                        <ReactMarkdown
+                                          remarkPlugins={[remarkGfm]}
+                                          components={{
+                                            a: ({ children, href }) => (
+                                              <a
+                                                href={href}
+                                                onClick={(event) => {
+                                                  event.preventDefault()
+                                                  openAssistantLink(href)
+                                                }}
+                                                title="Open in your default browser"
+                                              >
+                                                {children}
+                                              </a>
+                                            )
+                                          }}
+                                        >
+                                          {message.content}
+                                        </ReactMarkdown>
+                                      </div>
+                                    ) : (
+                                      message.content
+                                    )}
+                                  </div>
+                                  <div className="message-meta browser-agent-meta">
+                                    <time
+                                      dateTime={message.created_at}
+                                      title={new Date(message.created_at).toLocaleString()}
+                                    >
+                                      {formatMessageTime(message.created_at)}
+                                    </time>
+                                    <button
+                                      aria-label={
+                                        copiedMessageId === message.message_id
+                                          ? 'Copied'
+                                          : 'Copy message'
+                                      }
+                                      className="message-action"
+                                      onClick={() => void copyMessage(message)}
+                                      title={
+                                        copiedMessageId === message.message_id
+                                          ? 'Copied'
+                                          : 'Copy message'
+                                      }
+                                      type="button"
+                                    >
+                                      <CopyIcon copied={copiedMessageId === message.message_id} />
+                                    </button>
+                                    {message.role === 'user' ? (
+                                      <button
+                                        aria-label="Edit and resend message"
+                                        className="message-action"
+                                        disabled={backendStatus !== 'ready'}
+                                        onClick={() => beginBrowserMessageEdit(message)}
+                                        title="Edit and resend message"
+                                        type="button"
+                                      >
+                                        <Icon path="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                  {visibleBrowserActivity !== null &&
+                                  index === browserActivityAnchorIndex ? (
+                                    <RunActivityCard
+                                      activity={visibleBrowserActivity}
+                                      expanded={activityExpanded}
+                                      onExpandedChange={setActivityExpanded}
+                                    />
+                                  ) : null}
+                                </div>
+                              ))}
+                              {unmatchedBrowserRunHistory.map((history) => {
+                                const activity = persistedRunActivity(history)
+                                return (
+                                  <RunActivityCard
+                                    activity={activity}
+                                    expanded={expandedHistoryRunIds.has(activity.runId)}
+                                    key={activity.runId}
+                                    onExpandedChange={(expanded) =>
+                                      setExpandedHistoryRunIds((current) => {
+                                        const next = new Set(current)
+                                        if (expanded) next.add(activity.runId)
+                                        else next.delete(activity.runId)
+                                        return next
+                                      })
                                     }
-                                  )
-                                : null}
-                              {runActivity?.conversationId === selectedBrowserConversationId &&
-                              !browserRunHistory.some(
-                                (history) => history.run.run_id === runActivity.runId
-                              ) &&
-                              message.role === 'assistant' &&
-                              new Date(message.created_at).getTime() >= runActivity.startedAt ? (
+                                  />
+                                )
+                              })}
+                              {visibleBrowserActivity !== null &&
+                              browserActivityAnchorIndex === -1 ? (
                                 <RunActivityCard
-                                  activity={runActivity}
+                                  activity={visibleBrowserActivity}
                                   expanded={activityExpanded}
                                   onExpandedChange={setActivityExpanded}
                                 />
                               ) : null}
-                              <div className="browser-agent-bubble">
-                                {message.role === 'assistant' ? (
-                                  <div className="markdown-content">
-                                    <ReactMarkdown
-                                      remarkPlugins={[remarkGfm]}
-                                      components={{
-                                        a: ({ children, href }) => (
-                                          <a
-                                            href={href}
-                                            onClick={(event) => {
-                                              event.preventDefault()
-                                              openAssistantLink(href)
-                                            }}
-                                            title="Open in your default browser"
-                                          >
-                                            {children}
-                                          </a>
-                                        )
-                                      }}
-                                    >
-                                      {message.content}
-                                    </ReactMarkdown>
-                                  </div>
-                                ) : (
-                                  message.content
-                                )}
-                              </div>
-                              <div className="message-meta browser-agent-meta">
-                                <time
-                                  dateTime={message.created_at}
-                                  title={new Date(message.created_at).toLocaleString()}
-                                >
-                                  {formatMessageTime(message.created_at)}
-                                </time>
-                                <button
-                                  aria-label={
-                                    copiedMessageId === message.message_id
-                                      ? 'Copied'
-                                      : 'Copy message'
-                                  }
-                                  className="message-action"
-                                  onClick={() => void copyMessage(message)}
-                                  title={
-                                    copiedMessageId === message.message_id
-                                      ? 'Copied'
-                                      : 'Copy message'
-                                  }
-                                  type="button"
-                                >
-                                  <CopyIcon copied={copiedMessageId === message.message_id} />
-                                </button>
-                                {message.role === 'user' ? (
-                                  <button
-                                    aria-label="Edit and resend message"
-                                    className="message-action"
-                                    disabled={backendStatus !== 'ready'}
-                                    onClick={() => beginBrowserMessageEdit(message)}
-                                    title="Edit and resend message"
-                                    type="button"
-                                  >
-                                    <Icon path="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
-                                  </button>
-                                ) : null}
-                              </div>
-                            </div>
-                          ))}
-                          {unmatchedBrowserRunHistory.map((history) => {
-                            const activity = persistedRunActivity(history)
-                            return (
-                              <RunActivityCard
-                                activity={activity}
-                                expanded={expandedHistoryRunIds.has(activity.runId)}
-                                key={activity.runId}
-                                onExpandedChange={(expanded) =>
-                                  setExpandedHistoryRunIds((current) => {
-                                    const next = new Set(current)
-                                    if (expanded) next.add(activity.runId)
-                                    else next.delete(activity.runId)
-                                    return next
-                                  })
-                                }
-                              />
-                            )
-                          })}
-                          {runActivity?.conversationId === selectedBrowserConversationId &&
-                          !browserRunHistory.some(
-                            (history) => history.run.run_id === runActivity.runId
-                          ) &&
-                          !browserMessages.some(
-                            (message) =>
-                              message.role === 'assistant' &&
-                              new Date(message.created_at).getTime() >= runActivity.startedAt
-                          ) ? (
-                            <RunActivityCard
-                              activity={runActivity}
-                              expanded={activityExpanded}
-                              onExpandedChange={setActivityExpanded}
-                            />
-                          ) : null}
-                          <div ref={browserAgentMessagesEndRef} />
-                        </>
+                              <div ref={browserAgentMessagesEndRef} />
+                            </>
+                          )
+                        })()
                       )}
                     </div>
                     {visibleBrowserApproval !== null ? (
