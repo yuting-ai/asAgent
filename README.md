@@ -21,9 +21,9 @@ asAgent brings chat, browser assistance, scheduled tasks, and reversible file op
 ## Demo
 
 <p align="center">
-  <video src="video_demo/demo.mp4" controls muted playsinline width="720">
+  <video src="https://github.com/user-attachments/assets/a0c0ef10-a6af-4939-a4dc-80879d4b844e" controls muted playsinline width="720">
     Your browser cannot play this video.
-    <a href="video_demo/demo.mp4">Open the product demo →</a>
+    <a href="https://github.com/user-attachments/assets/a0c0ef10-a6af-4939-a4dc-80879d4b844e">Open the product demo →</a>
   </video>
 </p>
 

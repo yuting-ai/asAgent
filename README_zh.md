@@ -21,9 +21,9 @@ asAgent 将对话、浏览器辅助、定时任务和可撤回文件操作集中
 ## 演示
 
 <p align="center">
-  <video src="video_demo/demo.mp4" controls muted playsinline width="720">
+  <video src="https://github.com/user-attachments/assets/a0c0ef10-a6af-4939-a4dc-80879d4b844e" controls muted playsinline width="720">
     你的浏览器无法播放此视频。
-    <a href="video_demo/demo.mp4">打开产品演示 →</a>
+    <a href="https://github.com/user-attachments/assets/a0c0ef10-a6af-4939-a4dc-80879d4b844e">打开产品演示 →</a>
   </video>
 </p>
 
