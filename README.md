@@ -2,213 +2,226 @@
 
 # asAgent
 
-**A Private, Local-First, Autonomous Personal AI Assistant & Desktop Agent**
+**A private, local-first personal AI assistant and desktop agent**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python: 3.12+](https://img.shields.io/badge/Python-3.12%2B-teal.svg)](https://www.python.org/)
-[![Electron: 39+](https://img.shields.io/badge/Electron-39%2B-47848F.svg)](https://www.electronjs.org/)
+[![Python: 3.13](https://img.shields.io/badge/Python-3.13-teal.svg)](https://www.python.org/)
+[![Electron: 39](https://img.shields.io/badge/Electron-39-47848F.svg)](https://www.electronjs.org/)
 [![React: 19](https://img.shields.io/badge/React-19-52C9D1.svg)](https://react.dev/)
 [![TypeScript: 5.9](https://img.shields.io/badge/TypeScript-5.9-3178C6.svg)](https://www.typescriptlang.org/)
-[![Tests: 660+ Passed](https://img.shields.io/badge/Tests-660%2B%20Passed-brightgreen.svg)](#-testing--quality-assurance)
+[![Tests: 660+ Passed](https://img.shields.io/badge/Tests-660%2B%20Passed-brightgreen.svg)](#3-testing--quality-assurance)
 
 **English** • [简体中文](README_zh.md)
 
-[Key Features](#-key-features) • [Architecture](#-architecture--security) • [Quickstart](#-quickstart) • [Configuration](#-model-providers--configuration) • [Project Status & Roadmap](#-project-status--roadmap)
+[Features](#features) • [Architecture](#architecture--security) • [Quickstart](#quickstart) • [Model configuration](#model-providers--configuration) • [Status](#project-status--roadmap)
 
 </div>
 
 ---
 
-## 🌟 Philosophy & Overview
+## Overview
 
-**asAgent** is an open-source, local-first personal AI assistant and autonomous desktop agent. It pairs the reasoning capabilities of Large Language Models (LLMs) with direct, secure, and observable operating system capabilities—while keeping 100% of user data, database records, and credentials stored strictly on the local machine.
+asAgent is a local-first, single-user personal AI assistant built as a learning-oriented desktop project. Its conversations, run history, configuration, workspace metadata, and credentials are stored locally by default. When an external model or network-enabled tool is selected, the content required for that request may be sent to the configured provider.
 
-* 🔒 **100% Private & Local-First**: Built on SQLite with OS-level credential encryption (macOS Keychain / System Credential Store). No telemetry, no external accounts, zero cloud tracking.
-* 🧩 **Provider-Neutral Model Engine**: Connects seamlessly to Ollama, LM Studio, DeepSeek, OpenAI, OpenRouter, SiliconFlow, or any custom OpenAI-compatible endpoint.
-* 🛡️ **Human-in-the-Loop Security**: Every sensitive filesystem write and tool execution is guarded by configurable approval policies (Allow Once, Allow for Chat, Always Allow, or Deny) with automatic snapshot undo.
-* ⚡ **Neo-Mint Visual Identity**: Modern desktop UI featuring high-contrast WCAG AAA typography, draggable window headers, customizable split panes, and real-time bilingual localization.
+- **Local persistence:** SQLite stores conversations, messages, runs, events, automations, and file-change metadata.
+- **Provider-neutral model boundary:** The current adapter supports OpenAI-compatible endpoints such as DeepSeek, OpenAI, Ollama, LM Studio, OpenRouter, SiliconFlow, and custom endpoints.
+- **Observable execution:** Authenticated SSE carries safe run events and status updates. Final assistant messages are loaded from persisted conversation history.
+- **Narrow desktop privileges:** Electron Main owns the backend token, local endpoint, native dialogs, browser sessions, and credential access. The Renderer receives only named, validated capabilities through Preload.
+- **Bilingual interface:** The desktop UI can switch between English and Simplified Chinese without restarting.
 
----
-
-## 🚀 Key Features
-
-### 1. 💬 Private Multi-Turn Chat & Context Management
-* **Real-time SSE Streaming**: Smooth token-by-token streaming over an authenticated local loopback connection.
-* **Observable Run Activity**: Collapsible, step-by-step trace cards detailing tool calls, execution statuses, timings, and outputs.
-* **Context Budgeting**: Context Builder with token-aware sliding window management to maintain conversation depth while preventing context overflows.
-* **Bilingual Localization**: Seamless runtime switching between **English** and **中文 (Simplified Chinese)** without app restarts.
-
-### 2. 📁 Workspace & Reversible File Tools
-* **Granular Workspace Confinement**: Controlled tools for `list_dir`, `read_file`, `write_file`, `edit_file` (unified line-level search/replace), and `search_files` with strict symlink escape prevention.
-* **Reversible File Snapshots (One-Click Undo)**: Automatic atomic pre-change diff snapshotting in SQLite. Undo cards are injected directly into the chat stream for instant rollback.
-* **Integrated File Tree**: Real-time workspace file explorer with inline previewing and one-click quote-into-chat/prompt functionality.
-
-### 3. 🌐 Embedded Autonomous Browser
-* **Dual-Browser Isolation**: Clear separation between the interactive user-facing browser view and the autonomous agent automation engine.
-* **Deep Web Automation Toolkit**: Native support for `browser.navigate`, `browser.read_current_page` (Markdown DOM extraction with indexed links/buttons), `browser.inspect_interactive`, `browser.click`, `browser.fill`, `browser.select`, and `browser.wait`.
-* **Page Assistant Sidebar**: Instant side-panel to ask questions about the current page, summarize content, or direct the agent to complete web tasks.
-
-### 4. ⏰ Scheduled Tasks & Self-Healing Automation Engine
-* **Natural Language Task Planning**: Multi-turn interactive canvas to draft and refine recurring task instructions and schedules.
-* **Resizable Full-Canvas Workspace**: Master-detail view with persistent draggable column widths (260px to 640px) and prompt template chips.
-* **Execution History & Output Timeline**: Detailed execution logs with run status badges, timestamps, duration metrics, and rendered Markdown outputs.
-* **Self-Healing Plan Refinement (`automation.update_plan`)**: When executing scheduled jobs, the agent automatically diagnoses broken URLs (400/404) or website layout changes, explores alternative working paths, and permanently refines the saved task plan in SQLite for future unattended runs.
-
-### 5. 🔌 Tool Protocols & Extensibility
-* **Model Context Protocol (MCP)**: Native support for MCP `stdio` client sessions, managing external server sidecars and dynamically registering custom tool capabilities.
-* **Real-Time Web Search**: Built-in Tavily Search API integration for live web lookups.
+asAgent currently has no telemetry integration. External model providers, Tavily, and other user-configured MCP servers may still receive the data required to perform their requested operations.
 
 ---
 
-## 🏗️ Architecture & Security
+## Features
 
-```
+### 1. Multi-turn chat and context management
+
+- **Authenticated run-event streaming:** The desktop observes persisted `RunEvent` updates over Bearer-authenticated SSE. The current Agent Loop uses non-streaming model completion, so assistant text is shown after the run completes rather than token by token.
+- **Run activity:** Collapsible activity cards show safe step, tool, status, timing, and sanitized error metadata. They do not expose chain-of-thought, tool arguments, or complete tool results.
+- **Context budgeting:** A deterministic token estimator and Context Builder retain recent complete conversation/tool units within a configured input budget.
+- **Persistent history:** Chat and Browser conversations, user-visible messages, run status, and safe run events survive application restarts.
+
+### 2. Conversation-scoped workspace and reversible file changes
+
+- **Scoped access:** Each Chat conversation starts with its own asAgent Workspace and can be granted additional folders or individual files. Real-path resolution prevents `..` and symlink escape.
+- **Read tools:** `filesystem.list`, `filesystem.read_file`, and `filesystem.search_files` operate only inside the current conversation's allowed scope.
+- **Write tools:** `filesystem.create_file`, `filesystem.replace_file`, and `filesystem.delete_file` are currently allowed without a per-operation approval prompt inside an explicitly authorized scope. Create and replace accept complete UTF-8 file content; there is no line-level edit tool yet.
+- **Undo safety:** SQLite stores FileChange metadata and hashes, while private pre-change snapshots are stored under the application data directory. Snapshots are full pre-change bytes, not SQLite diffs. The current limits are 20 MiB per snapshot and 200 MiB in total, with configurable retention and manual cleanup.
+- **Safer deletion:** Deleted files are moved to the operating system Trash. When a private snapshot is available, the chat also offers a guarded Undo action.
+- **Workspace inspector:** The desktop provides a directory tree, bounded text preview, refresh, reveal-in-Finder, and quote-into-prompt/chat actions.
+
+### 3. Visible Browser assistant and isolated automation browser
+
+- **Visible Browser conversations:** Electron owns a persistent `WebContentsView` session and keeps page credentials, cookies, DOM selectors, and storage out of Python and the Renderer.
+- **Page tools:** Bound Browser runs can use `browser.navigate`, `browser.read_current_page`, `browser.take_snapshot`, `browser.click`, `browser.fill`, `browser.select`, and `browser.wait`.
+- **Semantic snapshots:** `browser.take_snapshot` returns bounded `ref`, name, role, tag, disabled state, and native select options. It does not expose full HTML or CSS selectors.
+- **Page Assistant:** A side panel can discuss the current page and perform visible interactions on the bound tab.
+- **Background isolation:** Scheduled tasks use a separate Playwright-over-CDP automation service and an independent browser profile. This path requires a supported system browser such as Google Chrome, Microsoft Edge, or Chromium.
+
+### 4. Scheduled tasks
+
+- **Conversation-based planning:** A short-lived, isolated draft conversation helps create or refine a task without adding draft messages to normal Recents.
+- **Supported schedules:** Triggers currently support `once`, `daily`, and `weekly` schedules with IANA time zones. Arbitrary cron expressions are not supported.
+- **Management and history:** Tasks can be created, edited, activated, paused, deleted, or run manually. Execution history stores status, timestamps, duration, and final visible messages.
+- **Missed-run protection:** Startup recovery skips stale recurring occurrences instead of launching a catch-up storm.
+- **Optional plan refinement:** During an automation execution, the model can call `automation.update_plan` to save a successfully verified correction for future runs. This is a tool-guided behavior, not a guarantee that every website failure will repair itself.
+
+### 5. MCP and web search
+
+- **MCP stdio client:** asAgent supports modern MCP discovery with an isolated legacy fallback, namespaces imported tools, validates schemas, applies permission/approval policy, and imports configured servers atomically.
+- **Startup-time tool set:** MCP servers are loaded when the Python Sidecar starts. Configuration changes require a restart; hot reload, notifications, and paginated tool discovery are not yet implemented.
+- **Optional Tavily search:** Tavily is configured as a restricted stdio MCP server. Its API key is stored in macOS Keychain and injected only into that server process. Tavily is not a built-in search implementation and is disabled until the user configures it.
+
+---
+
+## Architecture & Security
+
+```text
 ┌─────────────────────────────────────────────────────────────┐
-│                    Electron Desktop Shell                   │
-│         (React 19 + TypeScript + Vite + CSS Tokens)         │
+│ Electron Renderer                                           │
+│ React 19 · TypeScript · named Preload capabilities only     │
 └──────────────────────────────┬──────────────────────────────┘
-                               │ Loopback HTTP & Authenticated SSE
-                               │ Bearer Token / 127.0.0.1:0
+                               │ validated IPC
 ┌──────────────────────────────▼──────────────────────────────┐
-│                    FastAPI Local API Gateway                │
+│ Electron Main                                               │
+│ backend lifecycle · token · native dialogs · browser views  │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ loopback HTTP + authenticated SSE
+                               │ Bearer token · 127.0.0.1:0
+┌──────────────────────────────▼──────────────────────────────┐
+│ FastAPI Local API                                           │
 ├─────────────────────────────────────────────────────────────┤
-│                       asAgent Core Engine                   │
-│  ┌──────────────────────┬────────────────────────────────┐  │
-│  │ Context Builder      │ Model Provider Neutral Adapter │  │
-│  ├──────────────────────┼────────────────────────────────┤  │
-│  │ Tool Pipeline & Sec  │ Scheduler & Cron Engine        │  │
-│  ├──────────────────────┼────────────────────────────────┤  │
-│  │ Browser Automation   │ Reversible File Snapshot Store │  │
-│  └──────────────────────┴────────────────────────────────┘  │
+│ Agent Runtime · Context Builder · Models · Tools · Scheduler│
 ├─────────────────────────────────────────────────────────────┤
-│             SQLite Repository & OS Keychain Store           │
+│ SQLite · Workspace · private snapshots · macOS Keychain     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-* **Local Process Isolation**: The Python backend binds dynamically to a random loopback port (`127.0.0.1:0`) and reports its active port back to the Electron main process.
-* **Single-Session Bearer Authentication**: An ephemeral Bearer token is generated on every launch; API and SSE endpoints reject unauthorized requests.
-* **Credential Vault**: API keys are saved directly into the OS credential store (Keychain on macOS) and are never logged or exposed in plaintext.
+- The backend binds its own random loopback port and reports the actual endpoint through a structured ready record.
+- Electron Main creates a fresh launch token and sends it to the child process over stdin. The token is not placed in command-line arguments, URLs, Renderer storage, or normal logs.
+- Main parses authenticated SSE and exposes only structured run updates to the trusted Renderer.
+- Model API keys and Tavily credentials are stored in macOS Keychain. Windows Credential Manager and Linux Secret Service adapters are not implemented yet.
+- The product is single-user by default (`local-user`) but preserves `user_id` at domain and persistence boundaries.
 
 ---
 
-## 💻 Quickstart
+## Quickstart
 
 ### Prerequisites
-* **Node.js** >= 20.0.0
-* **Python** >= 3.12 (managed via `venv` or `uv`)
-* **npm** or **pnpm**
 
----
+- Python 3.13
+- [uv](https://docs.astral.sh/uv/)
+- Node.js `>=20.19.0` or `>=22.12.0`
+- npm
+- Optional for background web automation: Google Chrome, Microsoft Edge, or Chromium
 
-### 1. Clone & Environment Setup
+### 1. Clone and install
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/asAgent.git
+git clone https://github.com/yuting-ai/asAgent.git
 cd asAgent
 
-# Create and activate Python virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
-# Install Python dependencies in editable mode
-pip install -e ".[dev]"
-
-# Install desktop frontend dependencies
-npm --prefix desktop install
+uv sync --locked
+npm --prefix desktop ci
 ```
 
----
-
-### 2. Running in Development
-
-Start both the Python agent backend and the Electron desktop application with a single command:
+### 2. Run the desktop development environment
 
 ```bash
-cd desktop
-npm run dev
+npm --prefix desktop run dev
 ```
 
-To run directly with DeepSeek using an environment secret:
-```bash
-ASAGENT_MODEL_API_KEY="your-deepseek-api-key" npm --prefix desktop run dev:deepseek
-```
+The default development mode starts a deterministic offline model/tool runtime, so it does not require an API key. Configure a local or external OpenAI-compatible model in **Settings → Model & Privacy** when you want real model responses. Saved model settings take effect after the Sidecar restarts.
 
----
+The older `dev:deepseek` developer entry also requires a matching non-sensitive `deepseek` profile under the selected app home; setting an API-key environment variable alone is not a complete fresh-clone setup.
 
-### 3. Testing & Quality Assurance
-
-asAgent includes a comprehensive test suite (unit, integration, and contract tests):
+### 3. Testing & quality assurance
 
 ```bash
-# Run backend Python tests (530+ tests)
-pytest
+# Python tests (currently 530 collected tests)
+uv run pytest
 
-# Run desktop TypeScript typechecks, linting, and tests (133+ tests)
+# Python lint, formatting check, strict typing, lock and diff checks
+scripts/check.sh
+
+# Desktop type checking, linting, and tests (currently 133 tests)
 npm --prefix desktop run typecheck
 npm --prefix desktop run lint
 npm --prefix desktop test
 ```
 
----
-
-### 4. Building Desktop Packages
+Docker is currently used for clean Linux testing and CI, not as a desktop runtime or supported server deployment:
 
 ```bash
-# Build macOS application bundle (.dmg / .app)
-npm --prefix desktop run build:mac
-
-# Build Windows installer (.exe)
-npm --prefix desktop run build:win
-
-# Build Linux packages (AppImage / deb)
-npm --prefix desktop run build:linux
+docker build --file docker/Dockerfile.test --tag asagent-tests:local .
+docker run --rm asagent-tests:local
 ```
 
+### 4. Current build status
+
+The Python Sidecar can be built and smoke-tested independently:
+
+```bash
+uv run python scripts/build_backend.py
+uv run python scripts/smoke_backend_bundle.py
+```
+
+The Renderer/Main/Preload production build can be checked with:
+
+```bash
+npm --prefix desktop run build
+```
+
+The existing `build:mac`, `build:win`, and `build:linux` scripts are development scaffolding. They do not yet assemble the PyInstaller Sidecar into a release-ready asAgent package, and the packaged launcher still needs its production executable path. Code signing, notarization, platform credential stores, update publishing, and clean-machine installer verification remain pending.
+
 ---
 
-## ⚙️ Model Providers & Configuration
+## Model Providers & Configuration
 
-Navigate to the **Settings** view in the application to select or configure your model endpoint:
+The Settings view currently offers these OpenAI-compatible presets. DeepSeek is the primary externally hosted model used for end-to-end development testing; the other entries are compatibility presets rather than a guarantee that every model/endpoint combination has been fully verified.
 
-| Provider | Deployment Type | Default Base URL | Status |
+| Provider | Location | Default base URL | Current status |
 | :--- | :--- | :--- | :--- |
-| **DeepSeek** | Cloud API | `https://api.deepseek.com/v1` | **Fully Tested & Verified** |
-| **Ollama** | Local Server | `http://localhost:11434/v1` | Compatible (OpenAI API standard) |
-| **LM Studio** | Local Server | `http://localhost:1234/v1` | Compatible (OpenAI API standard) |
-| **OpenAI** | Cloud API | `https://api.openai.com/v1` | Compatible (OpenAI API standard) |
-| **OpenRouter** | API Aggregator | `https://openrouter.ai/api/v1` | Compatible (OpenAI API standard) |
-| **SiliconFlow** | Cloud API | `https://api.siliconflow.cn/v1` | Compatible (OpenAI API standard) |
-| **Custom** | Local / Cloud | User defined | Compatible (OpenAI API standard) |
+| DeepSeek | External | `https://api.deepseek.com` | Primary tested external provider |
+| OpenAI | External | `https://api.openai.com/v1` | Compatibility preset |
+| Ollama | Local | `http://127.0.0.1:11434/v1` | Compatibility preset |
+| LM Studio | Local | `http://127.0.0.1:1234/v1` | Compatibility preset |
+| OpenRouter | External | `https://openrouter.ai/api/v1` | Compatibility preset |
+| SiliconFlow | External | `https://api.siliconflow.cn/v1` | Compatibility preset |
+| Custom | Local or external | User-defined | OpenAI-compatible endpoints only |
 
-> [!IMPORTANT]
-> **Current Testing Status**: While asAgent's model layer is strictly provider-neutral and conforms to the OpenAI API specification, **DeepSeek (e.g., `deepseek-chat`) is currently the primary model that has undergone thorough end-to-end testing and verification**. Testing and tuning for additional local/cloud providers is underway.
-
-*API keys are encrypted and stored directly in your OS credential vault (macOS Keychain) and are never exposed in plaintext or logged.*
+Local endpoints may omit an API key. External endpoints require a saved key. On the current macOS implementation, keys are stored in Keychain and are never returned to the Renderer.
 
 ---
 
-## 📋 Project Status & Roadmap
+## Project Status & Roadmap
 
-### ✅ Completed & Implemented
-* [x] **Autonomous Agent Loop**: Multi-turn tool execution, schema validation, permissions, and timeout controls.
-* [x] **Provider-Neutral Model Layer**: OpenAI-compatible adapter with streaming SSE and failure classification.
-* [x] **SQLite Persistence**: Complete repositories for Conversations, Messages, Runs, Automations, and File Changes.
-* [x] **Reversible Filesystem System**: Atomic diff snapshots with one-click rollback in chat.
-* [x] **Embedded Browser Automation**: Dual-view isolation, Markdown DOM extraction, and page interaction tools (`navigate`, `click`, `fill`, `select`, `wait`).
-* [x] **Scheduled Task Engine**: Cron scheduling, storm-prevention locks, timeline history, and self-healing plan updates (`automation.update_plan`).
-* [x] **MCP Extensibility**: Stdio client session manager with dynamic tool registration.
-* [x] **Desktop Interface**: Modern Electron shell with resizable panes, macOS window dragging, i18n localization (EN/ZH), and Neo-Mint design tokens.
+### Implemented
 
-### 🚧 Unimplemented / Pending Roadmap Tasks
-* [ ] **Semantic Long-Term User Memory & Knowledge Base**: Embedding-based user profiling and memory recall across conversations (currently handled via sliding-window context buffer).
-* [ ] **Dynamic Skill Directory Ingestion**: Modular on-disk `SKILL.md` parser and dynamic runtime loader for domain-specific agent instructions.
-* [ ] **Multi-Agent Subagent Delegation**: Spawning and coordinating hierarchical subagent trees for multi-threaded complex research tasks.
-* [ ] **Production Code Signing & Auto-Update Pipeline**: Apple Notarization, Windows Authenticode signing, and GitHub Releases auto-updater integration.
-* [ ] **Standalone Headless Server / Docker Daemon**: Dedicated Docker Compose bundle for deploying the core backend as a remote headless service.
+- [x] Provider-neutral Core contracts and OpenAI-compatible model adapter
+- [x] Non-streaming Agent Loop with tool schemas, permissions, approval gates, timeouts, cancellation checkpoints, and safe RunEvents
+- [x] SQLite persistence for conversations, messages, runs, events, tool calls, file changes, connections, and scheduled tasks
+- [x] Conversation-scoped read tools and reversible single-file create/replace/delete with guarded Undo
+- [x] Visible Browser conversations and isolated background browser automation
+- [x] Once/daily/weekly Scheduled tasks with execution history and optional `automation.update_plan`
+- [x] MCP stdio client/manager and optional Tavily MCP configuration
+- [x] Electron development shell with Chat, Browser, Scheduled tasks, Settings, workspace inspector, and English/Chinese UI
+- [x] Independent PyInstaller Sidecar build and automated smoke test
+
+### Pending
+
+- [ ] True token-by-token assistant response streaming through the desktop Agent Loop
+- [ ] Conversation summaries, confirmed long-term User Memory, Knowledge indexing, and cross-conversation retrieval
+- [ ] Runtime loading and selection of on-disk `SKILL.md` files
+- [ ] Multi-agent/subagent orchestration
+- [ ] MCP pagination, notifications, hot refresh, and Streamable HTTP transport
+- [ ] Windows Credential Manager and Linux Secret Service adapters
+- [ ] Release-ready Electron packaging with bundled Sidecar, product metadata, signing/notarization, clean-machine testing, and updates
+- [ ] Supported headless/Docker server distribution
 
 ---
 
-## 📄 License
+## License
 
-Distributed under the [MIT License](LICENSE).
+asAgent is released under the [MIT License](LICENSE).

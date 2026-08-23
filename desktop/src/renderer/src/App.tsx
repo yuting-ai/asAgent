@@ -3947,8 +3947,8 @@ export default function App(): React.JSX.Element {
                 strokeWidth="2"
                 viewBox="0 0 24 24"
               >
-                <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
-                <circle cx="12" cy="12" r="4" />
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 3" />
               </svg>
               <span className="rail-item-label">{t(appLanguage, 'automationsTitle')}</span>
               <span className="rail-count">{automationPreviews.length}</span>
@@ -6014,9 +6014,16 @@ export default function App(): React.JSX.Element {
                 ) : selectedAutomation === null ? (
                   <div className="automations-canvas-empty">
                     <div className="automations-canvas-empty-icon">
-                      <svg fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                        <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
-                        <circle cx="12" cy="12" r="4" />
+                      <svg
+                        fill="none"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.5"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M12 7v5l3 3" />
                       </svg>
                     </div>
                     <h3>{t(appLanguage, 'automationsTitle')}</h3>
