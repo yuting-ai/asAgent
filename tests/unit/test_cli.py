@@ -1,17 +1,54 @@
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
 from asagent.chat.service import ChatService
-from asagent.cli import _delete_stale_automation_drafts, run_chat
-from asagent.core.conversation import Conversation
-from asagent.core.ids import ConversationId, MessageId, UserId
+from asagent.cli import (
+    _delete_stale_automation_drafts,
+    _registry_for_conversation,
+    run_chat,
+)
+from asagent.core.conversation import Conversation, ConversationKind
+from asagent.core.conversation_file_scope import ConversationFileScope
+from asagent.core.ids import ConversationId, MessageId, RunId, UserId
+from asagent.core.tool_definition import ToolDefinition
 from asagent.models.contracts import ModelResponse
 from asagent.models.fake_provider import FakeModelProvider
 from asagent.storage.in_memory_conversation_repository import (
     InMemoryConversationRepository,
 )
+from asagent.tools.builtin.echo import EchoTool
+from asagent.tools.registry import ToolRegistry
+from asagent.workspace.settings import ConversationWorkspaceSettings
+
+
+class InMemoryConversationFileScopeRepository:
+    async def get(self, conversation_id: ConversationId) -> ConversationFileScope:
+        return ConversationFileScope(conversation_id=conversation_id)
+
+    async def save(self, scope: ConversationFileScope) -> None:
+        del scope
+
+
+class TavilySearchTool:
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            tool_id="mcp:tavily:tavily_search:test",
+            display_name="tavily_search",
+            description="Search the web with Tavily.",
+            input_schema={"type": "object"},
+            risk_level="medium",
+            required_permissions=frozenset({"mcp.execute"}),
+            requires_approval=True,
+            timeout_seconds=10.0,
+        )
+
+    async def execute(self, arguments: Mapping[str, object]) -> str:
+        del arguments
+        return "not used"
 
 
 def make_conversation() -> Conversation:
@@ -78,6 +115,50 @@ async def test_sidecar_startup_deletes_only_stale_automation_drafts() -> None:
     assert await repository.get(draft.conversation_id) is None
     assert await repository.get(chat.conversation_id) == chat
     assert await repository.get(execution.conversation_id) == execution
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "expects_tavily"),
+    (("chat", True), ("browser", False), ("automation_execution", False)),
+)
+async def test_tavily_is_available_only_in_chat_tool_snapshots(
+    tmp_path: Path,
+    kind: ConversationKind,
+    expects_tavily: bool,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    conversations = InMemoryConversationRepository()
+    conversation_id = ConversationId(f"conversation-{kind}")
+    created_at = datetime(2026, 8, 23, 2, 0, tzinfo=UTC)
+    await conversations.save(
+        Conversation(
+            conversation_id,
+            UserId("local-user"),
+            created_at,
+            created_at,
+            kind=kind,
+        )
+    )
+    base_registry = ToolRegistry()
+    base_registry.register(EchoTool())
+    base_registry.register(TavilySearchTool())
+
+    registry = await _registry_for_conversation(
+        base_registry=base_registry,
+        workspace_settings=ConversationWorkspaceSettings(
+            scopes=InMemoryConversationFileScopeRepository(),
+            workspace_root=workspace_root,
+        ),
+        run_id=RunId("run-test"),
+        conversation_id=conversation_id,
+        conversations=conversations,
+    )
+
+    tool_ids = {definition.tool_id for definition in registry.definitions()}
+    assert "builtin.echo" in tool_ids
+    assert ("mcp:tavily:tavily_search:test" in tool_ids) is expects_tavily
 
 
 @pytest.mark.asyncio

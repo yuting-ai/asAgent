@@ -295,7 +295,11 @@ async def _registry_for_conversation(
         additional_roots=status.additional_roots,
         additional_files=status.additional_files,
     )
-    registry = base_registry.copy()
+    registry = (
+        base_registry.copy()
+        if conversation.kind == "chat"
+        else _register_builtin_tools()
+    )
     if (
         conversation.kind == "automation_execution"
         and automations is not None
