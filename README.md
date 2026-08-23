@@ -2,34 +2,39 @@
 
 # asAgent
 
-**A private, local-first personal AI assistant and desktop agent**
+**A desktop AI agent that turns conversations into visible, controllable actions.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python: 3.13](https://img.shields.io/badge/Python-3.13-teal.svg)](https://www.python.org/)
-[![Electron: 39](https://img.shields.io/badge/Electron-39-47848F.svg)](https://www.electronjs.org/)
-[![React: 19](https://img.shields.io/badge/React-19-52C9D1.svg)](https://react.dev/)
-[![TypeScript: 5.9](https://img.shields.io/badge/TypeScript-5.9-3178C6.svg)](https://www.typescriptlang.org/)
-[![Tests: 660+ Passed](https://img.shields.io/badge/Tests-660%2B%20Passed-brightgreen.svg)](#3-testing--quality-assurance)
 
 **English** • [简体中文](README_zh.md)
 
-[Features](#features) • [Architecture](#architecture--security) • [Quickstart](#quickstart) • [Model configuration](#model-providers--configuration) • [Status](#project-status--roadmap)
+[▶ Watch the product demo](#demo) • [Quickstart](#quickstart) • [Features](#features) • [Project status](#project-status--roadmap)
 
 </div>
 
 ---
 
-## Overview
+asAgent brings chat, browser assistance, scheduled tasks, and reversible file operations into one desktop app. Conversations and application state stay on your computer by default. When you choose an external model or network-enabled tool, only the data required for that request is sent to the configured service.
 
-asAgent is a local-first, single-user personal AI assistant built as a learning-oriented desktop project. Its conversations, run history, configuration, workspace metadata, and credentials are stored locally by default. When an external model or network-enabled tool is selected, the content required for that request may be sent to the configured provider.
+> asAgent is under active development and currently runs from source. It is not yet a release-ready desktop product.
 
-- **Local persistence:** SQLite stores conversations, messages, runs, events, automations, and file-change metadata.
-- **Provider-neutral model boundary:** The current adapter supports OpenAI-compatible endpoints such as DeepSeek, OpenAI, Ollama, LM Studio, OpenRouter, SiliconFlow, and custom endpoints.
-- **Observable execution:** Authenticated SSE carries safe run events and status updates. Final assistant messages are loaded from persisted conversation history.
-- **Narrow desktop privileges:** Electron Main owns the backend token, local endpoint, native dialogs, browser sessions, and credential access. The Renderer receives only named, validated capabilities through Preload.
-- **Bilingual interface:** The desktop UI can switch between English and Simplified Chinese without restarting.
+## Demo
 
-asAgent currently has no telemetry integration. External model providers, Tavily, and other user-configured MCP servers may still receive the data required to perform their requested operations.
+<p align="center">
+  <video src="video_demo/demo.mp4" controls muted playsinline width="720">
+    Your browser cannot play this video.
+    <a href="video_demo/demo.mp4">Open the product demo →</a>
+  </video>
+</p>
+
+## What you can do
+
+- Chat with OpenAI-compatible models and inspect each run.
+- Ask the agent to read and interact with pages in a visible browser.
+- Create one-time, daily, and weekly automated tasks.
+- Read and modify authorized files with snapshots and recovery safeguards.
+
+asAgent currently has no telemetry integration. External model providers, Tavily, and other user-configured MCP servers may still receive the data required to perform requested operations.
 
 ---
 
@@ -101,7 +106,7 @@ asAgent currently has no telemetry integration. External model providers, Tavily
 - The backend binds its own random loopback port and reports the actual endpoint through a structured ready record.
 - Electron Main creates a fresh launch token and sends it to the child process over stdin. The token is not placed in command-line arguments, URLs, Renderer storage, or normal logs.
 - Main parses authenticated SSE and exposes only structured run updates to the trusted Renderer.
-- Model API keys and Tavily credentials are stored in macOS Keychain. Windows Credential Manager and Linux Secret Service adapters are not implemented yet.
+- Model API keys and Tavily credentials are stored in macOS Keychain.
 - The product is single-user by default (`local-user`) but preserves `user_id` at domain and persistence boundaries.
 
 ---
@@ -216,7 +221,6 @@ Local endpoints may omit an API key. External endpoints require a saved key. On 
 - [ ] Runtime loading and selection of on-disk `SKILL.md` files
 - [ ] Multi-agent/subagent orchestration
 - [ ] MCP pagination, notifications, hot refresh, and Streamable HTTP transport
-- [ ] Windows Credential Manager and Linux Secret Service adapters
 - [ ] Release-ready Electron packaging with bundled Sidecar, product metadata, signing/notarization, clean-machine testing, and updates
 - [ ] Supported headless/Docker server distribution
 

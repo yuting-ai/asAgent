@@ -2,34 +2,39 @@
 
 # asAgent
 
-**私有、本地优先的个人 AI 助手与桌面智能体**
+**一个将对话转化为可见、可控行动的桌面 AI Agent。**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python: 3.13](https://img.shields.io/badge/Python-3.13-teal.svg)](https://www.python.org/)
-[![Electron: 39](https://img.shields.io/badge/Electron-39-47848F.svg)](https://www.electronjs.org/)
-[![React: 19](https://img.shields.io/badge/React-19-52C9D1.svg)](https://react.dev/)
-[![TypeScript: 5.9](https://img.shields.io/badge/TypeScript-5.9-3178C6.svg)](https://www.typescriptlang.org/)
-[![Tests: 660+ Passed](https://img.shields.io/badge/Tests-660%2B%20Passed-brightgreen.svg)](#3-测试与质量保证)
 
 [English](README.md) • **简体中文**
 
-[核心能力](#核心能力) • [架构与安全](#架构与安全) • [快速开始](#快速开始) • [模型配置](#模型服务商与配置) • [项目状态](#项目状态与路线图)
+[▶ 观看产品演示](#演示) • [快速开始](#快速开始) • [核心能力](#核心能力) • [项目状态](#项目状态与路线图)
 
 </div>
 
 ---
 
-## 项目概述
+asAgent 将对话、浏览器辅助、定时任务和可撤回文件操作集中在一个桌面应用中。会话与应用状态默认保存在你的电脑上；当你选择外部模型或联网工具时，只有完成该次请求所需的数据会发送给已配置的服务。
 
-asAgent 是一个本地优先、默认单用户的个人 AI 助手，也是一个以学习 Agent 工程为目标的桌面项目。会话、运行历史、配置、工作区元数据和凭据默认保存在本机。用户选择外部模型或具备联网能力的工具时，完成该次请求所需的内容可能会发送给所配置的服务商。
+> asAgent 仍在持续开发中，目前需要从源码运行，尚未成为可正式发布的桌面产品。
 
-- **本地持久化：** SQLite 保存会话、消息、Run、事件、定时任务和文件变更元数据。
-- **模型厂商中立边界：** 当前适配器支持 DeepSeek、OpenAI、Ollama、LM Studio、OpenRouter、SiliconFlow 和自定义 OpenAI-compatible Endpoint。
-- **执行过程可观察：** 带 Bearer Token 的 SSE 传输安全 RunEvent 与状态更新；最终 Assistant Message 从持久化会话历史中读取。
-- **收窄的桌面权限：** Electron Main 独占后端 Token、本地端点、原生对话框、浏览器会话和凭据访问；Renderer 只能通过 Preload 使用逐项命名且经过校验的能力。
-- **中英双语界面：** 桌面 UI 可以在英文与简体中文之间即时切换，无需重启。
+## 演示
 
-asAgent 当前没有接入遥测服务。外部模型服务商、Tavily 和用户配置的其他 MCP Server 仍可能接收完成相应操作所必需的数据。
+<p align="center">
+  <video src="video_demo/demo.mp4" controls muted playsinline width="720">
+    你的浏览器无法播放此视频。
+    <a href="video_demo/demo.mp4">打开产品演示 →</a>
+  </video>
+</p>
+
+## 你可以用它做什么
+
+- 与兼容 OpenAI 接口的模型对话，并查看每次运行过程。
+- 让 Agent 在可见浏览器中读取网页并执行交互。
+- 创建单次、每日和每周自动化任务。
+- 在授权范围内读取和修改文件，并通过快照与恢复机制降低风险。
+
+asAgent 当前没有接入遥测服务。外部模型服务商、Tavily 和用户配置的其他 MCP Server 仍可能接收完成相应操作所需的数据。
 
 ---
 
@@ -101,7 +106,7 @@ asAgent 当前没有接入遥测服务。外部模型服务商、Tavily 和用�
 - Backend 自行绑定随机回环端口，并通过结构化 Ready Record 报告实际端点。
 - Electron Main 每次启动生成新的 Token，经子进程 stdin 发送；Token 不进入命令行参数、URL、Renderer Storage 或普通日志。
 - Main 解析认证 SSE，只向受信任 Renderer 暴露结构化 Run 更新。
-- 模型 API Key 与 Tavily Credential 当前保存在 macOS Keychain。Windows Credential Manager 和 Linux Secret Service Adapter 尚未实现。
+- 模型 API Key 与 Tavily Credential 当前保存在 macOS Keychain。
 - 产品默认使用单个本地用户 `local-user`，但领域与持久化边界仍保留 `user_id`。
 
 ---
@@ -216,7 +221,6 @@ Settings 当前提供以下 OpenAI-compatible Preset。DeepSeek 是端到端开�
 - [ ] 运行时扫描、选择和加载磁盘上的 `SKILL.md`
 - [ ] 多 Agent/Subagent 编排
 - [ ] MCP 分页、通知、热刷新和 Streamable HTTP Transport
-- [ ] Windows Credential Manager 与 Linux Secret Service Adapter
 - [ ] 包含 Sidecar、正式产品元数据、签名/公证、干净机器测试和更新能力的可发布 Electron 安装包
 - [ ] 受支持的无头/Docker Server 发行方式
 
