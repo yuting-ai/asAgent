@@ -21,6 +21,11 @@ describe('i18n', () => {
 
     expect(t('en', 'browserAssistant')).toBe('Browser Assistant')
     expect(t('zh-Hans', 'browserAssistant')).toBe('浏览器助手')
+
+    expect(t('en', 'newScheduledTask')).toBe('New scheduled task')
+    expect(t('zh-Hans', 'newScheduledTask')).toBe('新建定时任务')
+    expect(t('en', 'planningScheduledTask')).toBe('Planning…')
+    expect(t('zh-Hans', 'planningScheduledTask')).toBe('规划中…')
   })
 
   it('defaults to english when given unknown language', () => {

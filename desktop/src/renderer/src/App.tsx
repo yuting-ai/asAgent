@@ -11,7 +11,12 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import { TOOL_APPROVAL_BANNER_ACTIONS, type ToolApprovalDecision } from './tool_approval'
-import { detectProviderPreset, getProviderPreset, MODEL_PROVIDER_PRESETS } from './model_presets'
+import {
+  detectProviderPreset,
+  getProviderPreset,
+  getProviderPresetDescription,
+  MODEL_PROVIDER_PRESETS
+} from './model_presets'
 import { type AppLanguage, getStoredAppLanguage, LANGUAGE_STORAGE_KEY, t } from './i18n'
 
 type AppInfo = {
@@ -107,7 +112,6 @@ type AppView =
   | 'browser'
   | 'activity'
   | 'privacy'
-  | 'scheduled'
   | 'automations'
   | 'history'
   | 'files'
@@ -115,6 +119,39 @@ type AppView =
   | 'calendar'
   | 'add-app'
   | 'preferences'
+
+type AutomationStatus = 'active' | 'paused' | 'draft'
+
+type AutomationPreview = {
+  id: string
+  name: string
+  summary: string
+  schedule: string
+  nextRun: string | null
+  lastRun: string | null
+  status: AutomationStatus
+  source: string
+  capabilities: string[]
+}
+
+type AutomationTriggerDetail = {
+  automation_trigger_id: string
+  kind: 'once' | 'daily' | 'weekly'
+  timezone: string
+  local_time: string
+  weekday: number | null
+  next_run_at: string | null
+  enabled: boolean
+}
+
+type AutomationExecutionDetail = {
+  automation_execution_id: string
+  scheduled_for: string
+  status: 'claimed' | 'missed' | 'completed' | 'failed' | 'cancelled'
+  run_id: string | null
+  claimed_at: string
+  completed_at: string | null
+}
 
 type TavilySettingsStatus = {
   enabled: boolean
@@ -185,7 +222,7 @@ type BrowserTab = {
 type ActivityTab = 'approvals' | 'schedule'
 type ScrollArea =
   'threads' | 'messages' | 'recents' | 'settings' | 'workspaceTree' | 'workspacePreview'
-type ResizableColumn = 'rail' | 'threads' | 'attention' | 'browserAgent'
+type ResizableColumn = 'rail' | 'threads' | 'attention' | 'browserAgent' | 'automationsMaster'
 type DesktopLayout = {
   railWidth: number
   threadWidth: number
@@ -193,6 +230,7 @@ type DesktopLayout = {
   attentionPanelOpen: boolean
   browserAgentPanelOpen: boolean
   browserAgentWidth: number
+  automationsMasterWidth: number
 }
 
 const TAVILY_SETTINGS_LOAD_ERROR = 'Tavily settings could not be loaded.'
@@ -217,6 +255,41 @@ function formatBytes(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
+}
+
+function formatAutomationSchedule(
+  trigger: AutomationTriggerDetail | undefined,
+  lang: AppLanguage = 'en'
+): string {
+  if (trigger === undefined) return t(lang, 'noScheduleConfigured')
+  const weekday =
+    trigger.weekday === null
+      ? ''
+      : lang === 'zh-Hans'
+        ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日'][trigger.weekday]
+        : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][
+            trigger.weekday
+          ]
+  if (trigger.kind === 'once') {
+    return lang === 'zh-Hans'
+      ? `一次性 ${trigger.local_time} (${trigger.timezone})`
+      : `Once at ${trigger.local_time} (${trigger.timezone})`
+  }
+  if (trigger.kind === 'daily') {
+    return lang === 'zh-Hans'
+      ? `每天 ${trigger.local_time} (${trigger.timezone})`
+      : `Daily at ${trigger.local_time} (${trigger.timezone})`
+  }
+  return lang === 'zh-Hans'
+    ? `每${weekday} ${trigger.local_time} (${trigger.timezone})`
+    : `Every ${weekday} at ${trigger.local_time} (${trigger.timezone})`
+}
+
+function formatAutomationExecution(
+  execution: AutomationExecutionDetail | undefined
+): string | null {
+  if (execution === undefined) return null
+  return `${execution.status[0].toUpperCase()}${execution.status.slice(1)} · ${new Date(execution.scheduled_for).toLocaleString()}`
 }
 
 const MODEL_DELETE_CONFIRM = 'Remove the saved model configuration and API key?'
@@ -429,6 +502,10 @@ const MAX_ATTENTION_WIDTH = 600
 const DEFAULT_BROWSER_AGENT_WIDTH = 340
 const MIN_BROWSER_AGENT_WIDTH = 200
 const MAX_BROWSER_AGENT_WIDTH = 1200
+const DEFAULT_AUTOMATIONS_MASTER_WIDTH = 340
+const MIN_AUTOMATIONS_MASTER_WIDTH = 260
+const MAX_AUTOMATIONS_MASTER_WIDTH = 640
+const MIN_AUTOMATIONS_DETAIL_WIDTH = 380
 const MIN_CHAT_CONTENT_WIDTH = 320
 const MIN_BROWSER_SURFACE_WIDTH = 260
 const MIN_CENTER_WIDTH = MIN_THREAD_WIDTH + MIN_CHAT_CONTENT_WIDTH
@@ -441,7 +518,8 @@ function defaultDesktopLayout(): DesktopLayout {
     attentionWidth: DEFAULT_ATTENTION_WIDTH,
     attentionPanelOpen: false,
     browserAgentPanelOpen: true,
-    browserAgentWidth: DEFAULT_BROWSER_AGENT_WIDTH
+    browserAgentWidth: DEFAULT_BROWSER_AGENT_WIDTH,
+    automationsMasterWidth: DEFAULT_AUTOMATIONS_MASTER_WIDTH
   }
 }
 
@@ -464,6 +542,7 @@ function storedDesktopLayout(): DesktopLayout {
     const attentionPanelOpen = layout['attentionPanelOpen']
     const browserAgentPanelOpen = layout['browserAgentPanelOpen']
     const browserAgentWidth = layout['browserAgentWidth']
+    const automationsMasterWidth = layout['automationsMasterWidth']
     if (
       !isLayoutWidth(railWidth, MIN_RAIL_WIDTH, MAX_RAIL_WIDTH) ||
       !isLayoutWidth(threadWidth, MIN_THREAD_WIDTH, MAX_THREAD_WIDTH) ||
@@ -484,7 +563,14 @@ function storedDesktopLayout(): DesktopLayout {
         MAX_BROWSER_AGENT_WIDTH
       )
         ? browserAgentWidth
-        : DEFAULT_BROWSER_AGENT_WIDTH
+        : DEFAULT_BROWSER_AGENT_WIDTH,
+      automationsMasterWidth: isLayoutWidth(
+        automationsMasterWidth,
+        MIN_AUTOMATIONS_MASTER_WIDTH,
+        MAX_AUTOMATIONS_MASTER_WIDTH
+      )
+        ? automationsMasterWidth
+        : DEFAULT_AUTOMATIONS_MASTER_WIDTH
     }
   } catch {
     return defaultDesktopLayout()
@@ -503,8 +589,8 @@ function saveDesktopLayout(layout: DesktopLayout): void {
   }
 }
 
-function conversationLabel(title: string | null): string {
-  return title ?? 'New conversation'
+function conversationLabel(title: string | null, lang: AppLanguage = 'en'): string {
+  return title ?? t(lang, 'newConversation')
 }
 
 function orderRecentConversations(
@@ -649,32 +735,33 @@ function formatElapsed(startedAt: number, endedAt: number | null): string | null
   return `${seconds}s`
 }
 
-function activitySummaryLabel(activity: RunActivity): string {
+function activitySummaryLabel(activity: RunActivity, lang: AppLanguage = 'en'): string {
   const elapsed = formatElapsed(activity.startedAt, activity.endedAt)
   const actionCount = activity.steps.filter((step) => step.id.startsWith('tool:')).length
-  const details = [
-    actionCount === 0 ? null : `${actionCount} ${actionCount === 1 ? 'action' : 'actions'}`,
-    elapsed
-  ].filter((detail): detail is string => detail !== null)
+  const actionUnit =
+    actionCount === 1 ? t(lang, 'activityActionUnit') : t(lang, 'activityActionsUnit')
+  const details = [actionCount === 0 ? null : `${actionCount} ${actionUnit}`, elapsed].filter(
+    (detail): detail is string => detail !== null
+  )
 
   switch (activity.outcome) {
     case 'failed':
-      return ['Failed', ...details].join(' · ')
+      return [t(lang, 'activityFailed'), ...details].join(' · ')
     case 'cancelled':
-      return ['Stopped', ...details].join(' · ')
+      return [t(lang, 'activityStopped'), ...details].join(' · ')
     case 'limit':
-      return ['Stopped for safety', ...details].join(' · ')
+      return [t(lang, 'activityStoppedSafety'), ...details].join(' · ')
     case 'completed':
     default:
-      return ['Completed', ...details].join(' · ')
+      return [t(lang, 'activityCompleted'), ...details].join(' · ')
   }
 }
 
-function activityCurrentLabel(activity: RunActivity): string {
+function activityCurrentLabel(activity: RunActivity, lang: AppLanguage = 'en'): string {
   const current = activity.steps.findLast(
     (step) => step.status === 'running' || step.status === 'waiting'
   )
-  return current === undefined ? 'Working…' : current.label
+  return current === undefined ? t(lang, 'activityWorking') : current.label
 }
 
 function persistedRunActivity(history: PersistedRunHistory): RunActivity {
@@ -763,10 +850,12 @@ function runHistoryByAssistantMessage(
 function RunActivityCard({
   activity,
   expanded,
+  lang = 'en',
   onExpandedChange
 }: {
   activity: RunActivity
   expanded: boolean
+  lang?: AppLanguage
   onExpandedChange: (expanded: boolean) => void
 }): React.JSX.Element {
   return (
@@ -778,7 +867,7 @@ function RunActivityCard({
           onClick={() => onExpandedChange(true)}
           type="button"
         >
-          <span className="activity-summary-label">{activitySummaryLabel(activity)}</span>
+          <span className="activity-summary-label">{activitySummaryLabel(activity, lang)}</span>
           <span aria-hidden="true" className="activity-chevron">
             ▾
           </span>
@@ -788,7 +877,7 @@ function RunActivityCard({
           {activity.phase === 'live' ? (
             <div aria-live="polite" className="activity-live">
               <span aria-hidden="true" className="activity-spinner" />
-              <span>{activityCurrentLabel(activity)}</span>
+              <span>{activityCurrentLabel(activity, lang)}</span>
             </div>
           ) : (
             <button
@@ -797,7 +886,7 @@ function RunActivityCard({
               onClick={() => onExpandedChange(false)}
               type="button"
             >
-              <span className="activity-card-title">{activitySummaryLabel(activity)}</span>
+              <span className="activity-card-title">{activitySummaryLabel(activity, lang)}</span>
               <span aria-hidden="true" className="activity-chevron">
                 ▴
               </span>
@@ -1094,6 +1183,26 @@ export default function App(): React.JSX.Element {
   const [pendingApproval, setPendingApproval] = useState<ToolApproval | null>(null)
   const [isDecidingApproval, setIsDecidingApproval] = useState(false)
   const [activeView, setActiveView] = useState<AppView>('chat')
+  const [automationPreviews, setAutomationPreviews] = useState<AutomationPreview[]>([])
+  const [selectedAutomationId, setSelectedAutomationId] = useState<string | null>(null)
+  const [automationLoadError, setAutomationLoadError] = useState<string | null>(null)
+  const [automationExecutions, setAutomationExecutions] = useState<AutomationExecutionDetail[]>([])
+  const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null)
+  const [executionMessages, setExecutionMessages] = useState<ConversationMessage[]>([])
+  const [isExecutionMessagesLoading, setIsExecutionMessagesLoading] = useState(false)
+  const [editingAutomationId, setEditingAutomationId] = useState<string | null>(null)
+  const [automationDraftConversationId, setAutomationDraftConversationId] = useState<string | null>(
+    null
+  )
+  const [automationDraftMessages, setAutomationDraftMessages] = useState<ConversationMessage[]>([])
+  const [automationInlineInput, setAutomationInlineInput] = useState('')
+  const [isAutomationCreating, setIsAutomationCreating] = useState(false)
+  const [automationCreateStatus, setAutomationCreateStatus] = useState<string | null>(null)
+  const [isAutomationRunningNow, setIsAutomationRunningNow] = useState(false)
+  const [automationRunNowMessage, setAutomationRunNowMessage] = useState<string | null>(null)
+  const [isCreatingNewTask, setIsCreatingNewTask] = useState(false)
+  const [showTaskPrompt, setShowTaskPrompt] = useState(false)
+  const [hasCopiedOutput, setHasCopiedOutput] = useState(false)
   const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([])
   const [activeBrowserTabId, setActiveBrowserTabId] = useState('')
   const [browserSessionReady, setBrowserSessionReady] = useState(false)
@@ -1186,6 +1295,10 @@ export default function App(): React.JSX.Element {
   const activeBrowserTabIdRef = useRef(activeBrowserTabId)
   const selectedConversationIdRef = useRef(selectedConversationId)
   const selectedBrowserConversationIdRef = useRef(selectedBrowserConversationId)
+  const automationDraftConversationIdRef = useRef(automationDraftConversationId)
+  const automationDraftRunIdRef = useRef<string | null>(null)
+  const automationUpdatedAtByIdRef = useRef<Map<string, string>>(new Map())
+  const automationDraftKnownVersionsRef = useRef<Map<string, string>>(new Map())
   const createNewChatSessionRef = useRef<() => void>(() => undefined)
   const browserMessageLoadIdRef = useRef(0)
   const scrollbarHideTimerRef = useRef<number | null>(null)
@@ -1197,6 +1310,7 @@ export default function App(): React.JSX.Element {
   browserTabsRef.current = browserTabs
   activeBrowserTabIdRef.current = activeBrowserTabId
   selectedConversationIdRef.current = selectedConversationId
+  automationDraftConversationIdRef.current = automationDraftConversationId
   selectedBrowserConversationIdRef.current = selectedBrowserConversationId
   const [workspaceTrees, setWorkspaceTrees] = useState<Record<string, WorkspaceFileNode | null>>({})
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
@@ -1213,13 +1327,81 @@ export default function App(): React.JSX.Element {
   const attachedFolders = workspaceSettings?.additional_roots ?? []
   const attachedFiles = workspaceSettings?.additional_files ?? []
   const hasAttachedWorkspace = attachedFolders.length > 0 || attachedFiles.length > 0
+  const selectedAutomation =
+    automationPreviews.find((automation) => automation.id === selectedAutomationId) ??
+    automationPreviews[0] ??
+    null
   activeViewRef.current = activeView
+
+  useEffect(() => {
+    if (backendStatus !== 'ready') return
+    void window.desktop
+      .listAutomations()
+      .then((automations) => {
+        automationUpdatedAtByIdRef.current = new Map(
+          automations.map((automation) => [automation.automation_id, automation.updated_at])
+        )
+        const values = automations.map((automation) => ({
+          id: automation.automation_id,
+          name: automation.name,
+          summary: automation.plan_summary,
+          schedule: 'Schedule details available after selection',
+          nextRun: null,
+          lastRun: null,
+          status: automation.status,
+          source: 'Confirmed scheduled task plan',
+          capabilities: automation.allowed_capabilities
+        }))
+        setAutomationPreviews(values)
+        setSelectedAutomationId((current) => current ?? values[0]?.id ?? null)
+        setAutomationLoadError(null)
+      })
+      .catch(() => setAutomationLoadError('Scheduled tasks could not be loaded.'))
+  }, [backendStatus])
+
+  useEffect(() => {
+    setSelectedExecutionId(null)
+    setExecutionMessages([])
+    if (backendStatus !== 'ready' || selectedAutomationId === null) {
+      setAutomationExecutions([])
+      return
+    }
+    void Promise.all([
+      window.desktop.listAutomationTriggers(selectedAutomationId),
+      window.desktop.listAutomationExecutions(selectedAutomationId)
+    ])
+      .then(([triggers, executions]) => {
+        setAutomationExecutions(executions)
+        const schedule = formatAutomationSchedule(triggers[0])
+        const nextRun = triggers[0]?.next_run_at
+          ? new Date(triggers[0].next_run_at).toLocaleString()
+          : null
+        const lastRun = formatAutomationExecution(executions[0])
+        setAutomationPreviews((values) =>
+          values.map((value) =>
+            value.id === selectedAutomationId ? { ...value, schedule, nextRun, lastRun } : value
+          )
+        )
+        if (executions.length > 0) {
+          const latestId = executions[0].automation_execution_id
+          setSelectedExecutionId(latestId)
+          setIsExecutionMessagesLoading(true)
+          window.desktop
+            .getAutomationExecutionMessages(selectedAutomationId, latestId)
+            .then((messages) => setExecutionMessages(messages))
+            .catch(() => setExecutionMessages([]))
+            .finally(() => setIsExecutionMessagesLoading(false))
+        }
+      })
+      .catch(() => setAutomationLoadError('Scheduled task details could not be loaded.'))
+  }, [backendStatus, selectedAutomationId])
 
   const isAttentionPanelVisible =
     (activeView === 'chat' && hasAttachedWorkspace && desktopLayout.attentionPanelOpen) ||
     (activeView !== 'chat' &&
       activeView !== 'browser' &&
       activeView !== 'preferences' &&
+      activeView !== 'automations' &&
       desktopLayout.attentionPanelOpen)
 
   const addBrowserTab = useCallback((): void => {
@@ -1343,7 +1525,9 @@ export default function App(): React.JSX.Element {
           ? event.clientX
           : column === 'threads'
             ? event.clientX - currentRailWidth
-            : window.innerWidth - event.clientX
+            : column === 'automationsMaster'
+              ? event.clientX - currentRailWidth
+              : window.innerWidth - event.clientX
       const otherColumnWidth =
         column === 'rail' && attentionIsVisible
           ? layout.attentionWidth
@@ -1357,25 +1541,33 @@ export default function App(): React.JSX.Element {
           ? MIN_RAIL_WIDTH
           : column === 'threads'
             ? MIN_THREAD_WIDTH
-            : column === 'browserAgent'
-              ? MIN_BROWSER_AGENT_WIDTH
-              : MIN_ATTENTION_WIDTH
+            : column === 'automationsMaster'
+              ? MIN_AUTOMATIONS_MASTER_WIDTH
+              : column === 'browserAgent'
+                ? MIN_BROWSER_AGENT_WIDTH
+                : MIN_ATTENTION_WIDTH
       const maximumWidth = Math.min(
         column === 'rail'
           ? MAX_RAIL_WIDTH
           : column === 'threads'
             ? MAX_THREAD_WIDTH
-            : column === 'browserAgent'
-              ? MAX_BROWSER_AGENT_WIDTH
-              : MAX_ATTENTION_WIDTH,
+            : column === 'automationsMaster'
+              ? MAX_AUTOMATIONS_MASTER_WIDTH
+              : column === 'browserAgent'
+                ? MAX_BROWSER_AGENT_WIDTH
+                : MAX_ATTENTION_WIDTH,
         column === 'threads'
           ? window.innerWidth -
               (railIsVisible ? currentRailWidth : 0) -
               (attentionIsVisible ? layout.attentionWidth : 0) -
               MIN_CHAT_CONTENT_WIDTH
-          : column === 'browserAgent'
-            ? window.innerWidth - otherColumnWidth - MIN_BROWSER_SURFACE_WIDTH
-            : window.innerWidth - otherColumnWidth - MIN_CENTER_WIDTH
+          : column === 'automationsMaster'
+            ? window.innerWidth -
+              (railIsVisible ? currentRailWidth : 0) -
+              MIN_AUTOMATIONS_DETAIL_WIDTH
+            : column === 'browserAgent'
+              ? window.innerWidth - otherColumnWidth - MIN_BROWSER_SURFACE_WIDTH
+              : window.innerWidth - otherColumnWidth - MIN_CENTER_WIDTH
       )
       const width = Math.max(minimumWidth, Math.min(requestedWidth, maximumWidth))
       const nextLayout = {
@@ -1384,9 +1576,11 @@ export default function App(): React.JSX.Element {
           ? { railWidth: width }
           : column === 'threads'
             ? { threadWidth: width }
-            : column === 'browserAgent'
-              ? { browserAgentWidth: width }
-              : { attentionWidth: width })
+            : column === 'automationsMaster'
+              ? { automationsMasterWidth: width }
+              : column === 'browserAgent'
+                ? { browserAgentWidth: width }
+                : { attentionWidth: width })
       }
       desktopLayoutRef.current = nextLayout
       setDesktopLayout(nextLayout)
@@ -1765,9 +1959,60 @@ export default function App(): React.JSX.Element {
           })
           .catch(() => setErrorMessage('Messages could not be refreshed.'))
       }
+
+      if (update.conversationId === automationDraftConversationIdRef.current) {
+        automationDraftRunIdRef.current = null
+        setIsAutomationCreating(false)
+        void Promise.all([
+          window.desktop.listAutomationDraftMessages(update.conversationId),
+          window.desktop.listAutomations()
+        ])
+          .then(([messages, automations]) => {
+            setAutomationDraftMessages(messages)
+            const savedAutomation = automations.find(
+              (automation) =>
+                automationDraftKnownVersionsRef.current.get(automation.automation_id) !==
+                automation.updated_at
+            )
+            automationUpdatedAtByIdRef.current = new Map(
+              automations.map((automation) => [automation.automation_id, automation.updated_at])
+            )
+            const values = automations.map((automation) => ({
+              id: automation.automation_id,
+              name: automation.name,
+              summary: automation.plan_summary,
+              schedule: 'Schedule details available after selection',
+              nextRun: null,
+              lastRun: null,
+              status: automation.status,
+              source: 'Confirmed scheduled task plan',
+              capabilities: automation.allowed_capabilities
+            }))
+            setAutomationPreviews(values)
+            if (savedAutomation !== undefined) {
+              const savedId = savedAutomation.automation_id
+              setSelectedAutomationId(savedId)
+              setEditingAutomationId(null)
+              setAutomationCreateStatus(`✓ Saved scheduled task: "${savedAutomation.name}"`)
+              automationDraftKnownVersionsRef.current.set(savedId, savedAutomation.updated_at)
+              window.setTimeout(() => {
+                setAutomationCreateStatus((curr) => (curr?.startsWith('✓') ? null : curr))
+              }, 4000)
+            } else {
+              setAutomationCreateStatus(null)
+            }
+          })
+          .catch(() => setAutomationLoadError('Scheduled tasks could not be refreshed.'))
+      }
     })
 
     const removeErrorListener = window.desktop.onRunStreamError((error) => {
+      if (error.runId === automationDraftRunIdRef.current) {
+        automationDraftRunIdRef.current = null
+        setIsAutomationCreating(false)
+        setAutomationCreateStatus(null)
+        setAutomationLoadError('The scheduled-task planning response was interrupted.')
+      }
       setActiveRun((current) => (current?.runId === error.runId ? null : current))
       setIsCancellingRun(false)
       setRunActivityWaiting(
@@ -1838,12 +2083,14 @@ export default function App(): React.JSX.Element {
   }, [browserDraft])
 
   useEffect(() => {
-    if (activeView !== 'browser') {
+    const showingMainBrowser = activeView === 'browser'
+    if (!showingMainBrowser) {
       void window.desktop.hideBrowser()
       return
     }
 
-    if (!browserSessionReady || activeBrowserTabId === '') {
+    const tabId = activeBrowserTabId
+    if (!browserSessionReady || tabId === '') {
       return
     }
 
@@ -1858,7 +2105,7 @@ export default function App(): React.JSX.Element {
         return
       }
 
-      void window.desktop.showBrowser(activeBrowserTabId, {
+      void window.desktop.showBrowser(tabId, {
         x: Math.round(rect.x),
         y: Math.round(rect.y),
         width: Math.round(rect.width),
@@ -3124,6 +3371,163 @@ export default function App(): React.JSX.Element {
       })
   }
 
+  function toggleAutomationPreview(automationId: string): void {
+    const current = automationPreviews.find((automation) => automation.id === automationId)
+    if (current === undefined) return
+    const status = current.status === 'active' ? 'paused' : 'active'
+    void window.desktop.updateAutomationStatus(automationId, status).then((saved) => {
+      setAutomationPreviews((values) =>
+        values.map((value) =>
+          value.id === automationId ? { ...value, status: saved.status } : value
+        )
+      )
+    })
+  }
+
+  function deleteAutomation(automationId: string): void {
+    if (isAutomationCreating) return
+    if (!window.confirm('Delete this scheduled task and its execution history?')) return
+    discardAutomationDraft()
+    void window.desktop
+      .deleteAutomation(automationId)
+      .then(() => {
+        setAutomationPreviews((current) =>
+          current.filter((automation) => automation.id !== automationId)
+        )
+        setSelectedAutomationId((current) => (current === automationId ? null : current))
+        setEditingAutomationId((current) => (current === automationId ? null : current))
+      })
+      .catch(() => setAutomationLoadError('The scheduled task could not be deleted.'))
+  }
+
+  function discardAutomationDraft(): void {
+    if (isAutomationCreating) return
+    const conversationId = automationDraftConversationIdRef.current
+    automationDraftConversationIdRef.current = null
+    automationDraftRunIdRef.current = null
+    setAutomationDraftConversationId(null)
+    setAutomationDraftMessages([])
+    setAutomationCreateStatus(null)
+    setAutomationInlineInput('')
+    setEditingAutomationId(null)
+    if (conversationId !== null) {
+      void window.desktop.deleteAutomationDraft(conversationId).catch(() => undefined)
+    }
+  }
+
+  async function submitAutomationInline(event?: React.FormEvent<HTMLFormElement>): Promise<void> {
+    if (event) event.preventDefault()
+    const content = automationInlineInput.trim()
+    if (!content || isAutomationCreating) return
+    setIsAutomationCreating(true)
+    setAutomationCreateStatus(t(appLanguage, 'planningScheduledTask'))
+    setAutomationLoadError(null)
+    try {
+      let conversationId = automationDraftConversationIdRef.current
+      if (conversationId === null) {
+        const conversation = await window.desktop.createAutomationDraft(
+          editingAutomationId ?? undefined,
+          Intl.DateTimeFormat().resolvedOptions().timeZone
+        )
+        conversationId = conversation.conversation_id
+        automationDraftConversationIdRef.current = conversationId
+        setAutomationDraftConversationId(conversationId)
+        setAutomationDraftMessages([])
+      }
+      const submitted = await window.desktop.submitAutomationDraftMessage(conversationId, content)
+      automationDraftRunIdRef.current = submitted.run.run_id
+      setAutomationInlineInput('')
+      setAutomationDraftMessages(await window.desktop.listAutomationDraftMessages(conversationId))
+    } catch {
+      setIsAutomationCreating(false)
+      setAutomationCreateStatus(null)
+      setAutomationLoadError('Failed to create or update the scheduled task.')
+    }
+  }
+
+  function startEditingAutomation(automationId: string): void {
+    if (isAutomationCreating) return
+    const target = automationPreviews.find((a) => a.id === automationId)
+    if (!target) return
+    discardAutomationDraft()
+    setEditingAutomationId(automationId)
+    setIsCreatingNewTask(true)
+    setAutomationInlineInput(`Update "${target.name}": `)
+  }
+
+  function runAutomationNow(automationId: string): void {
+    if (isAutomationRunningNow) return
+    setIsAutomationRunningNow(true)
+    setAutomationRunNowMessage('Starting execution…')
+    void window.desktop
+      .runAutomationNow(automationId)
+      .then(async (started) => {
+        setAutomationRunNowMessage('Execution running. Waiting for results…')
+        setSelectedExecutionId(started.automation_execution_id)
+        setIsExecutionMessagesLoading(true)
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 1000))
+          const executions = await window.desktop.listAutomationExecutions(automationId)
+          setAutomationExecutions(executions)
+          const target =
+            executions.find((e) => e.automation_execution_id === started.automation_execution_id) ??
+            executions[0]
+          if (target !== undefined && target.status !== 'claimed') {
+            setAutomationRunNowMessage(
+              target.status === 'completed'
+                ? 'Execution completed successfully.'
+                : `Execution finished with status: ${target.status}.`
+            )
+            setSelectedExecutionId(target.automation_execution_id)
+            const messages = await window.desktop.getAutomationExecutionMessages(
+              automationId,
+              target.automation_execution_id
+            )
+            setExecutionMessages(messages)
+            setIsExecutionMessagesLoading(false)
+            return
+          }
+        }
+        setAutomationRunNowMessage(
+          'Execution is taking longer than expected. It will complete in the background.'
+        )
+      })
+      .catch(() => {
+        setAutomationRunNowMessage(null)
+        setAutomationLoadError('The scheduled task could not be started.')
+      })
+      .finally(() => {
+        setIsAutomationRunningNow(false)
+        setIsExecutionMessagesLoading(false)
+      })
+  }
+
+  function selectExecutionHistory(executionId: string): void {
+    if (selectedAutomation === null) return
+    setSelectedExecutionId(executionId)
+    setIsExecutionMessagesLoading(true)
+    window.desktop
+      .getAutomationExecutionMessages(selectedAutomation.id, executionId)
+      .then((messages) => {
+        setExecutionMessages(messages)
+      })
+      .catch(() => {
+        setExecutionMessages([])
+      })
+      .finally(() => setIsExecutionMessagesLoading(false))
+  }
+
+  function copyExecutionOutput(text: string): void {
+    void window.desktop.copyText(text)
+    setHasCopiedOutput(true)
+    if (copyFeedbackTimerRef.current !== null) {
+      window.clearTimeout(copyFeedbackTimerRef.current)
+    }
+    copyFeedbackTimerRef.current = window.setTimeout(() => {
+      setHasCopiedOutput(false)
+    }, 2000)
+  }
+
   function setAttentionPanelOpen(open: boolean): void {
     const next = { ...desktopLayoutRef.current, attentionPanelOpen: open }
     desktopLayoutRef.current = next
@@ -3380,7 +3784,7 @@ export default function App(): React.JSX.Element {
               className="workspace-tree-empty-sub"
               style={{ paddingLeft: `${22 + depth * 12}px` }}
             >
-              Empty
+              {t(appLanguage, 'emptyDirectory')}
             </div>
           ) : null}
         </div>
@@ -3396,7 +3800,7 @@ export default function App(): React.JSX.Element {
         <button
           className="workspace-tree-file-btn"
           onClick={() => void handleSelectFileForPreview(node.path)}
-          title={`Preview ${node.name}`}
+          title={`${t(appLanguage, 'previewFile')} ${node.name}`}
           type="button"
         >
           <TreeIcon extension={node.extension} kind="file" />
@@ -3407,10 +3811,10 @@ export default function App(): React.JSX.Element {
         </button>
         <div className="workspace-tree-actions">
           <button
-            aria-label="Quote in chat"
+            aria-label={t(appLanguage, 'quoteInChat')}
             className="workspace-tree-action-btn"
             onClick={() => handleQuoteInChat(node.name)}
-            title="Quote in prompt"
+            title={t(appLanguage, 'quoteInPrompt')}
             type="button"
           >
             <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -3418,10 +3822,10 @@ export default function App(): React.JSX.Element {
             </svg>
           </button>
           <button
-            aria-label="Reveal in Finder"
+            aria-label={t(appLanguage, 'revealInFinder')}
             className="workspace-tree-action-btn"
             onClick={() => void window.desktop.revealInFinder(node.path)}
-            title="Reveal in Finder"
+            title={t(appLanguage, 'revealInFinder')}
             type="button"
           >
             <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -3473,7 +3877,8 @@ export default function App(): React.JSX.Element {
           {
             '--rail-width': `${railWidth}px`,
             '--thread-width': `${desktopLayout.threadWidth}px`,
-            '--attention-width': `${desktopLayout.attentionWidth}px`
+            '--attention-width': `${desktopLayout.attentionWidth}px`,
+            '--automations-master-width': `${desktopLayout.automationsMasterWidth}px`
           } as CSSProperties
         }
       >
@@ -3521,6 +3926,32 @@ export default function App(): React.JSX.Element {
                 <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" />
               </svg>
               <span className="rail-item-label">{t(appLanguage, 'newBrowser')}</span>
+            </button>
+          </div>
+
+          <div className="rail-section rail-automation-section">
+            <button
+              className={railItemClass('automations')}
+              onClick={() => {
+                setActiveView('automations')
+              }}
+              title={t(appLanguage, 'automationsTitle')}
+              type="button"
+            >
+              <svg
+                className="rail-icon"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+                <circle cx="12" cy="12" r="4" />
+              </svg>
+              <span className="rail-item-label">{t(appLanguage, 'automationsTitle')}</span>
+              <span className="rail-count">{automationPreviews.length}</span>
             </button>
           </div>
 
@@ -3590,7 +4021,7 @@ export default function App(): React.JSX.Element {
                             title={
                               kind === 'browser' && conversation.last_page_url !== null
                                 ? conversation.last_page_url
-                                : conversationLabel(conversation.title)
+                                : conversationLabel(conversation.title, appLanguage)
                             }
                             type="button"
                           >
@@ -3613,7 +4044,7 @@ export default function App(): React.JSX.Element {
                               </svg>
                             )}
                             <span className="rail-recent-title">
-                              {conversationLabel(conversation.title)}
+                              {conversationLabel(conversation.title, appLanguage)}
                             </span>
                             <time className="rail-recent-time" dateTime={conversation.updated_at}>
                               {formatThreadTime(conversation.updated_at)}
@@ -3725,14 +4156,18 @@ export default function App(): React.JSX.Element {
                       <circle cx="11" cy="11" r="7" />
                       <path d="m21 21-4.3-4.3" />
                     </svg>
-                    <input disabled placeholder="Search…" type="search" />
+                    <input
+                      disabled
+                      placeholder={t(appLanguage, 'searchPlaceholder')}
+                      type="search"
+                    />
                     <kbd>⌘K</kbd>
                   </label>
                   <button
                     className="chat-new-btn"
                     disabled={backendStatus !== 'ready' || isCreatingConversation}
                     onClick={() => void createConversation()}
-                    title="New conversation"
+                    title={t(appLanguage, 'newConversation')}
                     type="button"
                   >
                     <Icon path="M12 5v14M5 12h14" />
@@ -3740,7 +4175,7 @@ export default function App(): React.JSX.Element {
                 </div>
 
                 {conversations.length === 0 ? (
-                  <p className="chat-context-sub">No conversations yet. Create one to start.</p>
+                  <p className="chat-context-sub">{t(appLanguage, 'noConversationsYet')}</p>
                 ) : (
                   conversations.map((conversation) =>
                     renamingConversationId === conversation.conversation_id ? (
@@ -3783,7 +4218,7 @@ export default function App(): React.JSX.Element {
                           type="button"
                         >
                           <div className="chat-thread-name">
-                            {conversationLabel(conversation.title)}
+                            {conversationLabel(conversation.title, appLanguage)}
                           </div>
                           <div className="chat-thread-time">
                             {formatThreadTime(conversation.updated_at)}
@@ -3791,11 +4226,11 @@ export default function App(): React.JSX.Element {
                         </button>
                         <div className="chat-thread-actions">
                           <button
-                            aria-label="Rename conversation"
+                            aria-label={t(appLanguage, 'rename')}
                             className="chat-thread-action-btn"
                             disabled={backendStatus !== 'ready'}
                             onClick={() => startRename(conversation)}
-                            title="Rename"
+                            title={t(appLanguage, 'rename')}
                             type="button"
                           >
                             <svg
@@ -3809,14 +4244,14 @@ export default function App(): React.JSX.Element {
                             </svg>
                           </button>
                           <button
-                            aria-label="Delete conversation"
+                            aria-label={t(appLanguage, 'delete')}
                             className="chat-thread-action-btn chat-thread-action-btn-danger"
                             disabled={
                               backendStatus !== 'ready' ||
                               activeRun?.conversationId === conversation.conversation_id
                             }
                             onClick={() => void deleteConversation(conversation.conversation_id)}
-                            title="Delete"
+                            title={t(appLanguage, 'delete')}
                             type="button"
                           >
                             <svg
@@ -3849,8 +4284,8 @@ export default function App(): React.JSX.Element {
                 <div className="chat-thread-header">
                   <div className="chat-thread-header-title">
                     {selectedConversation
-                      ? conversationLabel(selectedConversation.title)
-                      : 'No conversation selected'}
+                      ? conversationLabel(selectedConversation.title, appLanguage)
+                      : t(appLanguage, 'noConversationSelected')}
                   </div>
                   {hasAttachedWorkspace ? (
                     <button
@@ -3859,8 +4294,8 @@ export default function App(): React.JSX.Element {
                       onClick={() => setAttentionPanelOpen(!desktopLayout.attentionPanelOpen)}
                       title={
                         desktopLayout.attentionPanelOpen
-                          ? 'Hide workspace files'
-                          : 'Show workspace files'
+                          ? t(appLanguage, 'hideWorkspaceFiles')
+                          : t(appLanguage, 'showWorkspaceFiles')
                       }
                       type="button"
                     >
@@ -3873,7 +4308,7 @@ export default function App(): React.JSX.Element {
                       >
                         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                       </svg>
-                      <span>Files</span>
+                      <span>{t(appLanguage, 'workspaceFiles')}</span>
                       <span className="chat-workspace-toggle-count">
                         {(workspaceSettings?.additional_roots.length ?? 0) +
                           (workspaceSettings?.additional_files.length ?? 0)}
@@ -3976,18 +4411,18 @@ export default function App(): React.JSX.Element {
                               <div className="file-change-card-copy">
                                 <span className="file-change-operation">
                                   {change.operation === 'create'
-                                    ? 'Created file'
+                                    ? t(appLanguage, 'createdFile')
                                     : change.operation === 'replace'
-                                      ? 'Updated file'
-                                      : 'Deleted file'}
+                                      ? t(appLanguage, 'updatedFile')
+                                      : t(appLanguage, 'deletedFile')}
                                 </span>
                                 <span className="file-change-path" title={change.path}>
                                   {change.path}
                                 </span>
                                 {change.status === 'conflicted' ? (
                                   <span className="file-change-conflict" role="status">
-                                    <strong>Undo unavailable</strong>
-                                    <span>File version changed after this update.</span>
+                                    <strong>{t(appLanguage, 'undoUnavailable')}</strong>
+                                    <span>{t(appLanguage, 'fileVersionChanged')}</span>
                                   </span>
                                 ) : null}
                               </div>
@@ -3998,17 +4433,21 @@ export default function App(): React.JSX.Element {
                                     onClick={() => void undoFileChange(change)}
                                     type="button"
                                   >
-                                    {undoingChangeId === change.change_id ? 'Undoing…' : 'Undo'}
+                                    {undoingChangeId === change.change_id
+                                      ? t(appLanguage, 'undoing')
+                                      : t(appLanguage, 'undo')}
                                   </button>
                                   {hasUndoError ? (
                                     <span className="file-change-undo-error" role="status">
-                                      Undo could not be completed. The file may have changed.
+                                      {t(appLanguage, 'undoError')}
                                     </span>
                                   ) : null}
                                 </div>
                               ) : change.status === 'conflicted' ? null : (
                                 <span className={`file-change-status is-${change.status}`}>
-                                  {change.status === 'reverted' ? 'Undone' : 'Unavailable'}
+                                  {change.status === 'reverted'
+                                    ? t(appLanguage, 'undone')
+                                    : t(appLanguage, 'unavailable')}
                                 </span>
                               )}
                             </div>
@@ -4028,6 +4467,7 @@ export default function App(): React.JSX.Element {
                                             activity={activity}
                                             expanded={expandedHistoryRunIds.has(activity.runId)}
                                             key={activity.runId}
+                                            lang={appLanguage}
                                             onExpandedChange={(expanded) =>
                                               setExpandedHistoryRunIds((current) => {
                                                 const next = new Set(current)
@@ -4058,7 +4498,7 @@ export default function App(): React.JSX.Element {
                                                     event.preventDefault()
                                                     openAssistantLink(href)
                                                   }}
-                                                  title="Open in your default browser"
+                                                  title={t(appLanguage, 'openInDefaultBrowser')}
                                                 >
                                                   {children}
                                                 </a>
@@ -4083,15 +4523,15 @@ export default function App(): React.JSX.Element {
                                     <button
                                       aria-label={
                                         copiedMessageId === message.message_id
-                                          ? 'Copied'
-                                          : 'Copy message'
+                                          ? t(appLanguage, 'copiedMessage')
+                                          : t(appLanguage, 'copyMessage')
                                       }
                                       className="message-action"
                                       onClick={() => void copyMessage(message)}
                                       title={
                                         copiedMessageId === message.message_id
-                                          ? 'Copied'
-                                          : 'Copy message'
+                                          ? t(appLanguage, 'copiedMessage')
+                                          : t(appLanguage, 'copyMessage')
                                       }
                                       type="button"
                                     >
@@ -4099,11 +4539,11 @@ export default function App(): React.JSX.Element {
                                     </button>
                                     {message.role === 'user' ? (
                                       <button
-                                        aria-label="Edit and resend message"
+                                        aria-label={t(appLanguage, 'editAndResend')}
                                         className="message-action"
                                         disabled={backendStatus !== 'ready'}
                                         onClick={() => beginMessageEdit(message)}
-                                        title="Edit and resend message"
+                                        title={t(appLanguage, 'editAndResend')}
                                         type="button"
                                       >
                                         <Icon path="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
@@ -4115,6 +4555,7 @@ export default function App(): React.JSX.Element {
                                   <RunActivityCard
                                     activity={visibleActivity}
                                     expanded={activityExpanded}
+                                    lang={appLanguage}
                                     onExpandedChange={setActivityExpanded}
                                   />
                                 ) : null}
@@ -4125,6 +4566,7 @@ export default function App(): React.JSX.Element {
                               <RunActivityCard
                                 activity={visibleActivity}
                                 expanded={activityExpanded}
+                                lang={appLanguage}
                                 onExpandedChange={setActivityExpanded}
                               />
                             ) : null}
@@ -4138,13 +4580,19 @@ export default function App(): React.JSX.Element {
                 </div>
 
                 {visibleApproval !== null ? (
-                  <div aria-label="Tool approval" className="tool-approval-banner" role="region">
+                  <div
+                    aria-label={t(appLanguage, 'approvalsTitle')}
+                    className="tool-approval-banner"
+                    role="region"
+                  >
                     <span className="tool-approval-kind">
                       {visibleApprovalServer === null ? 'Tool' : 'MCP'}
                     </span>
                     <p className="tool-approval-banner-copy">
                       <span className="tool-approval-banner-title">
-                        Allow {visibleApproval.display_name}?
+                        {appLanguage === 'zh-Hans'
+                          ? `是否允许 ${visibleApproval.display_name}？`
+                          : `Allow ${visibleApproval.display_name}?`}
                       </span>
                       {visibleApproval.resource_path !== null ? (
                         <>
@@ -4172,10 +4620,13 @@ export default function App(): React.JSX.Element {
                           onClick={() => void decidePendingApproval(action.decision)}
                           type="button"
                         >
-                          {action.decision === 'allow_conversation' &&
-                          visibleApproval.tool_id.startsWith('filesystem.')
-                            ? 'Always allow file changes'
-                            : action.label}
+                          {action.decision === 'allow_conversation'
+                            ? visibleApproval.tool_id.startsWith('filesystem.')
+                              ? t(appLanguage, 'alwaysAllowFileChanges')
+                              : t(appLanguage, 'allowForChat')
+                            : action.decision === 'allow_once'
+                              ? t(appLanguage, 'allowOnce')
+                              : t(appLanguage, 'deny')}
                         </button>
                       ))}
                     </div>
@@ -4186,9 +4637,9 @@ export default function App(): React.JSX.Element {
                   <div className="chat-composer-box">
                     {editingMessageId !== null ? (
                       <div className="composer-editing">
-                        <span>Editing a previous message. Sending creates a new message.</span>
+                        <span>{t(appLanguage, 'editingPreviousMessage')}</span>
                         <button onClick={cancelMessageEdit} type="button">
-                          Cancel
+                          {t(appLanguage, 'cancel')}
                         </button>
                       </div>
                     ) : null}
@@ -4730,14 +5181,11 @@ export default function App(): React.JSX.Element {
                             )
                               ? runActivity
                               : null
-                          const browserActivityAnchorIndex =
-                            visibleBrowserActivity === null
-                              ? -1
-                              : browserMessages.reduce(
-                                  (lastIndex, message, index) =>
-                                    message.role === 'user' ? index : lastIndex,
-                                  -1
-                                )
+                          const browserActivityAnchorIndex = browserMessages.reduce(
+                            (lastIndex, message, index) =>
+                              message.role === 'user' ? index : lastIndex,
+                            -1
+                          )
 
                           return (
                             <>
@@ -4756,6 +5204,7 @@ export default function App(): React.JSX.Element {
                                             activity={activity}
                                             expanded={expandedHistoryRunIds.has(activity.runId)}
                                             key={activity.runId}
+                                            lang={appLanguage}
                                             onExpandedChange={(expanded) =>
                                               setExpandedHistoryRunIds((current) => {
                                                 const next = new Set(current)
@@ -4781,7 +5230,7 @@ export default function App(): React.JSX.Element {
                                                   event.preventDefault()
                                                   openAssistantLink(href)
                                                 }}
-                                                title="Open in your default browser"
+                                                title={t(appLanguage, 'openInDefaultBrowser')}
                                               >
                                                 {children}
                                               </a>
@@ -4805,15 +5254,15 @@ export default function App(): React.JSX.Element {
                                     <button
                                       aria-label={
                                         copiedMessageId === message.message_id
-                                          ? 'Copied'
-                                          : 'Copy message'
+                                          ? t(appLanguage, 'copiedMessage')
+                                          : t(appLanguage, 'copyMessage')
                                       }
                                       className="message-action"
                                       onClick={() => void copyMessage(message)}
                                       title={
                                         copiedMessageId === message.message_id
-                                          ? 'Copied'
-                                          : 'Copy message'
+                                          ? t(appLanguage, 'copiedMessage')
+                                          : t(appLanguage, 'copyMessage')
                                       }
                                       type="button"
                                     >
@@ -4821,11 +5270,11 @@ export default function App(): React.JSX.Element {
                                     </button>
                                     {message.role === 'user' ? (
                                       <button
-                                        aria-label="Edit and resend message"
+                                        aria-label={t(appLanguage, 'editAndResend')}
                                         className="message-action"
                                         disabled={backendStatus !== 'ready'}
                                         onClick={() => beginBrowserMessageEdit(message)}
-                                        title="Edit and resend message"
+                                        title={t(appLanguage, 'editAndResend')}
                                         type="button"
                                       >
                                         <Icon path="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
@@ -4837,6 +5286,7 @@ export default function App(): React.JSX.Element {
                                     <RunActivityCard
                                       activity={visibleBrowserActivity}
                                       expanded={activityExpanded}
+                                      lang={appLanguage}
                                       onExpandedChange={setActivityExpanded}
                                     />
                                   ) : null}
@@ -4849,6 +5299,7 @@ export default function App(): React.JSX.Element {
                                     activity={activity}
                                     expanded={expandedHistoryRunIds.has(activity.runId)}
                                     key={activity.runId}
+                                    lang={appLanguage}
                                     onExpandedChange={(expanded) =>
                                       setExpandedHistoryRunIds((current) => {
                                         const next = new Set(current)
@@ -4865,6 +5316,7 @@ export default function App(): React.JSX.Element {
                                 <RunActivityCard
                                   activity={visibleBrowserActivity}
                                   expanded={activityExpanded}
+                                  lang={appLanguage}
                                   onExpandedChange={setActivityExpanded}
                                 />
                               ) : null}
@@ -4876,7 +5328,7 @@ export default function App(): React.JSX.Element {
                     </div>
                     {visibleBrowserApproval !== null ? (
                       <div
-                        aria-label="Tool approval"
+                        aria-label={t(appLanguage, 'approvalsTitle')}
                         className="browser-agent-approval"
                         role="region"
                       >
@@ -4888,10 +5340,14 @@ export default function App(): React.JSX.Element {
                                 visibleBrowserApprovalServer
                               )}
                             </span>
-                            <span className="browser-agent-approval-hint">Approval needed</span>
+                            <span className="browser-agent-approval-hint">
+                              {t(appLanguage, 'approvalNeeded')}
+                            </span>
                           </div>
                           <p className="browser-agent-approval-title">
-                            Allow {visibleBrowserApproval.display_name}?
+                            {appLanguage === 'zh-Hans'
+                              ? `是否允许 ${visibleBrowserApproval.display_name}？`
+                              : `Allow ${visibleBrowserApproval.display_name}?`}
                           </p>
                           {visibleBrowserApprovalDetails.length > 0 ? (
                             <div className="browser-agent-approval-details">
@@ -4926,8 +5382,10 @@ export default function App(): React.JSX.Element {
                                 type="button"
                               >
                                 {action.decision === 'allow_conversation'
-                                  ? 'Allow for chat'
-                                  : action.label}
+                                  ? t(appLanguage, 'allowForChat')
+                                  : action.decision === 'allow_once'
+                                    ? t(appLanguage, 'allowOnce')
+                                    : t(appLanguage, 'deny')}
                               </button>
                             ))}
                           </div>
@@ -4940,9 +5398,9 @@ export default function App(): React.JSX.Element {
                     >
                       {browserEditingMessageId !== null ? (
                         <div className="composer-editing">
-                          <span>Editing a previous message. Sending creates a new message.</span>
+                          <span>{t(appLanguage, 'editingPreviousMessage')}</span>
                           <button onClick={cancelBrowserMessageEdit} type="button">
-                            Cancel
+                            {t(appLanguage, 'cancel')}
                           </button>
                         </div>
                       ) : null}
@@ -4957,7 +5415,7 @@ export default function App(): React.JSX.Element {
                               event.currentTarget.form?.requestSubmit()
                             }
                           }}
-                          placeholder="Message asAgent…"
+                          placeholder={t(appLanguage, 'composerPlaceholder')}
                           rows={1}
                           value={browserDraft}
                         />
@@ -4968,14 +5426,16 @@ export default function App(): React.JSX.Element {
                             onClick={() => void cancelActiveRun()}
                             type="button"
                           >
-                            {isCancellingRun ? 'Stopping…' : 'Stop'}
+                            {isCancellingRun
+                              ? t(appLanguage, 'stopping')
+                              : t(appLanguage, 'stopGenerating')}
                           </button>
                         ) : (
                           <button
-                            aria-label="Send message"
+                            aria-label={t(appLanguage, 'sendMessage')}
                             className="composer-send"
                             disabled={!browserDraft.trim() || isBusy}
-                            title="Send message"
+                            title={t(appLanguage, 'sendMessage')}
                             type="submit"
                           >
                             <Icon path="M12 19V5m-6 6 6-6 6 6" />
@@ -5017,9 +5477,7 @@ export default function App(): React.JSX.Element {
                   <div className="entry-title">
                     No activity feed yet — use <b>Chat</b> for live runs
                   </div>
-                  <div className="entry-detail">
-                    When Automations land, their timelines will show up here.
-                  </div>
+                  <div className="entry-detail">Scheduled-task timelines will appear here.</div>
                   <div className="entry-tag">placeholder</div>
                 </div>
                 <div className="entry-actions">
@@ -5089,9 +5547,7 @@ export default function App(): React.JSX.Element {
               <div className="attn-divider">Later today</div>
               <div className="sched-item">
                 <div className="sched-time">—</div>
-                <div className="sched-name">
-                  No scheduled items yet <b>(placeholder)</b>
-                </div>
+                <div className="sched-name">No scheduled task activity yet.</div>
               </div>
             </div>
           </AttentionAside>
@@ -5190,11 +5646,693 @@ export default function App(): React.JSX.Element {
           </AttentionAside>
         </div>
 
-        <div className={`view${activeView === 'scheduled' ? ' active' : ''}`}>
-          {renderPlaceholderView('Scheduled', 'Recurring and time-based agent jobs.')}
-        </div>
         <div className={`view${activeView === 'automations' ? ' active' : ''}`}>
-          {renderPlaceholderView('Automations', 'Saved workflows your agent can run.')}
+          <section className="center automations-center-shell">
+            <div className="automations-view-shell">
+              {/* Master Pane: Scheduled Tasks List */}
+              <section className="automations-master-pane">
+                <div className="automations-master-header">
+                  <div className="automations-master-header-text">
+                    <div className="automations-master-title">
+                      {t(appLanguage, 'automationsTitle')}
+                    </div>
+                    <div className="automations-master-sub">
+                      {automationPreviews.length} {t(appLanguage, 'automationsTitle').toLowerCase()}
+                    </div>
+                  </div>
+                  <button
+                    className="automations-new-task-btn"
+                    onClick={() => {
+                      discardAutomationDraft()
+                      setIsCreatingNewTask(true)
+                    }}
+                    title={t(appLanguage, 'newTask')}
+                    type="button"
+                  >
+                    <Icon path="M12 5v14M5 12h14" />
+                    <span>{t(appLanguage, 'newTask')}</span>
+                  </button>
+                </div>
+
+                {/* List of Tasks */}
+                <div className="automations-list" role="list">
+                  {isCreatingNewTask && (
+                    <div className="automation-card selected is-draft-card" role="listitem">
+                      <div className="automation-card-main">
+                        <div className="automation-card-toprow">
+                          <span className="automation-status draft">
+                            <span aria-hidden="true" className="automation-status-dot" />
+                            {editingAutomationId !== null
+                              ? t(appLanguage, 'editTask')
+                              : t(appLanguage, 'statusDraft')}
+                          </span>
+                        </div>
+                        <h2>
+                          {editingAutomationId !== null
+                            ? (automationPreviews.find((a) => a.id === editingAutomationId)?.name ??
+                              t(appLanguage, 'newScheduledTask'))
+                            : t(appLanguage, 'newScheduledTask')}
+                        </h2>
+                        <p className="automation-card-draft-hint">
+                          {editingAutomationId !== null
+                            ? t(appLanguage, 'editingTaskInCanvas')
+                            : t(appLanguage, 'draftingTaskInCanvas')}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {automationLoadError !== null && (
+                    <p className="automation-empty-detail">{automationLoadError}</p>
+                  )}
+                  {automationLoadError === null &&
+                    automationPreviews.length === 0 &&
+                    !isCreatingNewTask && (
+                      <p className="automation-empty-detail">
+                        {t(appLanguage, 'noAutomationsYet')}
+                      </p>
+                    )}
+                  {automationPreviews.map((automation) => (
+                    <button
+                      aria-pressed={!isCreatingNewTask && selectedAutomation?.id === automation.id}
+                      className={`automation-card${
+                        !isCreatingNewTask && selectedAutomation?.id === automation.id
+                          ? ' selected'
+                          : ''
+                      }`}
+                      key={automation.id}
+                      onClick={() => {
+                        setSelectedAutomationId(automation.id)
+                        setIsCreatingNewTask(false)
+                      }}
+                      role="listitem"
+                      type="button"
+                    >
+                      <div className="automation-card-main">
+                        <div className="automation-card-toprow">
+                          <span className={`automation-status ${automation.status}`}>
+                            <span aria-hidden="true" className="automation-status-dot" />
+                            {automation.status === 'active'
+                              ? t(appLanguage, 'statusActive')
+                              : automation.status === 'paused'
+                                ? t(appLanguage, 'statusPaused')
+                                : t(appLanguage, 'statusDraft')}
+                          </span>
+                        </div>
+                        <h2>{automation.name}</h2>
+                        <p>{automation.summary}</p>
+                      </div>
+                      <div className="automation-card-meta">
+                        <span className="automation-card-schedule">{automation.schedule}</span>
+                        <span className="automation-card-next">
+                          {automation.nextRun
+                            ? `${t(appLanguage, 'nextRun')}: ${automation.nextRun}`
+                            : t(appLanguage, 'noUpcomingRun')}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {/* Column Resizer between Master Pane & Canvas */}
+              <div
+                aria-label="Resize scheduled tasks list"
+                className="automations-column-resizer"
+                onPointerDown={(event) => beginColumnResize('automationsMaster', event)}
+                role="separator"
+              />
+
+              {/* Detail Canvas: Hero Task Dashboard or Creation Workspace */}
+              <section className="automations-detail-canvas">
+                {isCreatingNewTask ? (
+                  <div className="automation-creation-dashboard">
+                    <div className="automation-hero-header">
+                      <div className="automation-hero-header-info">
+                        <div className="automation-hero-meta-row">
+                          <span className="automation-status draft">
+                            <span aria-hidden="true" className="automation-status-dot" />
+                            {editingAutomationId !== null
+                              ? t(appLanguage, 'editTask')
+                              : t(appLanguage, 'statusDraft')}
+                          </span>
+                        </div>
+                        <h1 className="automation-hero-title">
+                          {editingAutomationId !== null
+                            ? `${t(appLanguage, 'editTask')}: "${
+                                automationPreviews.find((a) => a.id === editingAutomationId)
+                                  ?.name ?? 'plan'
+                              }"`
+                            : t(appLanguage, 'newScheduledTask')}
+                        </h1>
+                        <p className="automation-creation-sub">
+                          {editingAutomationId !== null
+                            ? t(appLanguage, 'refineTaskSub')
+                            : t(appLanguage, 'createTaskSub')}
+                        </p>
+                      </div>
+                      <div className="automation-hero-actions">
+                        <button
+                          className="automation-action-btn"
+                          onClick={() => {
+                            discardAutomationDraft()
+                            setIsCreatingNewTask(false)
+                          }}
+                          type="button"
+                        >
+                          {t(appLanguage, 'cancel')}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Big Spacious Composer */}
+                    <div className="automation-canvas-composer-card">
+                      <form
+                        className="automation-canvas-form"
+                        onSubmit={(e) => void submitAutomationInline(e)}
+                      >
+                        <div className="automation-canvas-textarea-wrapper">
+                          <textarea
+                            aria-label={t(appLanguage, 'describeScheduledTask')}
+                            className="automation-canvas-textarea"
+                            disabled={isAutomationCreating}
+                            onChange={(e) => setAutomationInlineInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault()
+                                void submitAutomationInline()
+                              }
+                            }}
+                            placeholder={
+                              editingAutomationId !== null
+                                ? appLanguage === 'zh-Hans'
+                                  ? `正在编辑 "${
+                                      automationPreviews.find((a) => a.id === editingAutomationId)
+                                        ?.name ?? '任务'
+                                    }"… 输入要调整的内容。`
+                                  : `Editing "${
+                                      automationPreviews.find((a) => a.id === editingAutomationId)
+                                        ?.name ?? 'plan'
+                                    }"… Type changes to update.`
+                                : t(appLanguage, 'draftPromptHint')
+                            }
+                            rows={4}
+                            value={automationInlineInput}
+                          />
+                        </div>
+
+                        {/* Quick Suggestion Chips (when drafting new task) */}
+                        {editingAutomationId === null && (
+                          <div className="automation-template-chips">
+                            <span className="automation-template-label">
+                              {t(appLanguage, 'templateSuggestions')}
+                            </span>
+                            <button
+                              className="automation-template-chip"
+                              disabled={isAutomationCreating}
+                              onClick={() =>
+                                setAutomationInlineInput(
+                                  (curr) =>
+                                    (curr ? curr + ' ' : '') +
+                                    (appLanguage === 'zh-Hans'
+                                      ? '每天早上 08:00，'
+                                      : 'Every morning at 08:00 AM, ')
+                                )
+                              }
+                              type="button"
+                            >
+                              {appLanguage === 'zh-Hans' ? '📅 每天 08:00 AM' : '📅 Daily 08:00 AM'}
+                            </button>
+                            <button
+                              className="automation-template-chip"
+                              disabled={isAutomationCreating}
+                              onClick={() =>
+                                setAutomationInlineInput(
+                                  (curr) =>
+                                    (curr ? curr + ' ' : '') +
+                                    (appLanguage === 'zh-Hans'
+                                      ? '每周一早上 09:00，'
+                                      : 'Every Monday at 09:00 AM, ')
+                                )
+                              }
+                              type="button"
+                            >
+                              {appLanguage === 'zh-Hans'
+                                ? '📅 每周一 09:00 AM'
+                                : '📅 Every Monday 09:00 AM'}
+                            </button>
+                            <button
+                              className="automation-template-chip"
+                              disabled={isAutomationCreating}
+                              onClick={() =>
+                                setAutomationInlineInput(
+                                  (curr) =>
+                                    (curr ? curr + ' ' : '') +
+                                    (appLanguage === 'zh-Hans'
+                                      ? '每小时执行一次，'
+                                      : 'Every hour, ')
+                                )
+                              }
+                              type="button"
+                            >
+                              {appLanguage === 'zh-Hans' ? '⏱ 每小时' : '⏱ Hourly'}
+                            </button>
+                            <button
+                              className="automation-template-chip"
+                              disabled={isAutomationCreating}
+                              onClick={() =>
+                                setAutomationInlineInput(
+                                  appLanguage === 'zh-Hans'
+                                    ? '每天早上 08:30 打开 Google News 澳洲主页 (https://news.google.com/?hl=en-AU&gl=AU&ceid=AU:en)，抓取置顶澳洲新闻头条并生成简要摘要。'
+                                    : 'Every morning at 08:30, open Google News AU (https://news.google.com/?hl=en-AU&gl=AU&ceid=AU:en), extract the top Australian news headlines and summarize them.'
+                                )
+                              }
+                              type="button"
+                            >
+                              {appLanguage === 'zh-Hans'
+                                ? '📰 Google 新闻早报'
+                                : '📰 Google News AU Digest'}
+                            </button>
+                          </div>
+                        )}
+
+                        <div className="automation-canvas-composer-bottom">
+                          <button
+                            className="automation-create-btn"
+                            disabled={isAutomationCreating || !automationInlineInput.trim()}
+                            type="submit"
+                          >
+                            {isAutomationCreating ? (
+                              <>
+                                <span className="automation-create-status-dot" />
+                                <span>{t(appLanguage, 'planningScheduledTask')}</span>
+                              </>
+                            ) : (
+                              <>
+                                <Icon path="m5 12 14-7-4 14-3-5-4 2 1-5-4-3Z" />
+                                <span>{t(appLanguage, 'save')}</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </form>
+
+                      {automationCreateStatus !== null && (
+                        <div className="automation-create-status-bar">
+                          {isAutomationCreating && (
+                            <span className="automation-create-status-dot" />
+                          )}
+                          <span>{automationCreateStatus}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Planning Conversation Stream (if any messages) */}
+                    {automationDraftMessages.length > 0 ? (
+                      <div aria-live="polite" className="automation-canvas-messages" role="log">
+                        {automationDraftMessages.map((message) => (
+                          <div
+                            className={`automation-draft-message-card ${message.role}`}
+                            key={message.message_id}
+                          >
+                            <div className="automation-draft-message-role">
+                              {message.role === 'assistant'
+                                ? 'asAgent'
+                                : t(appLanguage, 'planningUserRole')}
+                            </div>
+                            <div className="automation-draft-message-content">
+                              {message.role === 'assistant' ? (
+                                <div className="markdown-content">
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                    {message.content}
+                                  </ReactMarkdown>
+                                </div>
+                              ) : (
+                                message.content
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      /* Planning Tips Guide */
+                      <div className="automation-canvas-guide">
+                        <div className="automation-canvas-guide-title">
+                          {t(appLanguage, 'planningGuideTitle')}
+                        </div>
+                        <div className="automation-canvas-guide-grid">
+                          <div className="automation-canvas-guide-card">
+                            <div className="automation-guide-card-icon">🎯</div>
+                            <div className="automation-guide-card-title">
+                              {t(appLanguage, 'planningTipTaskTitle')}
+                            </div>
+                            <div className="automation-guide-card-desc">
+                              {t(appLanguage, 'planningTipTaskDesc')}
+                            </div>
+                          </div>
+                          <div className="automation-canvas-guide-card">
+                            <div className="automation-guide-card-icon">⏰</div>
+                            <div className="automation-guide-card-title">
+                              {t(appLanguage, 'planningTipScheduleTitle')}
+                            </div>
+                            <div className="automation-guide-card-desc">
+                              {t(appLanguage, 'planningTipScheduleDesc')}
+                            </div>
+                          </div>
+                          <div className="automation-canvas-guide-card">
+                            <div className="automation-guide-card-icon">⚡</div>
+                            <div className="automation-guide-card-title">
+                              {t(appLanguage, 'planningTipSaveTitle')}
+                            </div>
+                            <div className="automation-guide-card-desc">
+                              {t(appLanguage, 'planningTipSaveDesc')}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : selectedAutomation === null ? (
+                  <div className="automations-canvas-empty">
+                    <div className="automations-canvas-empty-icon">
+                      <svg fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                        <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+                        <circle cx="12" cy="12" r="4" />
+                      </svg>
+                    </div>
+                    <h3>{t(appLanguage, 'automationsTitle')}</h3>
+                    <p>{t(appLanguage, 'createFirstAutomation')}</p>
+                    <button
+                      className="settings-button settings-button-primary"
+                      onClick={() => setIsCreatingNewTask(true)}
+                      type="button"
+                    >
+                      {t(appLanguage, 'newTask')}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="automation-hero-dashboard">
+                    {/* Hero Header */}
+                    <div className="automation-hero-header">
+                      <div className="automation-hero-header-info">
+                        <div className="automation-hero-meta-row">
+                          <span className={`automation-status ${selectedAutomation.status}`}>
+                            <span aria-hidden="true" className="automation-status-dot" />
+                            {selectedAutomation.status === 'active'
+                              ? t(appLanguage, 'statusActive')
+                              : selectedAutomation.status === 'paused'
+                                ? t(appLanguage, 'statusPaused')
+                                : t(appLanguage, 'statusDraft')}
+                          </span>
+                          <span className="automation-hero-schedule-badge">
+                            📅 {selectedAutomation.schedule}
+                          </span>
+                          {selectedAutomation.nextRun && (
+                            <span className="automation-hero-next-badge">
+                              ⏱ {t(appLanguage, 'nextRun')}: {selectedAutomation.nextRun}
+                            </span>
+                          )}
+                        </div>
+                        <h1 className="automation-hero-title">{selectedAutomation.name}</h1>
+                      </div>
+
+                      <div className="automation-hero-actions">
+                        <button
+                          className="automation-action-btn primary"
+                          disabled={isAutomationRunningNow}
+                          onClick={() => void runAutomationNow(selectedAutomation.id)}
+                          type="button"
+                        >
+                          {isAutomationRunningNow ? (
+                            <>
+                              <span className="automation-create-status-dot" />
+                              <span>{t(appLanguage, 'runningAutomation')}</span>
+                            </>
+                          ) : (
+                            <>
+                              <svg
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                viewBox="0 0 24 24"
+                              >
+                                <polygon points="5 3 19 12 5 21 5 3" />
+                              </svg>
+                              <span>{t(appLanguage, 'runNow')}</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          className="automation-action-btn"
+                          onClick={() => toggleAutomationPreview(selectedAutomation.id)}
+                          type="button"
+                        >
+                          {selectedAutomation.status === 'active'
+                            ? t(appLanguage, 'pause')
+                            : t(appLanguage, 'activate')}
+                        </button>
+                        <button
+                          className="automation-action-btn"
+                          disabled={isAutomationCreating}
+                          onClick={() => startEditingAutomation(selectedAutomation.id)}
+                          type="button"
+                        >
+                          {t(appLanguage, 'editPlan')}
+                        </button>
+                        <button
+                          className="automation-action-btn danger"
+                          disabled={isAutomationCreating}
+                          onClick={() => deleteAutomation(selectedAutomation.id)}
+                          type="button"
+                        >
+                          {t(appLanguage, 'delete')}
+                        </button>
+                      </div>
+                    </div>
+
+                    {automationRunNowMessage !== null && (
+                      <div className="automation-hero-run-banner">
+                        {isAutomationRunningNow && (
+                          <span className="automation-create-status-dot" />
+                        )}
+                        <span>{automationRunNowMessage}</span>
+                      </div>
+                    )}
+
+                    {/* Plan Summary Card */}
+                    <div className="automation-plan-summary-card">
+                      <div className="automation-plan-summary-header">
+                        <span className="automation-plan-label">{t(appLanguage, 'taskPlan')}</span>
+                        <button
+                          className="automation-plan-edit-link"
+                          onClick={() => startEditingAutomation(selectedAutomation.id)}
+                          type="button"
+                        >
+                          {t(appLanguage, 'editPlan')}
+                        </button>
+                      </div>
+                      <p className="automation-plan-summary-text">{selectedAutomation.summary}</p>
+                    </div>
+
+                    {/* Hero Execution Output Box */}
+                    {(() => {
+                      const currentExecution =
+                        automationExecutions.find(
+                          (e) => e.automation_execution_id === selectedExecutionId
+                        ) ?? automationExecutions[0]
+                      const assistantMsg =
+                        executionMessages.find((m) => m.role === 'assistant')?.content ?? null
+                      const userPromptMsg = executionMessages.find((m) => m.role === 'user') ?? null
+
+                      return (
+                        <div className="automation-hero-output-box">
+                          <div className="automation-hero-output-header">
+                            <div className="automation-hero-output-title-row">
+                              <span className="automation-hero-output-heading">
+                                {t(appLanguage, 'latestOutput')}
+                              </span>
+                              {currentExecution !== undefined && (
+                                <span className={`automation-status ${currentExecution.status}`}>
+                                  <span aria-hidden="true" className="automation-status-dot" />
+                                  {currentExecution.status === 'completed'
+                                    ? t(appLanguage, 'executionStatusCompleted')
+                                    : currentExecution.status === 'failed'
+                                      ? t(appLanguage, 'executionStatusFailed')
+                                      : currentExecution.status === 'missed'
+                                        ? t(appLanguage, 'executionStatusMissed')
+                                        : currentExecution.status === 'cancelled'
+                                          ? t(appLanguage, 'executionStatusCancelled')
+                                          : t(appLanguage, 'executionStatusClaimed')}
+                                </span>
+                              )}
+                              {currentExecution?.scheduled_for && (
+                                <span className="automation-hero-output-time">
+                                  {new Date(currentExecution.scheduled_for).toLocaleString()}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="automation-hero-output-controls">
+                              {assistantMsg && (
+                                <button
+                                  className="automation-copy-btn"
+                                  onClick={() => copyExecutionOutput(assistantMsg)}
+                                  type="button"
+                                >
+                                  {hasCopiedOutput
+                                    ? t(appLanguage, 'copied')
+                                    : t(appLanguage, 'copyOutput')}
+                                </button>
+                              )}
+                              {userPromptMsg && (
+                                <button
+                                  className="automation-toggle-prompt-btn"
+                                  onClick={() => setShowTaskPrompt((v) => !v)}
+                                  type="button"
+                                >
+                                  {showTaskPrompt
+                                    ? t(appLanguage, 'hidePrompt')
+                                    : t(appLanguage, 'viewPrompt')}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Optional Task Prompt Viewer */}
+                          {showTaskPrompt && userPromptMsg && (
+                            <div className="automation-task-prompt-container">
+                              <div className="automation-task-prompt-hint">
+                                {t(appLanguage, 'taskPromptDescription')}
+                              </div>
+                              <div className="automation-task-prompt-content">
+                                {userPromptMsg.content}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Execution Output Canvas */}
+                          <div className="automation-hero-output-content">
+                            {isExecutionMessagesLoading ? (
+                              <div className="automation-output-loading">
+                                <span className="automation-create-status-dot" />
+                                <span>{t(appLanguage, 'loadingExecutionOutput')}</span>
+                              </div>
+                            ) : isAutomationRunningNow && executionMessages.length <= 1 ? (
+                              <div className="automation-output-running-card">
+                                <span className="automation-running-spinner" />
+                                <div className="automation-running-text">
+                                  <strong>{t(appLanguage, 'runningTask')}</strong>
+                                  <p>{t(appLanguage, 'executingAutonomousSteps')}</p>
+                                </div>
+                              </div>
+                            ) : assistantMsg ? (
+                              <div className="automation-output-markdown-canvas">
+                                <div className="markdown-content">
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{
+                                      a: ({ children, href }) => (
+                                        <a
+                                          href={href}
+                                          onClick={(event) => {
+                                            event.preventDefault()
+                                            openAssistantLink(href)
+                                          }}
+                                          title={t(appLanguage, 'openInDefaultBrowser')}
+                                        >
+                                          {children}
+                                        </a>
+                                      )
+                                    }}
+                                  >
+                                    {assistantMsg}
+                                  </ReactMarkdown>
+                                </div>
+                              </div>
+                            ) : currentExecution?.status === 'failed' ? (
+                              <div className="automation-output-failed-card">
+                                <strong>{t(appLanguage, 'executionStatusFailed')}</strong>
+                                <p>{t(appLanguage, 'executionErrorOccurred')}</p>
+                                <button
+                                  className="settings-button settings-button-primary"
+                                  onClick={() => void runAutomationNow(selectedAutomation.id)}
+                                  type="button"
+                                >
+                                  {t(appLanguage, 'runNow')}
+                                </button>
+                              </div>
+                            ) : automationExecutions.length === 0 ? (
+                              <div className="automation-output-empty-card">
+                                <p>{t(appLanguage, 'noExecutionsYetPrompt')}</p>
+                                <button
+                                  className="settings-button settings-button-primary"
+                                  onClick={() => void runAutomationNow(selectedAutomation.id)}
+                                  type="button"
+                                >
+                                  {t(appLanguage, 'runNow')}
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="automation-output-empty-card">
+                                <p>{t(appLanguage, 'noExecutionMessages')}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })()}
+
+                    {/* Execution History Timeline Strip */}
+                    {automationExecutions.length > 0 && (
+                      <div className="automation-history-timeline-strip">
+                        <span className="automation-history-timeline-label">
+                          {t(appLanguage, 'executionHistoryTimeline')} (
+                          {automationExecutions.length}):
+                        </span>
+                        <div className="automation-history-pills">
+                          {automationExecutions.slice(0, 10).map((execution) => {
+                            const isSelected =
+                              selectedExecutionId === execution.automation_execution_id ||
+                              (selectedExecutionId === null &&
+                                automationExecutions[0]?.automation_execution_id ===
+                                  execution.automation_execution_id)
+                            return (
+                              <button
+                                className={`automation-history-pill ${execution.status}${
+                                  isSelected ? ' is-selected' : ''
+                                }`}
+                                key={execution.automation_execution_id}
+                                onClick={() =>
+                                  selectExecutionHistory(execution.automation_execution_id)
+                                }
+                                type="button"
+                              >
+                                <span className="automation-history-pill-dot" />
+                                <span className="automation-history-pill-time">
+                                  {new Date(execution.scheduled_for).toLocaleString([], {
+                                    month: 'numeric',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </span>
+                                <span className="automation-history-pill-status">
+                                  {execution.status === 'completed'
+                                    ? '✓'
+                                    : execution.status === 'failed'
+                                      ? '✗'
+                                      : '●'}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+            </div>
+          </section>
         </div>
         <div className={`view${activeView === 'history' ? ' active' : ''}`}>
           {renderPlaceholderView('History', 'Longer-term activity and audit trail.')}
@@ -5280,14 +6418,16 @@ export default function App(): React.JSX.Element {
                   >
                     {modelSettings?.configured
                       ? modelSettings.active
-                        ? `${modelSettings.location === 'local' ? (appLanguage === 'zh-Hans' ? '本地' : 'Local') : appLanguage === 'zh-Hans' ? '外部' : 'External'} ${t(appLanguage, 'activeBadge')}`
-                        : `${modelSettings.location === 'local' ? (appLanguage === 'zh-Hans' ? '本地' : 'Local') : appLanguage === 'zh-Hans' ? '外部' : 'External'} ${t(appLanguage, 'needsAttentionBadge')}`
+                        ? `${modelSettings.location === 'local' ? t(appLanguage, 'badgeLocal') : t(appLanguage, 'badgeExternal')} ${t(appLanguage, 'activeBadge')}`
+                        : `${modelSettings.location === 'local' ? t(appLanguage, 'badgeLocal') : t(appLanguage, 'badgeExternal')} ${t(appLanguage, 'needsAttentionBadge')}`
                       : t(appLanguage, 'notConfiguredBadge')}
                   </span>
                 </div>
 
                 {isModelLoading ? (
-                  <p className="settings-section-status">Loading model settings…</p>
+                  <p className="settings-section-status">
+                    {t(appLanguage, 'loadingModelSettings')}
+                  </p>
                 ) : null}
                 {modelLoadError !== null ? (
                   <p className="settings-section-error">{modelLoadError}</p>
@@ -5299,16 +6439,18 @@ export default function App(): React.JSX.Element {
                         <p className="model-connection-copy">
                           {selectedProviderId === 'custom'
                             ? modelLocation === 'local'
-                              ? 'Local server connection (localhost or loopback IP). API key is optional.'
-                              : 'External provider connection. API key is required.'
-                            : getProviderPreset(selectedProviderId).description}
+                              ? t(appLanguage, 'localServerDesc')
+                              : t(appLanguage, 'externalProviderDesc')
+                            : getProviderPresetDescription(selectedProviderId, appLanguage)}
                         </p>
                         <span
                           className={`model-privacy-badge${
                             modelLocation === 'external' ? ' external' : ''
                           }`}
                         >
-                          {modelLocation === 'local' ? 'Stays on device' : 'Data may leave device'}
+                          {modelLocation === 'local'
+                            ? t(appLanguage, 'staysOnDevice')
+                            : t(appLanguage, 'dataMayLeaveDevice')}
                         </span>
                       </div>
 
@@ -5317,11 +6459,11 @@ export default function App(): React.JSX.Element {
                       modelSettings.issue !== null &&
                       modelSettings.location === modelLocation ? (
                         <div className="model-provider-warning" role="status">
-                          <strong>Saved provider is not active</strong>
+                          <strong>{t(appLanguage, 'savedProviderNotActive')}</strong>
                           <span>
                             {modelSettings.issue === 'credential_store_unavailable'
-                              ? 'asAgent could not access the system credential store. Save the API key again or check Keychain access.'
-                              : 'The saved API key is missing. Enter it again and save these settings.'}
+                              ? t(appLanguage, 'keychainAccessError')
+                              : t(appLanguage, 'savedApiKeyMissing')}
                           </span>
                         </div>
                       ) : null}
@@ -5329,7 +6471,7 @@ export default function App(): React.JSX.Element {
                       <div className="model-fields-grid">
                         <div className="model-field model-field-wide">
                           <label className="settings-field-label" htmlFor="model-provider-preset">
-                            Provider
+                            {t(appLanguage, 'provider')}
                           </label>
                           <select
                             className="settings-select"
@@ -5349,7 +6491,7 @@ export default function App(): React.JSX.Element {
                         {selectedProviderId === 'custom' ? (
                           <div className="model-field model-field-wide">
                             <label className="settings-field-label" htmlFor="model-custom-location">
-                              Location
+                              {t(appLanguage, 'locationLabel')}
                             </label>
                             <select
                               className="settings-select"
@@ -5362,15 +6504,17 @@ export default function App(): React.JSX.Element {
                               }
                               value={modelLocation}
                             >
-                              <option value="external">External provider (cloud endpoint)</option>
-                              <option value="local">Local model (localhost server)</option>
+                              <option value="external">
+                                {t(appLanguage, 'locationExternalOption')}
+                              </option>
+                              <option value="local">{t(appLanguage, 'locationLocalOption')}</option>
                             </select>
                           </div>
                         ) : null}
 
                         <div className="model-field">
                           <label className="settings-field-label" htmlFor="model-name">
-                            Model name
+                            {t(appLanguage, 'modelName')}
                           </label>
                           <input
                             className="settings-text-input"
@@ -5385,7 +6529,7 @@ export default function App(): React.JSX.Element {
 
                         <div className="model-field">
                           <label className="settings-field-label" htmlFor="model-base-url">
-                            Base URL
+                            {t(appLanguage, 'baseUrl')}
                           </label>
                           <input
                             className="settings-text-input"
@@ -5405,7 +6549,9 @@ export default function App(): React.JSX.Element {
 
                         <div className="model-field model-field-wide">
                           <label className="settings-field-label" htmlFor="model-api-key">
-                            {modelLocation === 'local' ? 'API key (optional)' : 'API key'}
+                            {modelLocation === 'local'
+                              ? t(appLanguage, 'apiKeyOptionalLabel')
+                              : t(appLanguage, 'apiKey')}
                           </label>
                           <input
                             autoComplete="off"
@@ -5417,13 +6563,13 @@ export default function App(): React.JSX.Element {
                               isCurrentPresetApiKeySaved
                                 ? '••••••••••••••••••••••••'
                                 : modelLocation === 'local'
-                                  ? 'Only if your local server requires one'
-                                  : 'Enter API key'
+                                  ? t(appLanguage, 'apiKeyOnlyIfRequired')
+                                  : t(appLanguage, 'apiKeyPlaceholder')
                             }
                             spellCheck={false}
                             title={
                               isCurrentPresetApiKeySaved
-                                ? 'API key is saved in Keychain. Enter a new key to replace it.'
+                                ? t(appLanguage, 'apiKeySavedInKeychain')
                                 : undefined
                             }
                             type="password"
@@ -5457,7 +6603,7 @@ export default function App(): React.JSX.Element {
                             }}
                             type="button"
                           >
-                            {appLanguage === 'zh-Hans' ? '移除模型配置' : 'Remove model settings'}
+                            {t(appLanguage, 'removeModelSettings')}
                           </button>
                         ) : null}
                       </div>
@@ -5480,12 +6626,14 @@ export default function App(): React.JSX.Element {
                   <span className="settings-state configured">
                     {agentSettings === null
                       ? '—'
-                      : `${agentSettings.max_steps} ${appLanguage === 'zh-Hans' ? '步' : 'steps'}`}
+                      : `${agentSettings.max_steps} ${t(appLanguage, 'stepUnit')}`}
                   </span>
                 </div>
 
                 {isAgentLoading ? (
-                  <p className="settings-section-status">Loading agent settings…</p>
+                  <p className="settings-section-status">
+                    {t(appLanguage, 'loadingAgentSettings')}
+                  </p>
                 ) : null}
                 {agentLoadError !== null ? (
                   <p className="settings-section-error">{agentLoadError}</p>
@@ -5551,7 +6699,9 @@ export default function App(): React.JSX.Element {
                 </div>
 
                 {isTavilyLoading ? (
-                  <p className="settings-section-status">Loading Tavily settings…</p>
+                  <p className="settings-section-status">
+                    {t(appLanguage, 'loadingTavilySettings')}
+                  </p>
                 ) : null}
 
                 {tavilyLoadError !== null ? (
@@ -5571,7 +6721,7 @@ export default function App(): React.JSX.Element {
                     {showTavilyKeyInput ? (
                       <div className="settings-key-form">
                         <label className="settings-field-label" htmlFor="tavily-api-key">
-                          Tavily API key
+                          {t(appLanguage, 'apiKey')}
                         </label>
                         <input
                           autoComplete="off"
@@ -5595,9 +6745,7 @@ export default function App(): React.JSX.Element {
                           >
                             {isReplacingTavilyKey
                               ? t(appLanguage, 'saveApiKey')
-                              : appLanguage === 'zh-Hans'
-                                ? '保存并启用'
-                                : 'Save and enable'}
+                              : t(appLanguage, 'saveAndEnable')}
                           </button>
                           {isReplacingTavilyKey ? (
                             <button
@@ -5664,7 +6812,9 @@ export default function App(): React.JSX.Element {
                 </div>
 
                 {isStorageLoading ? (
-                  <p className="settings-section-status">Loading storage settings…</p>
+                  <p className="settings-section-status">
+                    {t(appLanguage, 'loadingStorageSettings')}
+                  </p>
                 ) : null}
 
                 {storageLoadError !== null ? (
@@ -5679,15 +6829,15 @@ export default function App(): React.JSX.Element {
                       </span>
                       <span className="storage-usage-value">
                         {formatBytes(storageSettings.usage_bytes)} ({storageSettings.snapshot_count}{' '}
-                        {appLanguage === 'zh-Hans'
-                          ? '个快照'
-                          : `snapshot${storageSettings.snapshot_count === 1 ? '' : 's'}`}
+                        {storageSettings.snapshot_count === 1
+                          ? t(appLanguage, 'snapshotUnitSingle')
+                          : t(appLanguage, 'snapshotUnit')}
                         )
                       </span>
                     </div>
 
                     <label className="settings-field-label" htmlFor="storage-retention">
-                      {appLanguage === 'zh-Hans' ? '快照保留策略' : 'Snapshot retention'}
+                      {t(appLanguage, 'snapshotRetentionLabel')}
                     </label>
                     <select
                       className="settings-text-input settings-select"
@@ -5698,17 +6848,11 @@ export default function App(): React.JSX.Element {
                       }}
                       value={storageRetentionDays}
                     >
-                      <option value={1}>
-                        {appLanguage === 'zh-Hans' ? '24 小时 (1 天)' : '24 hours (1 day)'}
-                      </option>
-                      <option value={3}>{appLanguage === 'zh-Hans' ? '3 天' : '3 days'}</option>
-                      <option value={7}>
-                        {appLanguage === 'zh-Hans' ? '7 天 (推荐)' : '7 days (Recommended)'}
-                      </option>
-                      <option value={30}>{appLanguage === 'zh-Hans' ? '30 天' : '30 days'}</option>
-                      <option value={0}>
-                        {appLanguage === 'zh-Hans' ? '永久保留' : 'Never delete automatically'}
-                      </option>
+                      <option value={1}>{t(appLanguage, 'retention1Day')}</option>
+                      <option value={3}>{t(appLanguage, 'retention3Days')}</option>
+                      <option value={7}>{t(appLanguage, 'retention7Days')}</option>
+                      <option value={30}>{t(appLanguage, 'retention30Days')}</option>
+                      <option value={0}>{t(appLanguage, 'retentionNever')}</option>
                     </select>
 
                     <div className="settings-card-actions" style={{ marginTop: '12px' }}>
@@ -5747,9 +6891,7 @@ export default function App(): React.JSX.Element {
         <div aria-modal="true" className="restart-modal-backdrop" role="dialog">
           <section aria-labelledby="restart-modal-title" className="restart-modal">
             <div className="restart-modal-eyebrow">{t(appLanguage, 'restartNoticeTitle')}</div>
-            <h2 id="restart-modal-title">
-              {appLanguage === 'zh-Hans' ? '立即重启 asAgent？' : 'Restart asAgent now?'}
-            </h2>
+            <h2 id="restart-modal-title">{t(appLanguage, 'restartDialogTitle')}</h2>
             <p>{t(appLanguage, 'restartNoticeBody')}</p>
             <div className="restart-modal-actions">
               <button
@@ -5769,11 +6911,7 @@ export default function App(): React.JSX.Element {
                 }}
                 type="button"
               >
-                {isRestarting
-                  ? appLanguage === 'zh-Hans'
-                    ? '正在重启…'
-                    : 'Restarting…'
-                  : t(appLanguage, 'restartNow')}
+                {isRestarting ? t(appLanguage, 'restarting') : t(appLanguage, 'restartNow')}
               </button>
             </div>
           </section>

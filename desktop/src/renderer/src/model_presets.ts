@@ -5,6 +5,7 @@ export type ModelProviderPreset = {
   defaultBaseUrl: string
   placeholderModel: string
   description: string
+  descriptionZh?: string
 }
 
 export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
@@ -14,7 +15,8 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
     location: 'external',
     defaultBaseUrl: 'https://api.deepseek.com',
     placeholderModel: 'deepseek-chat',
-    description: 'DeepSeek official OpenAI-compatible API.'
+    description: 'DeepSeek official OpenAI-compatible API.',
+    descriptionZh: 'DeepSeek 官方 OpenAI 兼容 API 接口。'
   },
   {
     id: 'openai',
@@ -22,7 +24,8 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
     location: 'external',
     defaultBaseUrl: 'https://api.openai.com/v1',
     placeholderModel: 'gpt-4o',
-    description: 'OpenAI official API endpoint.'
+    description: 'OpenAI official API endpoint.',
+    descriptionZh: 'OpenAI 官方 API 接口服务。'
   },
   {
     id: 'ollama',
@@ -30,7 +33,8 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
     location: 'local',
     defaultBaseUrl: 'http://127.0.0.1:11434/v1',
     placeholderModel: 'qwen2.5:7b',
-    description: 'Local Ollama server running on your machine.'
+    description: 'Local Ollama server running on your machine.',
+    descriptionZh: '运行在您电脑本地的 Ollama 服务。'
   },
   {
     id: 'lmstudio',
@@ -38,7 +42,8 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
     location: 'local',
     defaultBaseUrl: 'http://127.0.0.1:1234/v1',
     placeholderModel: 'local-model',
-    description: 'Local LM Studio OpenAI-compatible server.'
+    description: 'Local LM Studio OpenAI-compatible server.',
+    descriptionZh: '运行在您电脑本地的 LM Studio 服务。'
   },
   {
     id: 'openrouter',
@@ -46,7 +51,8 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
     location: 'external',
     defaultBaseUrl: 'https://openrouter.ai/api/v1',
     placeholderModel: 'deepseek/deepseek-chat',
-    description: 'Unified gateway for multiple model providers.'
+    description: 'Unified gateway for multiple model providers.',
+    descriptionZh: '多模型统一聚合与路由网关。'
   },
   {
     id: 'siliconflow',
@@ -54,7 +60,8 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
     location: 'external',
     defaultBaseUrl: 'https://api.siliconflow.cn/v1',
     placeholderModel: 'deepseek-ai/DeepSeek-V3',
-    description: 'High-speed cloud inference platform.'
+    description: 'High-speed cloud inference platform.',
+    descriptionZh: '高并发云端模型推理服务平台。'
   },
   {
     id: 'custom',
@@ -62,13 +69,22 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
     location: 'external',
     defaultBaseUrl: '',
     placeholderModel: 'custom-model',
-    description: 'Any custom OpenAI-compatible endpoint.'
+    description: 'Any custom OpenAI-compatible endpoint.',
+    descriptionZh: '任意自定义 OpenAI 兼容接口地址。'
   }
 ]
 
 export function getProviderPreset(presetId: string): ModelProviderPreset {
   const found = MODEL_PROVIDER_PRESETS.find((preset) => preset.id === presetId)
   return found ?? MODEL_PROVIDER_PRESETS[0]
+}
+
+export function getProviderPresetDescription(presetId: string, lang: 'en' | 'zh-Hans'): string {
+  const preset = getProviderPreset(presetId)
+  if (lang === 'zh-Hans' && preset.descriptionZh) {
+    return preset.descriptionZh
+  }
+  return preset.description
 }
 
 function normalizeUrl(url: string): string {

@@ -4,7 +4,12 @@ from typing import Literal
 
 from asagent.core.ids import ConversationId, UserId
 
-ConversationKind = Literal["chat", "browser"]
+ConversationKind = Literal[
+    "chat",
+    "browser",
+    "automation_draft",
+    "automation_execution",
+]
 
 
 @dataclass(frozen=True, slots=True)

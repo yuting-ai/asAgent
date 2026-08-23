@@ -20,6 +20,96 @@ users = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+automations = Table(
+    "automations",
+    metadata,
+    Column("automation_id", String, primary_key=True),
+    Column(
+        "user_id",
+        String,
+        ForeignKey("users.user_id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("name", String, nullable=False),
+    Column("plan_summary", Text, nullable=False),
+    Column("allowed_capabilities_json", Text, nullable=False),
+    Column("status", String, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "status IN ('draft', 'active', 'paused')", name="automation_status_valid"
+    ),
+)
+
+automation_triggers = Table(
+    "automation_triggers",
+    metadata,
+    Column("automation_trigger_id", String, primary_key=True),
+    Column(
+        "automation_id",
+        String,
+        ForeignKey("automations.automation_id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("kind", String, nullable=False),
+    Column("timezone", String, nullable=False),
+    Column("local_time", String, nullable=False),
+    Column("weekday", Integer),
+    Column("next_run_at", DateTime(timezone=True)),
+    Column("enabled", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "kind IN ('once', 'daily', 'weekly')", name="automation_trigger_kind_valid"
+    ),
+    CheckConstraint("enabled IN (0, 1)", name="automation_trigger_enabled_valid"),
+    CheckConstraint(
+        "(kind = 'weekly' AND weekday BETWEEN 0 AND 6) "
+        "OR (kind != 'weekly' AND weekday IS NULL)",
+        name="automation_trigger_weekday_valid",
+    ),
+)
+
+automation_executions = Table(
+    "automation_executions",
+    metadata,
+    Column("automation_execution_id", String, primary_key=True),
+    Column(
+        "automation_id",
+        String,
+        ForeignKey("automations.automation_id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column(
+        "automation_trigger_id",
+        String,
+        ForeignKey("automation_triggers.automation_trigger_id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("scheduled_for", DateTime(timezone=True), nullable=False),
+    Column("status", String, nullable=False),
+    Column("claimed_at", DateTime(timezone=True), nullable=False),
+    Column(
+        "run_id",
+        String,
+        ForeignKey(
+            "runs.run_id",
+            name="automation_execution_run_id_fkey",
+            ondelete="RESTRICT",
+        ),
+    ),
+    Column("completed_at", DateTime(timezone=True)),
+    CheckConstraint(
+        "status IN ('claimed', 'missed', 'completed', 'failed', 'cancelled')",
+        name="automation_execution_status_valid",
+    ),
+    UniqueConstraint(
+        "automation_trigger_id",
+        "scheduled_for",
+        name="automation_execution_trigger_scheduled_for",
+    ),
+)
+
 conversations = Table(
     "conversations",
     metadata,
@@ -37,7 +127,7 @@ conversations = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     CheckConstraint(
-        "kind IN ('chat', 'browser')",
+        "kind IN ('chat', 'browser', 'automation_draft', 'automation_execution')",
         name="conversation_kind_valid",
     ),
 )

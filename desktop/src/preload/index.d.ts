@@ -13,6 +13,47 @@ interface ConversationSummary {
   last_page_title: string | null
 }
 
+interface AutomationSummary {
+  automation_id: string
+  name: string
+  plan_summary: string
+  allowed_capabilities: string[]
+  status: 'draft' | 'active' | 'paused'
+  created_at: string
+  updated_at: string
+}
+
+interface AutomationTrigger {
+  automation_trigger_id: string
+  kind: 'once' | 'daily' | 'weekly'
+  timezone: string
+  local_time: string
+  weekday: number | null
+  next_run_at: string | null
+  enabled: boolean
+}
+interface AutomationExecution {
+  automation_execution_id: string
+  scheduled_for: string
+  status: 'claimed' | 'missed' | 'completed' | 'failed' | 'cancelled'
+  run_id: string | null
+  claimed_at: string
+  completed_at: string | null
+}
+interface CreateAutomationInput {
+  name: string
+  planSummary: string
+  allowedCapabilities: string[]
+  trigger: {
+    kind: 'once' | 'daily' | 'weekly'
+    timezone: string
+    localTime: string
+    weekday?: number
+    nextRunAt?: string
+  }
+}
+type UpdateAutomationInput = CreateAutomationInput
+
 interface ConversationMessage {
   message_id: string
   role: 'user' | 'assistant'
@@ -193,6 +234,29 @@ interface DesktopBridge {
   getBackendStatus(): Promise<{ status: 'ready' | 'unavailable' }>
   restartApp(): Promise<void>
   listConversations(): Promise<ConversationSummary[]>
+  listAutomations(): Promise<AutomationSummary[]>
+  createAutomation(input: CreateAutomationInput): Promise<AutomationSummary>
+  updateAutomation(automationId: string, input: UpdateAutomationInput): Promise<AutomationSummary>
+  deleteAutomation(automationId: string): Promise<void>
+  updateAutomationStatus(
+    automationId: string,
+    status: AutomationSummary['status']
+  ): Promise<AutomationSummary>
+  listAutomationTriggers(automationId: string): Promise<AutomationTrigger[]>
+  listAutomationExecutions(automationId: string): Promise<AutomationExecution[]>
+  getAutomationExecutionMessages(
+    automationId: string,
+    executionId: string
+  ): Promise<ConversationMessage[]>
+  runAutomationNow(automationId: string): Promise<AutomationExecution>
+  createAutomationDraft(automationId?: string, timezone?: string): Promise<ConversationSummary>
+  listAutomationDraftMessages(conversationId: string): Promise<ConversationMessage[]>
+  submitAutomationDraftMessage(
+    conversationId: string,
+    content: string,
+    tabId?: string
+  ): Promise<SubmittedMessage>
+  deleteAutomationDraft(conversationId: string): Promise<void>
   listConversationMessages(conversationId: string): Promise<ConversationMessage[]>
   listConversationRunHistory(conversationId: string): Promise<RunHistory[]>
   listConversationFileChanges(conversationId: string): Promise<FileChange[]>

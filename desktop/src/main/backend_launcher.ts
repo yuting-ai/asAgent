@@ -19,6 +19,50 @@ export type ConversationSummary = {
   last_page_title: string | null
 }
 
+export type AutomationSummary = {
+  automation_id: string
+  name: string
+  plan_summary: string
+  allowed_capabilities: string[]
+  status: 'draft' | 'active' | 'paused'
+  created_at: string
+  updated_at: string
+}
+
+export type AutomationTrigger = {
+  automation_trigger_id: string
+  kind: 'once' | 'daily' | 'weekly'
+  timezone: string
+  local_time: string
+  weekday: number | null
+  next_run_at: string | null
+  enabled: boolean
+}
+
+export type AutomationExecution = {
+  automation_execution_id: string
+  scheduled_for: string
+  status: 'claimed' | 'missed' | 'completed' | 'failed' | 'cancelled'
+  run_id: string | null
+  claimed_at: string
+  completed_at: string | null
+}
+
+export type CreateAutomationInput = {
+  name: string
+  planSummary: string
+  allowedCapabilities: string[]
+  trigger: {
+    kind: 'once' | 'daily' | 'weekly'
+    timezone: string
+    localTime: string
+    weekday?: number
+    nextRunAt?: string
+  }
+}
+
+export type UpdateAutomationInput = CreateAutomationInput
+
 export type ConversationMessage = {
   message_id: string
   role: 'user' | 'assistant'
@@ -321,6 +365,123 @@ export class BackendLauncher {
 
   async listConversations(): Promise<ConversationSummary[]> {
     return this.requestJson('/api/v1/conversations', 'GET')
+  }
+
+  async listAutomations(): Promise<AutomationSummary[]> {
+    return this.requestJson('/api/v1/automations', 'GET')
+  }
+
+  async createAutomation(input: CreateAutomationInput): Promise<AutomationSummary> {
+    return this.requestJson('/api/v1/automations', 'POST', {
+      name: input.name,
+      plan_summary: input.planSummary,
+      allowed_capabilities: input.allowedCapabilities,
+      trigger: {
+        kind: input.trigger.kind,
+        timezone: input.trigger.timezone,
+        local_time: input.trigger.localTime,
+        weekday: input.trigger.weekday,
+        next_run_at: input.trigger.nextRunAt
+      }
+    })
+  }
+
+  async updateAutomation(
+    automationId: string,
+    input: UpdateAutomationInput
+  ): Promise<AutomationSummary> {
+    return this.requestJson(`/api/v1/automations/${encodeURIComponent(automationId)}`, 'PUT', {
+      name: input.name,
+      plan_summary: input.planSummary,
+      allowed_capabilities: input.allowedCapabilities,
+      trigger: {
+        kind: input.trigger.kind,
+        timezone: input.trigger.timezone,
+        local_time: input.trigger.localTime,
+        weekday: input.trigger.weekday,
+        next_run_at: input.trigger.nextRunAt
+      }
+    })
+  }
+
+  async deleteAutomation(automationId: string): Promise<void> {
+    await this.request(`/api/v1/automations/${encodeURIComponent(automationId)}`, 'DELETE')
+  }
+
+  async updateAutomationStatus(
+    automationId: string,
+    status: AutomationSummary['status']
+  ): Promise<AutomationSummary> {
+    return this.requestJson(
+      `/api/v1/automations/${encodeURIComponent(automationId)}/status`,
+      'PUT',
+      { status }
+    )
+  }
+
+  async listAutomationTriggers(automationId: string): Promise<AutomationTrigger[]> {
+    return this.requestJson(
+      `/api/v1/automations/${encodeURIComponent(automationId)}/triggers`,
+      'GET'
+    )
+  }
+
+  async listAutomationExecutions(automationId: string): Promise<AutomationExecution[]> {
+    return this.requestJson(
+      `/api/v1/automations/${encodeURIComponent(automationId)}/executions`,
+      'GET'
+    )
+  }
+
+  async getAutomationExecutionMessages(
+    automationId: string,
+    executionId: string
+  ): Promise<ConversationMessage[]> {
+    return this.requestJson(
+      `/api/v1/automations/${encodeURIComponent(automationId)}/executions/${encodeURIComponent(executionId)}/messages`,
+      'GET'
+    )
+  }
+
+  async runAutomationNow(automationId: string): Promise<AutomationExecution> {
+    return this.requestJson(
+      `/api/v1/automations/${encodeURIComponent(automationId)}/run-now`,
+      'POST',
+      {}
+    )
+  }
+
+  async createAutomationDraft(
+    automationId?: string,
+    timezone = 'UTC'
+  ): Promise<CreatedConversation> {
+    return this.requestJson('/api/v1/automation-drafts', 'POST', {
+      automation_id: automationId,
+      timezone
+    })
+  }
+
+  async listAutomationDraftMessages(conversationId: string): Promise<ConversationMessage[]> {
+    return this.requestJson(
+      `/api/v1/automation-drafts/${encodeURIComponent(conversationId)}/messages`,
+      'GET'
+    )
+  }
+
+  async submitAutomationDraftMessage(
+    conversationId: string,
+    content: string,
+    tabId?: string
+  ): Promise<SubmittedMessage> {
+    return this.requestJson(
+      `/api/v1/automation-drafts/${encodeURIComponent(conversationId)}/messages`,
+      'POST',
+      { content, tab_id: tabId }
+    )
+  }
+
+  async deleteAutomationDraft(conversationId: string): Promise<void> {
+    await this.request(`/api/v1/automation-drafts/${encodeURIComponent(conversationId)}`, 'DELETE')
   }
 
   async listConversationMessages(conversationId: string): Promise<ConversationMessage[]> {

@@ -1,10 +1,21 @@
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
+from asagent.core.automation import Automation, AutomationExecution, AutomationTrigger
 from asagent.core.connection import Connection
 from asagent.core.conversation import Conversation, ConversationKind
 from asagent.core.conversation_file_scope import ConversationFileScope
 from asagent.core.file_change import FileChange
-from asagent.core.ids import ConnectionId, ConversationId, FileChangeId, RunId, UserId
+from asagent.core.ids import (
+    AutomationExecutionId,
+    AutomationId,
+    AutomationTriggerId,
+    ConnectionId,
+    ConversationId,
+    FileChangeId,
+    RunId,
+    UserId,
+)
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.run import Run
 from asagent.core.run_event import RunEvent
@@ -93,3 +104,46 @@ class FileChangeRepository(Protocol):
     async def list_for_run(self, run_id: RunId) -> tuple[FileChange, ...]: ...
 
     async def save(self, file_change: FileChange) -> None: ...
+
+
+@runtime_checkable
+class AutomationRepository(Protocol):
+    async def get(self, automation_id: AutomationId) -> Automation | None: ...
+
+    async def list_for_user(self, user_id: UserId) -> tuple[Automation, ...]: ...
+
+    async def save(self, automation: Automation) -> None: ...
+
+    async def save_with_trigger(
+        self, automation: Automation, trigger: AutomationTrigger
+    ) -> None: ...
+
+    async def delete(self, automation_id: AutomationId) -> bool: ...
+
+    async def get_trigger(
+        self, automation_trigger_id: AutomationTriggerId
+    ) -> AutomationTrigger | None: ...
+
+    async def list_triggers(
+        self, automation_id: AutomationId
+    ) -> tuple[AutomationTrigger, ...]: ...
+
+    async def save_trigger(self, trigger: AutomationTrigger) -> None: ...
+
+    async def claim_due(
+        self,
+        now: datetime,
+        *,
+        missed_before: datetime | None = None,
+        limit: int = 100,
+    ) -> tuple[AutomationExecution, ...]: ...
+
+    async def get_execution(
+        self, automation_execution_id: AutomationExecutionId
+    ) -> AutomationExecution | None: ...
+
+    async def list_executions(
+        self, automation_id: AutomationId
+    ) -> tuple[AutomationExecution, ...]: ...
+
+    async def save_execution(self, execution: AutomationExecution) -> None: ...

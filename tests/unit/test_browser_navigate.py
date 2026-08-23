@@ -8,7 +8,7 @@ from asagent.bootstrap.browser_page_bridge import (
     BrowserPageBridgeClient,
 )
 from asagent.cli import _register_browser_tools
-from asagent.core.conversation import Conversation
+from asagent.core.conversation import Conversation, ConversationKind
 from asagent.core.ids import ConversationId, RunId, UserId
 from asagent.storage.in_memory_conversation_repository import (
     InMemoryConversationRepository,
@@ -98,7 +98,8 @@ async def test_browser_navigate_tool_returns_navigated_payload() -> None:
 
 
 @pytest.mark.asyncio
-async def test_register_browser_tools_includes_navigate() -> None:
+@pytest.mark.parametrize("kind", ["browser", "automation_draft"])
+async def test_register_browser_tools_includes_navigate(kind: ConversationKind) -> None:
     conversations = InMemoryConversationRepository()
     created_at = datetime.now(UTC)
     conversation = Conversation(
@@ -106,7 +107,7 @@ async def test_register_browser_tools_includes_navigate() -> None:
         user_id=UserId("local-user"),
         created_at=created_at,
         updated_at=created_at,
-        kind="browser",
+        kind=kind,
     )
     await conversations.save(conversation)
 

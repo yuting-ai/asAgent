@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import pytest
 
 from asagent.chat.service import ChatService
-from asagent.cli import run_chat
+from asagent.cli import _delete_stale_automation_drafts, run_chat
 from asagent.core.conversation import Conversation
 from asagent.core.ids import ConversationId, MessageId, UserId
 from asagent.models.contracts import ModelResponse
@@ -43,6 +43,41 @@ def make_chat_service(
         now=now,
         new_message_id=new_message_id,
     )
+
+
+@pytest.mark.asyncio
+async def test_sidecar_startup_deletes_only_stale_automation_drafts() -> None:
+    repository = InMemoryConversationRepository()
+    created_at = datetime(2026, 8, 23, 1, 0, tzinfo=UTC)
+    chat = Conversation(
+        ConversationId("chat"), UserId("local-user"), created_at, created_at
+    )
+    draft = Conversation(
+        ConversationId("draft"),
+        UserId("local-user"),
+        created_at,
+        created_at,
+        kind="automation_draft",
+    )
+    execution = Conversation(
+        ConversationId("execution"),
+        UserId("local-user"),
+        created_at,
+        created_at,
+        kind="automation_execution",
+    )
+    await repository.save(chat)
+    await repository.save(draft)
+    await repository.save(execution)
+
+    await _delete_stale_automation_drafts(
+        conversations=repository,
+        user_id=UserId("local-user"),
+    )
+
+    assert await repository.get(draft.conversation_id) is None
+    assert await repository.get(chat.conversation_id) == chat
+    assert await repository.get(execution.conversation_id) == execution
 
 
 @pytest.mark.asyncio

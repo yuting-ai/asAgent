@@ -1,13 +1,12 @@
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal
 
 import pytest
 import sqlalchemy as sa
 from alembic.config import Config
 
 from alembic import command
-from asagent.core.conversation import Conversation
+from asagent.core.conversation import Conversation, ConversationKind
 from asagent.core.ids import ConversationId, MessageId, UserId
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.repositories import ConversationRepository
@@ -29,7 +28,7 @@ def _conversation(
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
     title: str | None = None,
-    kind: Literal["chat", "browser"] = "chat",
+    kind: ConversationKind = "chat",
 ) -> Conversation:
     creation_time = created_at or datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
     return Conversation(
@@ -263,6 +262,59 @@ async def test_persists_and_filters_browser_conversations(tmp_path: Path) -> Non
         assert await repository.list_for_user(user_id) == (browser, chat)
         assert await repository.list_for_user(user_id, kind="chat") == (chat,)
         assert await repository.list_for_user(user_id, kind="browser") == (browser,)
+    finally:
+        await repository.aclose()
+
+
+@pytest.mark.asyncio
+async def test_persists_and_filters_automation_draft_conversations(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    user_id = UserId("local-user")
+    draft = _conversation(
+        ConversationId("conversation-automation-draft"),
+        user_id,
+        kind="automation_draft",
+    )
+    repository = SqliteConversationRepository(database_path)
+
+    try:
+        await repository.save(draft)
+
+        assert await repository.get(draft.conversation_id) == draft
+        assert await repository.list_for_user(user_id, kind="automation_draft") == (
+            draft,
+        )
+    finally:
+        await repository.aclose()
+
+
+@pytest.mark.asyncio
+async def test_persists_and_filters_automation_execution_conversations(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+
+    user_id = UserId("local-user")
+    execution = _conversation(
+        ConversationId("conversation-automation-execution"),
+        user_id,
+        kind="automation_execution",
+    )
+    repository = SqliteConversationRepository(database_path)
+
+    try:
+        await repository.save(execution)
+
+        assert await repository.get(execution.conversation_id) == execution
+        assert await repository.list_for_user(
+            user_id,
+            kind="automation_execution",
+        ) == (execution,)
     finally:
         await repository.aclose()
 

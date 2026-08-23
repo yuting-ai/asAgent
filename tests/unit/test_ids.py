@@ -1,6 +1,9 @@
 from typing import assert_type
 
 from asagent.core.ids import (
+    AutomationExecutionId,
+    AutomationId,
+    AutomationTriggerId,
     ConnectionId,
     ConversationId,
     EventId,
@@ -21,6 +24,9 @@ def test_id_types_preserve_string_values() -> None:
     message_id = MessageId("msg_123")
     connection_id = ConnectionId("connection_123")
     file_change_id = FileChangeId("change_123")
+    automation_id = AutomationId("automation_123")
+    automation_trigger_id = AutomationTriggerId("trigger_123")
+    automation_execution_id = AutomationExecutionId("execution_123")
 
     assert user_id == "local-user"
     assert conversation_id == "conv_123"
@@ -30,6 +36,9 @@ def test_id_types_preserve_string_values() -> None:
     assert message_id == "msg_123"
     assert connection_id == "connection_123"
     assert file_change_id == "change_123"
+    assert automation_id == "automation_123"
+    assert automation_trigger_id == "trigger_123"
+    assert automation_execution_id == "execution_123"
 
     assert isinstance(user_id, str)
     assert isinstance(conversation_id, str)
@@ -39,6 +48,9 @@ def test_id_types_preserve_string_values() -> None:
     assert isinstance(message_id, str)
     assert isinstance(connection_id, str)
     assert isinstance(file_change_id, str)
+    assert isinstance(automation_id, str)
+    assert isinstance(automation_trigger_id, str)
+    assert isinstance(automation_execution_id, str)
 
     assert_type(user_id, UserId)
     assert_type(conversation_id, ConversationId)
@@ -48,3 +60,6 @@ def test_id_types_preserve_string_values() -> None:
     assert_type(message_id, MessageId)
     assert_type(connection_id, ConnectionId)
     assert_type(file_change_id, FileChangeId)
+    assert_type(automation_id, AutomationId)
+    assert_type(automation_trigger_id, AutomationTriggerId)
+    assert_type(automation_execution_id, AutomationExecutionId)

@@ -1,23 +1,53 @@
 :root {
+  /* Brand Core Triad */
+  --brand-mint: #9bf1d0;
+  --brand-cyan: #52c9d1;
+  --brand-ink: #08201f;
+
+  /* Surfaces & Backgrounds */
   --bg: #ffffff;
   --bg-raised: #ffffff;
-  --bg-inset: #f4f4f5;
-  --rail-bg: #f9f9fb;
-  --line: #e4e4e7;
-  --line-soft: #f1f1f4;
-  --text: #27272a;
-  --text-dim: #71717a;
-  --text-faint: #a1a1aa;
-  --brass: #39b789;
-  --brass-dim: #5fcba3;
-  --brass-glow: rgba(57, 183, 137, 0.14);
-  --accent-soft: #eef8f4;
-  --green: #39b789;
-  --green-dim: rgba(57, 183, 137, 0.1);
-  --red: #fd5c5f;
-  --red-dim: rgba(253, 92, 95, 0.1);
-  --amber: #fac833;
-  --amber-dim: rgba(250, 200, 51, 0.12);
+  --bg-subtle: #f6faf9;
+  --bg-inset: #eff5f4;
+  --rail-bg: #f4f9f8;
+  --bg-hover: #e8f4f3;
+  --bg-active: #dbeefd;
+
+  /* Lines & Borders */
+  --line: #e2ecea;
+  --line-soft: #edf5f4;
+  --line-strong: #cddbdb;
+
+  /* Typography (High contrast pine-ink) */
+  --text: #08201f;
+  --text-secondary: #364e4d;
+  --text-dim: #647f7d;
+  --text-faint: #98b0ae;
+
+  /* Primary Brand (Oceanic Cyan / Mint Accents) */
+  --brass: #1ea3ad;
+  --brass-dim: #9bf1d0;
+  --brass-glow: rgba(82, 201, 209, 0.18);
+  --accent-soft: #ebfbfc;
+
+  /* Semantic Feedback */
+  --green: #24b07d;
+  --green-dim: rgba(36, 176, 125, 0.12);
+  --red: #ea434a;
+  --red-dim: rgba(234, 67, 74, 0.12);
+  --amber: #e59500;
+  --amber-dim: rgba(229, 149, 0, 0.14);
+
+  /* Gradients & Glows */
+  --gradient-brand: linear-gradient(135deg, #9bf1d0 0%, #52c9d1 100%);
+  --gradient-brand-subtle: linear-gradient(
+    135deg,
+    rgba(155, 241, 208, 0.14) 0%,
+    rgba(82, 201, 209, 0.18) 100%
+  );
+  --shadow-brand-glow: 0 4px 20px -2px rgba(82, 201, 209, 0.28);
+  --focus-ring: 0 0 0 3px rgba(82, 201, 209, 0.32);
+
   --sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -90,9 +120,9 @@ button {
 @keyframes pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(57, 183, 137, 0.24);
+    box-shadow: 0 0 0 0 rgba(82, 201, 209, 0.35);
   }
   50% {
-    box-shadow: 0 0 0 5px rgba(57, 183, 137, 0);
+    box-shadow: 0 0 0 5px rgba(82, 201, 209, 0);
   }
 }

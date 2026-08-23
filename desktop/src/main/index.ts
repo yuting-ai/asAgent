@@ -711,6 +711,161 @@ app.whenReady().then(async () => {
     return getReadyBackendLauncher().listConversations()
   })
 
+  ipcMain.handle('desktop:list-automations', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().listAutomations()
+  })
+
+  ipcMain.handle('desktop:create-automation', (event, input: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof input !== 'object' || input === null || Array.isArray(input))
+      throw new Error('Automation input is invalid.')
+    return getReadyBackendLauncher().createAutomation(
+      input as import('./backend_launcher').CreateAutomationInput
+    )
+  })
+
+  ipcMain.handle('desktop:update-automation', (event, automationId: unknown, input: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof automationId !== 'string' || !automationId.trim())
+      throw new Error('Automation ID is invalid.')
+    if (typeof input !== 'object' || input === null || Array.isArray(input))
+      throw new Error('Automation input is invalid.')
+    return getReadyBackendLauncher().updateAutomation(
+      automationId,
+      input as import('./backend_launcher').UpdateAutomationInput
+    )
+  })
+
+  ipcMain.handle('desktop:delete-automation', (event, automationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof automationId !== 'string' || !automationId.trim())
+      throw new Error('Automation ID is invalid.')
+    return getReadyBackendLauncher().deleteAutomation(automationId)
+  })
+
+  ipcMain.handle(
+    'desktop:update-automation-status',
+    (event, automationId: unknown, status: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) throw new Error('Untrusted renderer IPC request.')
+      assertTrustedRenderer(frame.url)
+      if (typeof automationId !== 'string' || !automationId.trim())
+        throw new Error('Automation ID is invalid.')
+      if (status !== 'draft' && status !== 'active' && status !== 'paused')
+        throw new Error('Automation status is invalid.')
+      return getReadyBackendLauncher().updateAutomationStatus(automationId, status)
+    }
+  )
+
+  ipcMain.handle('desktop:list-automation-triggers', (event, automationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof automationId !== 'string' || !automationId.trim())
+      throw new Error('Automation ID is invalid.')
+    return getReadyBackendLauncher().listAutomationTriggers(automationId)
+  })
+
+  ipcMain.handle('desktop:list-automation-executions', (event, automationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof automationId !== 'string' || !automationId.trim())
+      throw new Error('Automation ID is invalid.')
+    return getReadyBackendLauncher().listAutomationExecutions(automationId)
+  })
+
+  ipcMain.handle(
+    'desktop:get-automation-execution-messages',
+    (event, automationId: unknown, executionId: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) throw new Error('Untrusted renderer IPC request.')
+      assertTrustedRenderer(frame.url)
+      if (typeof automationId !== 'string' || !automationId.trim())
+        throw new Error('Automation ID is invalid.')
+      if (typeof executionId !== 'string' || !executionId.trim())
+        throw new Error('Execution ID is invalid.')
+      return getReadyBackendLauncher().getAutomationExecutionMessages(automationId, executionId)
+    }
+  )
+
+  ipcMain.handle('desktop:run-automation-now', (event, automationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof automationId !== 'string' || !automationId.trim())
+      throw new Error('Automation ID is invalid.')
+    return getReadyBackendLauncher().runAutomationNow(automationId)
+  })
+
+  ipcMain.handle(
+    'desktop:create-automation-draft',
+    (event, automationId: unknown, timezone: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) throw new Error('Untrusted renderer IPC request.')
+      assertTrustedRenderer(frame.url)
+      if (automationId !== undefined && (typeof automationId !== 'string' || !automationId.trim()))
+        throw new Error('Automation ID is invalid.')
+      if (typeof timezone !== 'string' || !timezone.trim()) throw new Error('Timezone is invalid.')
+      return getReadyBackendLauncher().createAutomationDraft(
+        typeof automationId === 'string' ? automationId : undefined,
+        timezone
+      )
+    }
+  )
+
+  ipcMain.handle('desktop:list-automation-draft-messages', (event, conversationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof conversationId !== 'string' || !conversationId.trim())
+      throw new Error('Conversation ID is invalid.')
+    return getReadyBackendLauncher().listAutomationDraftMessages(conversationId)
+  })
+
+  ipcMain.handle(
+    'desktop:submit-automation-draft-message',
+    (event, conversationId: unknown, content: unknown, tabId: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) throw new Error('Untrusted renderer IPC request.')
+      assertTrustedRenderer(frame.url)
+      if (typeof conversationId !== 'string' || !conversationId.trim())
+        throw new Error('Conversation ID is invalid.')
+      if (typeof content !== 'string' || !content.trim())
+        throw new Error('Message content is invalid.')
+      if (tabId !== undefined && (typeof tabId !== 'string' || !tabId.trim()))
+        throw new Error('Browser tab ID is invalid.')
+      return getReadyBackendLauncher()
+        .submitAutomationDraftMessage(
+          conversationId,
+          content,
+          typeof tabId === 'string' ? tabId : undefined
+        )
+        .then((submitted) => {
+          watchRun(event.sender, conversationId, submitted)
+          return submitted
+        })
+    }
+  )
+
+  ipcMain.handle('desktop:delete-automation-draft', (event, conversationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof conversationId !== 'string' || !conversationId.trim())
+      throw new Error('Conversation ID is invalid.')
+    return getReadyBackendLauncher().deleteAutomationDraft(conversationId)
+  })
+
   ipcMain.handle('desktop:list-conversation-messages', (event, conversationId: unknown) => {
     const frame = event.senderFrame
     if (frame === null) {

@@ -18,6 +18,23 @@ from asagent.agent.run_submission import RunSubmissionService, SubmittedRun
 from asagent.api.app import create_app
 from asagent.api.bootstrap import read_local_api_bootstrap
 from asagent.api.server import READY_PREFIX, LocalApiServer
+from asagent.automation.browser.browser_service import AutomationBrowserService
+from asagent.automation.browser.tools import (
+    AutomationBrowserClickTool,
+    AutomationBrowserCloseTool,
+    AutomationBrowserFillTool,
+    AutomationBrowserNavigateTool,
+    AutomationBrowserReadPageTool,
+    AutomationBrowserSelectTool,
+    AutomationBrowserSnapshotTool,
+    AutomationBrowserWaitTool,
+)
+from asagent.automation.drafts import AutomationDraftContextStore
+from asagent.automation.scheduler import (
+    AutomationExecutionContextStore,
+    AutomationRunSubmissionService,
+    AutomationScheduler,
+)
 from asagent.bootstrap.agent_settings import AgentSettingsStore
 from asagent.bootstrap.browser_page_bridge import BrowserPageBridgeClient
 from asagent.bootstrap.credential_secret_provider import CredentialStoreSecretProvider
@@ -77,6 +94,7 @@ from asagent.storage.reversible_files import (
     FileChangeNotFoundError,
     ReversibleFileService,
 )
+from asagent.storage.sqlite.automation_repository import SqliteAutomationRepository
 from asagent.storage.sqlite.connection_repository import (
     SqliteConnectionRepository,
 )
@@ -93,6 +111,7 @@ from asagent.storage.sqlite.run_repository import SqliteRunRepository
 from asagent.storage.sqlite.run_starter import SqliteRunStarter
 from asagent.storage.tool_call_recorder import RepositoryToolCallRecorder
 from asagent.tools.approval import PendingToolApprovalPolicy, ToolApprovalPolicy
+from asagent.tools.automation_save import AutomationPlanUpdateTool, AutomationSaveTool
 from asagent.tools.browser_click import BrowserClickTool
 from asagent.tools.browser_fill import BrowserFillTool
 from asagent.tools.browser_inspect_interactive import BrowserInspectInteractiveTool
@@ -228,10 +247,47 @@ async def _registry_for_conversation(
     workspace_settings: ConversationWorkspaceSettings,
     run_id: RunId,
     conversation_id: ConversationId,
+    conversations: ConversationRepository,
+    automations: SqliteAutomationRepository | None = None,
+    automation_drafts: AutomationDraftContextStore | None = None,
+    automation_execution_contexts: AutomationExecutionContextStore | None = None,
+    automation_browser_service: AutomationBrowserService | None = None,
     file_changes: SqliteFileChangeRepository | None = None,
     file_change_snapshots: FileChangeSnapshotStore | None = None,
 ) -> ToolRegistry:
-    """Add this Run's Conversation-scoped file tools to an isolated registry."""
+    """Add this Run's Conversation-scoped file and automation browser tools to an isolated registry."""
+
+    conversation = await conversations.get(conversation_id)
+    if conversation is None:
+        raise ValueError("conversation not found")
+    if conversation.kind == "automation_draft":
+        if (
+            automations is None
+            or automation_drafts is None
+            or not automation_drafts.contains(conversation_id)
+        ):
+            raise RuntimeError("automation draft context is unavailable")
+        registry = ToolRegistry()
+        registry.register(CurrentTimeTool(now))
+        registry.register(
+            AutomationSaveTool(
+                automations=automations,
+                drafts=automation_drafts,
+                conversation_id=conversation_id,
+                user_id=conversation.user_id,
+                now=now,
+            )
+        )
+        if automation_browser_service is not None:
+            registry.register(AutomationBrowserNavigateTool(automation_browser_service))
+            registry.register(AutomationBrowserSnapshotTool(automation_browser_service))
+            registry.register(AutomationBrowserClickTool(automation_browser_service))
+            registry.register(AutomationBrowserFillTool(automation_browser_service))
+            registry.register(AutomationBrowserSelectTool(automation_browser_service))
+            registry.register(AutomationBrowserWaitTool(automation_browser_service))
+            registry.register(AutomationBrowserReadPageTool(automation_browser_service))
+            registry.register(AutomationBrowserCloseTool(automation_browser_service))
+        return registry
 
     status = await workspace_settings.get_status(conversation_id)
     resolver = WorkspaceResolver(
@@ -240,9 +296,33 @@ async def _registry_for_conversation(
         additional_files=status.additional_files,
     )
     registry = base_registry.copy()
+    if (
+        conversation.kind == "automation_execution"
+        and automations is not None
+        and automation_execution_contexts is not None
+    ):
+        target_automation_id = automation_execution_contexts.target(conversation_id)
+        if target_automation_id is not None:
+            registry.register(
+                AutomationPlanUpdateTool(
+                    automations=automations,
+                    automation_id=target_automation_id,
+                    user_id=conversation.user_id,
+                    now=now,
+                )
+            )
     registry.register(FilesystemListTool(resolver))
     registry.register(FilesystemReadFileTool(resolver))
     registry.register(FilesystemSearchFilesTool(resolver))
+    if automation_browser_service is not None:
+        registry.register(AutomationBrowserNavigateTool(automation_browser_service))
+        registry.register(AutomationBrowserSnapshotTool(automation_browser_service))
+        registry.register(AutomationBrowserClickTool(automation_browser_service))
+        registry.register(AutomationBrowserFillTool(automation_browser_service))
+        registry.register(AutomationBrowserSelectTool(automation_browser_service))
+        registry.register(AutomationBrowserWaitTool(automation_browser_service))
+        registry.register(AutomationBrowserReadPageTool(automation_browser_service))
+        registry.register(AutomationBrowserCloseTool(automation_browser_service))
     if file_changes is not None and file_change_snapshots is not None:
         service = ReversibleFileService(
             resolver,
@@ -266,14 +346,14 @@ async def _register_browser_tools(
     browser_run_bindings: BrowserRunBindings | None,
     browser_page_client: BrowserPageBridgeClient | None,
 ) -> frozenset[str]:
-    """Register page tools only for a bound Browser Run."""
+    """Register page tools only for a bound Browser or automation-draft Run."""
 
     tab_id = None if browser_run_bindings is None else browser_run_bindings.take(run_id)
     if tab_id is None or browser_page_client is None or browser_run_bindings is None:
         return frozenset()
 
     conversation = await conversations.get(conversation_id)
-    if conversation is None or conversation.kind != "browser":
+    if conversation is None or conversation.kind not in {"browser", "automation_draft"}:
         return frozenset()
 
     registry.register(
@@ -330,11 +410,46 @@ async def _system_prompt_for_conversation(
     workspace_settings: ConversationWorkspaceSettings,
     conversations: ConversationRepository,
     conversation_id: ConversationId,
+    automations: SqliteAutomationRepository | None = None,
+    automation_drafts: AutomationDraftContextStore | None = None,
 ) -> str:
     """Add the visible-browser operating contract only to Browser conversations."""
 
     workspace_context = await workspace_settings.model_context(conversation_id)
     conversation = await conversations.get(conversation_id)
+    if conversation is not None and conversation.kind == "automation_draft":
+        target = (
+            None
+            if automation_drafts is None
+            else automation_drafts.target(conversation_id)
+        )
+        target_context = "Create a new automation."
+        if target is not None and automations is not None:
+            stored = await automations.get(target)
+            if stored is not None:
+                triggers = await automations.list_triggers(target)
+                trigger = triggers[0] if len(triggers) == 1 else None
+                target_context = (
+                    f"Update automation {target}. Current name: {stored.name}. "
+                    f"Current plan: {stored.plan_summary}. "
+                    f"Current schedule: {trigger.kind.value if trigger else 'unknown'} "
+                    f"at {trigger.local_time.isoformat() if trigger else 'unknown'} "
+                    f"in {trigger.timezone if trigger else 'unknown'}."
+                )
+        return (
+            "You are in a dedicated automation planning conversation. Help the user express "
+            "the task and schedule in natural language. Ask one concise question when a required "
+            "detail is missing. When the name, complete repeatable instructions, frequency, local "
+            "time, and IANA timezone are unambiguous, call automation.save_draft. The user's "
+            f"current local timezone is {automation_drafts.timezone(conversation_id) if automation_drafts else 'UTC'}; "
+            "use it unless the user specifies another timezone. For weekly "
+            "schedules also determine weekday; for once schedules determine a timezone-aware "
+            "future instant. Do not execute the task itself and do not use unrelated tools. "
+            "A visible automation browser may be available. Use its browser tools when the user "
+            "asks you to inspect or test a webpage while refining the plan. "
+            "New automations are saved as Draft and must be enabled separately. "
+            f"{target_context}"
+        )
     if conversation is None or conversation.kind != "browser":
         return workspace_context
 
@@ -608,6 +723,10 @@ def build_persistent_agent_runtime(
     file_change_snapshots: FileChangeSnapshotStore | None = None,
     browser_run_bindings: BrowserRunBindings | None = None,
     browser_page_client: BrowserPageBridgeClient | None = None,
+    automations: SqliteAutomationRepository | None = None,
+    automation_drafts: AutomationDraftContextStore | None = None,
+    automation_execution_contexts: AutomationExecutionContextStore | None = None,
+    automation_browser_service: AutomationBrowserService | None = None,
     max_steps: int = 20,
 ) -> PersistentAgentRuntime:
     base_registry = registry if registry is not None else _register_builtin_tools()
@@ -623,6 +742,11 @@ def build_persistent_agent_runtime(
                 workspace_settings=workspace_settings,
                 run_id=run_id,
                 conversation_id=conversation_id,
+                conversations=conversations,
+                automations=automations,
+                automation_drafts=automation_drafts,
+                automation_execution_contexts=automation_execution_contexts,
+                automation_browser_service=automation_browser_service,
                 file_changes=file_changes,
                 file_change_snapshots=file_change_snapshots,
             )
@@ -668,6 +792,8 @@ def build_persistent_agent_runtime(
                     workspace_settings=workspace_settings,
                     conversations=conversations,
                     conversation_id=conversation_id,
+                    automations=automations,
+                    automation_drafts=automation_drafts,
                 )
             ),
             now=now,
@@ -712,6 +838,10 @@ def build_persistent_development_runtime(
     file_change_snapshots: FileChangeSnapshotStore | None = None,
     browser_run_bindings: BrowserRunBindings | None = None,
     browser_page_client: BrowserPageBridgeClient | None = None,
+    automations: SqliteAutomationRepository | None = None,
+    automation_drafts: AutomationDraftContextStore | None = None,
+    automation_execution_contexts: AutomationExecutionContextStore | None = None,
+    automation_browser_service: AutomationBrowserService | None = None,
     max_steps: int = 20,
 ) -> PersistentAgentRuntime:
     base_registry = registry if registry is not None else _register_builtin_tools()
@@ -727,6 +857,11 @@ def build_persistent_development_runtime(
                 workspace_settings=workspace_settings,
                 run_id=run_id,
                 conversation_id=conversation_id,
+                conversations=conversations,
+                automations=automations,
+                automation_drafts=automation_drafts,
+                automation_execution_contexts=automation_execution_contexts,
+                automation_browser_service=automation_browser_service,
                 file_changes=file_changes,
                 file_change_snapshots=file_change_snapshots,
             )
@@ -771,6 +906,8 @@ def build_persistent_development_runtime(
                     workspace_settings=workspace_settings,
                     conversations=conversations,
                     conversation_id=conversation_id,
+                    automations=automations,
+                    automation_drafts=automation_drafts,
                 )
             ),
             now=now,
@@ -920,6 +1057,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+async def _delete_stale_automation_drafts(
+    *,
+    conversations: ConversationRepository,
+    user_id: UserId,
+) -> None:
+    """Remove hidden drafts whose process-local planning context cannot be restored."""
+    stale_drafts = await conversations.list_for_user(
+        user_id,
+        kind="automation_draft",
+    )
+    for draft in stale_drafts:
+        await conversations.delete(draft.conversation_id)
+
+
 async def _run_main(args: argparse.Namespace) -> None:
     if (args.profile is None) != (args.secret_env is None):
         raise ProviderConfigurationError(
@@ -947,6 +1098,13 @@ async def _run_main(args: argparse.Namespace) -> None:
         file_changes = SqliteFileChangeRepository(database_path)
         file_change_snapshots = FileChangeSnapshotStore(paths.data_dir)
         runs = SqliteRunRepository(database_path)
+        automations = SqliteAutomationRepository(database_path)
+        await _delete_stale_automation_drafts(
+            conversations=conversations,
+            user_id=UserId("local-user"),
+        )
+        automation_drafts = AutomationDraftContextStore()
+        automation_execution_contexts = AutomationExecutionContextStore()
         starter = SqliteRunStarter(database_path)
         finisher = SqliteRunFinisher(database_path)
         credential_store = MacOSKeychainCredentialStore()
@@ -987,10 +1145,17 @@ async def _run_main(args: argparse.Namespace) -> None:
         http_client: httpx.AsyncClient | None = None
         browser_page_client: BrowserPageBridgeClient | None = None
         browser_run_bindings = BrowserRunBindings()
+        automation_browser_service: AutomationBrowserService | None = None
         mcp_manager: McpServerManager | None = None
         dispatcher: InProcessRunDispatcher | None = None
+        automation_scheduler: AutomationScheduler | None = None
 
         try:
+            automation_browser_service = AutomationBrowserService(
+                user_data_dir=paths.data_dir / "browser_profile",
+                headless=os.environ.get("ASAGENT_AUTOMATION_HEADLESS", "").lower()
+                == "true",
+            )
             if bootstrap.browser_bridge is not None:
                 browser_page_client = BrowserPageBridgeClient(
                     base_url=bootstrap.browser_bridge.base_url,
@@ -1026,6 +1191,10 @@ async def _run_main(args: argparse.Namespace) -> None:
                     file_change_snapshots=file_change_snapshots,
                     browser_run_bindings=browser_run_bindings,
                     browser_page_client=browser_page_client,
+                    automations=automations,
+                    automation_drafts=automation_drafts,
+                    automation_execution_contexts=automation_execution_contexts,
+                    automation_browser_service=automation_browser_service,
                     max_steps=agent_settings.max_steps,
                 )
                 model_name = "development-tools"
@@ -1087,6 +1256,10 @@ async def _run_main(args: argparse.Namespace) -> None:
                     file_change_snapshots=file_change_snapshots,
                     browser_run_bindings=browser_run_bindings,
                     browser_page_client=browser_page_client,
+                    automations=automations,
+                    automation_drafts=automation_drafts,
+                    automation_execution_contexts=automation_execution_contexts,
+                    automation_browser_service=automation_browser_service,
                     max_steps=agent_settings.max_steps,
                 )
                 model_name = profile.model
@@ -1105,6 +1278,20 @@ async def _run_main(args: argparse.Namespace) -> None:
             dispatcher = InProcessRunDispatcher(
                 execute_submitted=execute_submitted,
             )
+            automation_scheduler = AutomationScheduler(
+                automations=automations,
+                runs=runs,
+                submission=AutomationRunSubmissionService(
+                    conversations=conversations,
+                    run_submission=run_submission,
+                    now=now,
+                    new_conversation_id=new_conversation_id,
+                    execution_contexts=automation_execution_contexts,
+                ),
+                dispatcher=dispatcher,
+                now=now,
+            )
+            await automation_scheduler.start()
 
             async def revert_file_change(
                 file_change_id: FileChangeId,
@@ -1145,6 +1332,9 @@ async def _run_main(args: argparse.Namespace) -> None:
                     file_changes=file_changes,
                     revert_file_change=revert_file_change,
                     browser_run_bindings=browser_run_bindings,
+                    automations=automations,
+                    automation_drafts=automation_drafts,
+                    run_automation_now_action=automation_scheduler.run_now,
                 ),
                 host=args.host,
                 port=args.port,
@@ -1154,8 +1344,12 @@ async def _run_main(args: argparse.Namespace) -> None:
             await server.wait_closed()
         finally:
             await tool_approvals.aclose()
+            if automation_scheduler is not None:
+                await automation_scheduler.aclose()
             if dispatcher is not None:
                 await dispatcher.aclose()
+            if automation_browser_service is not None:
+                await automation_browser_service.close()
             if mcp_manager is not None:
                 await mcp_manager.aclose()
             await finisher.aclose()
@@ -1163,6 +1357,7 @@ async def _run_main(args: argparse.Namespace) -> None:
             if http_client is not None:
                 await http_client.aclose()
             await runs.aclose()
+            await automations.aclose()
             await file_changes.aclose()
             await conversations.aclose()
             await conversation_file_scopes.aclose()

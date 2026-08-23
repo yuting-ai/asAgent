@@ -2,7 +2,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from pathlib import Path
 from typing import Annotated, Final, Literal
 from urllib.parse import urlsplit
@@ -26,6 +26,7 @@ from asagent.agent.run_submission import (
     UnknownConversationError,
 )
 from asagent.api.auth import BearerTokenAuthenticator, LocalApiToken
+from asagent.automation.drafts import AutomationDraftContextStore
 from asagent.bootstrap.agent_settings import (
     MAX_MAX_STEPS,
     MIN_MAX_STEPS,
@@ -47,11 +48,29 @@ from asagent.bootstrap.tavily_settings import (
     TavilySettings,
     TavilySettingsStatus,
 )
+from asagent.core.automation import (
+    Automation,
+    AutomationExecution,
+    AutomationStatus,
+    AutomationTrigger,
+    AutomationTriggerKind,
+    next_run_after,
+)
 from asagent.core.conversation import Conversation, ConversationKind
 from asagent.core.file_change import FileChange
-from asagent.core.ids import ApprovalId, ConversationId, FileChangeId, RunId, UserId
+from asagent.core.ids import (
+    ApprovalId,
+    AutomationExecutionId,
+    AutomationId,
+    AutomationTriggerId,
+    ConversationId,
+    FileChangeId,
+    RunId,
+    UserId,
+)
 from asagent.core.messages import AssistantMessage, UserMessage
 from asagent.core.repositories import (
+    AutomationRepository,
     ConversationRepository,
     FileChangeRepository,
     RunRepository,
@@ -82,6 +101,122 @@ _EVENT_POLL_INTERVAL_SECONDS: Final = 0.1
 
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
+
+
+class AutomationResponse(BaseModel):
+    automation_id: str
+    name: str
+    plan_summary: str
+    allowed_capabilities: list[str]
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_automation(cls, value: Automation) -> "AutomationResponse":
+        return cls(
+            automation_id=str(value.automation_id),
+            name=value.name,
+            plan_summary=value.plan_summary,
+            allowed_capabilities=list(value.allowed_capabilities),
+            status=value.status.value,
+            created_at=value.created_at,
+            updated_at=value.updated_at,
+        )
+
+
+class AutomationTriggerResponse(BaseModel):
+    automation_trigger_id: str
+    kind: str
+    timezone: str
+    local_time: str
+    weekday: int | None
+    next_run_at: datetime | None
+    enabled: bool
+
+    @classmethod
+    def from_trigger(cls, value: AutomationTrigger) -> "AutomationTriggerResponse":
+        return cls(
+            automation_trigger_id=str(value.automation_trigger_id),
+            kind=value.kind.value,
+            timezone=value.timezone,
+            local_time=value.local_time.isoformat(),
+            weekday=value.weekday,
+            next_run_at=value.next_run_at,
+            enabled=value.enabled,
+        )
+
+
+class AutomationExecutionResponse(BaseModel):
+    automation_execution_id: str
+    scheduled_for: datetime
+    status: str
+    run_id: str | None
+    claimed_at: datetime
+    completed_at: datetime | None
+
+    @classmethod
+    def from_execution(
+        cls, value: AutomationExecution
+    ) -> "AutomationExecutionResponse":
+        return cls(
+            automation_execution_id=str(value.automation_execution_id),
+            scheduled_for=value.scheduled_for,
+            status=value.status.value,
+            run_id=None if value.run_id is None else str(value.run_id),
+            claimed_at=value.claimed_at,
+            completed_at=value.completed_at,
+        )
+
+
+class UpdateAutomationStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["draft", "active", "paused"]
+
+
+class CreateAutomationTriggerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["once", "daily", "weekly"]
+    timezone: str
+    local_time: str
+    weekday: int | None = None
+    next_run_at: datetime | None = None
+
+
+class CreateAutomationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    plan_summary: str
+    allowed_capabilities: list[str] = Field(default_factory=list)
+    trigger: CreateAutomationTriggerRequest
+
+    @field_validator("name", "plan_summary")
+    @classmethod
+    def automation_text_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value must not be blank")
+        return value
+
+
+class UpdateAutomationRequest(CreateAutomationRequest):
+    """Full replacement of the editable automation plan and its single trigger."""
+
+
+class CreateAutomationDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    automation_id: str | None = None
+    timezone: str = "UTC"
+
+    @field_validator("timezone")
+    @classmethod
+    def timezone_must_be_nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("timezone must not be blank")
+        return value.strip()
 
 
 class CreateConversationRequest(BaseModel):
@@ -160,6 +295,27 @@ class CreateMessageRequest(BaseModel):
         if not value.strip():
             raise ValueError("content must not be blank")
         return value
+
+
+class CreateAutomationDraftMessageRequest(CreateMessageRequest):
+    tab_id: str | None = None
+
+    @field_validator("tab_id")
+    @classmethod
+    def tab_id_must_be_valid(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        tab_id = value.strip()
+        if (
+            not tab_id
+            or len(tab_id) > 80
+            or any(
+                not character.isalnum() and character not in "-_"
+                for character in tab_id
+            )
+        ):
+            raise ValueError("tab_id is invalid")
+        return tab_id
 
 
 class CreateBrowserMessageRequest(BaseModel):
@@ -549,6 +705,12 @@ def create_app(
         Callable[[FileChangeId, Path], Awaitable[FileChange]] | None
     ) = None,
     browser_run_bindings: BrowserRunBindings | None = None,
+    automations: AutomationRepository | None = None,
+    automation_drafts: AutomationDraftContextStore | None = None,
+    run_automation_now_action: Callable[[AutomationId], Awaitable[AutomationExecution]]
+    | None = None,
+    automation_id_factory: Callable[[], AutomationId] | None = None,
+    automation_trigger_id_factory: Callable[[], AutomationTriggerId] | None = None,
     conversation_id_factory: Callable[[], ConversationId] | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
@@ -559,6 +721,10 @@ def create_app(
     authenticate = BearerTokenAuthenticator(access_token)
     create_conversation_id = conversation_id_factory or _new_conversation_id
     current_time = clock or _now
+    create_automation_id = automation_id_factory or _new_automation_id
+    create_automation_trigger_id = (
+        automation_trigger_id_factory or _new_automation_trigger_id
+    )
 
     async def get_local_run(run_id: RunId) -> Run:
         stored_run = await runs.get(run_id)
@@ -625,6 +791,7 @@ def create_app(
         request: CreateMessageRequest,
         *,
         kind: ConversationKind,
+        browser_tab_id: str | None = None,
     ) -> SubmitMessageResponse:
         await get_local_conversation(ConversationId(conversation_id), kind=kind)
         try:
@@ -642,6 +809,8 @@ def create_app(
                 detail="conversation not found",
             ) from error
 
+        if browser_tab_id is not None and browser_run_bindings is not None:
+            browser_run_bindings.bind(submission.run.run_id, browser_tab_id)
         dispatch_submitted_run(submission)
 
         return SubmitMessageResponse(
@@ -832,6 +1001,73 @@ def create_app(
             request,
             kind="chat",
         )
+
+    @app.post(
+        "/api/v1/automation-drafts",
+        response_model=ConversationResponse,
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(authenticate)],
+    )
+    async def create_automation_draft(
+        request: CreateAutomationDraftRequest,
+    ) -> ConversationResponse:
+        target_id = (
+            None
+            if request.automation_id is None
+            else AutomationId(request.automation_id)
+        )
+        if target_id is not None:
+            target = None if automations is None else await automations.get(target_id)
+            if target is None or target.user_id != _LOCAL_USER_ID:
+                raise HTTPException(status_code=404, detail="automation not found")
+        created = await create_conversation_of_kind("automation_draft")
+        if automation_drafts is not None:
+            automation_drafts.bind(
+                ConversationId(created.conversation_id),
+                target_id,
+                request.timezone,
+            )
+        return created
+
+    @app.get(
+        "/api/v1/automation-drafts/{conversation_id}/messages",
+        response_model=list[MessageResponse],
+        dependencies=[Depends(authenticate)],
+    )
+    async def list_automation_draft_messages(
+        conversation_id: str,
+    ) -> list[MessageResponse]:
+        return await list_messages_of_kind(conversation_id, kind="automation_draft")
+
+    @app.post(
+        "/api/v1/automation-drafts/{conversation_id}/messages",
+        response_model=SubmitMessageResponse,
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(authenticate)],
+    )
+    async def submit_automation_draft_message(
+        conversation_id: str, request: CreateAutomationDraftMessageRequest
+    ) -> SubmitMessageResponse:
+        return await submit_message_of_kind(
+            conversation_id,
+            request,
+            kind="automation_draft",
+            browser_tab_id=request.tab_id,
+        )
+
+    @app.delete(
+        "/api/v1/automation-drafts/{conversation_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(authenticate)],
+    )
+    async def delete_automation_draft(conversation_id: str) -> Response:
+        await get_local_conversation(
+            ConversationId(conversation_id), kind="automation_draft"
+        )
+        await conversations.delete(ConversationId(conversation_id))
+        if automation_drafts is not None:
+            automation_drafts.remove(ConversationId(conversation_id))
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get(
         "/api/v1/runs/{run_id}",
@@ -1327,11 +1563,244 @@ def create_app(
                 ) from error
             return WorkspaceSettingsResponse.from_status(saved_status)
 
+    if automations is not None:
+
+        async def get_local_automation(automation_id: str) -> Automation:
+            automation = await automations.get(AutomationId(automation_id))
+            if automation is None or automation.user_id != _LOCAL_USER_ID:
+                raise HTTPException(status_code=404, detail="automation not found")
+            return automation
+
+        @app.get(
+            "/api/v1/automations",
+            response_model=list[AutomationResponse],
+            dependencies=[Depends(authenticate)],
+        )
+        async def list_automations() -> list[AutomationResponse]:
+            return [
+                AutomationResponse.from_automation(value)
+                for value in await automations.list_for_user(_LOCAL_USER_ID)
+            ]
+
+        @app.post(
+            "/api/v1/automations",
+            response_model=AutomationResponse,
+            status_code=status.HTTP_201_CREATED,
+            dependencies=[Depends(authenticate)],
+        )
+        async def create_automation(
+            request: CreateAutomationRequest,
+        ) -> AutomationResponse:
+            created_at = current_time()
+            try:
+                local_time = time.fromisoformat(request.trigger.local_time)
+                automation = Automation(
+                    create_automation_id(),
+                    _LOCAL_USER_ID,
+                    request.name,
+                    request.plan_summary,
+                    tuple(request.allowed_capabilities),
+                    AutomationStatus.DRAFT,
+                    created_at,
+                    created_at,
+                )
+                trigger = AutomationTrigger(
+                    create_automation_trigger_id(),
+                    automation.automation_id,
+                    AutomationTriggerKind(request.trigger.kind),
+                    request.trigger.timezone,
+                    local_time,
+                    request.trigger.weekday,
+                    request.trigger.next_run_at,
+                    True,
+                    created_at,
+                    created_at,
+                )
+                if trigger.next_run_at is None:
+                    next_run_at = next_run_after(trigger, created_at)
+                    if next_run_at is None:
+                        raise ValueError("once triggers require next_run_at")
+                    trigger = replace(trigger, next_run_at=next_run_at)
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=422, detail="automation input is invalid"
+                ) from error
+            await automations.save_with_trigger(automation, trigger)
+            return AutomationResponse.from_automation(automation)
+
+        @app.get(
+            "/api/v1/automations/{automation_id}",
+            response_model=AutomationResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def get_automation(automation_id: str) -> AutomationResponse:
+            return AutomationResponse.from_automation(
+                await get_local_automation(automation_id)
+            )
+
+        @app.delete(
+            "/api/v1/automations/{automation_id}",
+            status_code=status.HTTP_204_NO_CONTENT,
+            dependencies=[Depends(authenticate)],
+        )
+        async def delete_automation(automation_id: str) -> Response:
+            await get_local_automation(automation_id)
+            await automations.delete(AutomationId(automation_id))
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+        @app.post(
+            "/api/v1/automations/{automation_id}/run-now",
+            response_model=AutomationExecutionResponse,
+            status_code=status.HTTP_202_ACCEPTED,
+            dependencies=[Depends(authenticate)],
+        )
+        async def run_automation_now(automation_id: str) -> AutomationExecutionResponse:
+            stored = await get_local_automation(automation_id)
+            if run_automation_now_action is None:
+                raise HTTPException(
+                    status_code=503, detail="automation runner unavailable"
+                )
+            try:
+                execution = await run_automation_now_action(stored.automation_id)
+            except ValueError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            return AutomationExecutionResponse.from_execution(execution)
+
+        @app.put(
+            "/api/v1/automations/{automation_id}",
+            response_model=AutomationResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def update_automation(
+            automation_id: str, request: UpdateAutomationRequest
+        ) -> AutomationResponse:
+            stored = await get_local_automation(automation_id)
+            triggers = await automations.list_triggers(stored.automation_id)
+            if len(triggers) != 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="automation must have exactly one editable trigger",
+                )
+            updated_at = current_time()
+            try:
+                local_time = time.fromisoformat(request.trigger.local_time)
+                automation = replace(
+                    stored,
+                    name=request.name,
+                    plan_summary=request.plan_summary,
+                    allowed_capabilities=tuple(request.allowed_capabilities),
+                    updated_at=updated_at,
+                )
+                trigger = AutomationTrigger(
+                    triggers[0].automation_trigger_id,
+                    stored.automation_id,
+                    AutomationTriggerKind(request.trigger.kind),
+                    request.trigger.timezone,
+                    local_time,
+                    request.trigger.weekday,
+                    request.trigger.next_run_at,
+                    triggers[0].enabled,
+                    triggers[0].created_at,
+                    updated_at,
+                )
+                if trigger.next_run_at is None:
+                    next_run_at = next_run_after(trigger, updated_at)
+                    if next_run_at is None:
+                        raise ValueError("once triggers require next_run_at")
+                    trigger = replace(trigger, next_run_at=next_run_at)
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=422, detail="automation input is invalid"
+                ) from error
+            await automations.save_with_trigger(automation, trigger)
+            return AutomationResponse.from_automation(automation)
+
+        @app.put(
+            "/api/v1/automations/{automation_id}/status",
+            response_model=AutomationResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def update_automation_status(
+            automation_id: str, request: UpdateAutomationStatusRequest
+        ) -> AutomationResponse:
+            stored = await get_local_automation(automation_id)
+            saved = replace(
+                stored,
+                status=AutomationStatus(request.status),
+                updated_at=current_time(),
+            )
+            await automations.save(saved)
+            return AutomationResponse.from_automation(saved)
+
+        @app.get(
+            "/api/v1/automations/{automation_id}/triggers",
+            response_model=list[AutomationTriggerResponse],
+            dependencies=[Depends(authenticate)],
+        )
+        async def list_automation_triggers(
+            automation_id: str,
+        ) -> list[AutomationTriggerResponse]:
+            stored = await get_local_automation(automation_id)
+            return [
+                AutomationTriggerResponse.from_trigger(value)
+                for value in await automations.list_triggers(stored.automation_id)
+            ]
+
+        @app.get(
+            "/api/v1/automations/{automation_id}/executions",
+            response_model=list[AutomationExecutionResponse],
+            dependencies=[Depends(authenticate)],
+        )
+        async def list_automation_executions(
+            automation_id: str,
+        ) -> list[AutomationExecutionResponse]:
+            stored = await get_local_automation(automation_id)
+            return [
+                AutomationExecutionResponse.from_execution(value)
+                for value in await automations.list_executions(stored.automation_id)
+            ]
+
+        @app.get(
+            "/api/v1/automations/{automation_id}/executions/{execution_id}/messages",
+            response_model=list[MessageResponse],
+            dependencies=[Depends(authenticate)],
+        )
+        async def get_automation_execution_messages(
+            automation_id: str,
+            execution_id: str,
+        ) -> list[MessageResponse]:
+            stored = await get_local_automation(automation_id)
+            execution = await automations.get_execution(
+                AutomationExecutionId(execution_id)
+            )
+            if execution is None or execution.automation_id != stored.automation_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="automation execution not found",
+                )
+            if execution.run_id is None:
+                return []
+            run = await runs.get(execution.run_id)
+            if run is None:
+                return []
+            stored_messages = await conversations.list_messages(run.conversation_id)
+            return [
+                MessageResponse.from_message(message) for message in stored_messages
+            ]
+
     return app
 
 
 def _new_conversation_id() -> ConversationId:
     return ConversationId(f"conv_{uuid4().hex}")
+
+
+def _new_automation_id() -> AutomationId:
+    return AutomationId(f"automation_{uuid4().hex}")
+
+
+def _new_automation_trigger_id() -> AutomationTriggerId:
+    return AutomationTriggerId(f"automation_trigger_{uuid4().hex}")
 
 
 def _now() -> datetime:

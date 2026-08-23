@@ -9,6 +9,47 @@ type ConversationSummary = {
   last_page_title: string | null
 }
 
+type AutomationSummary = {
+  automation_id: string
+  name: string
+  plan_summary: string
+  allowed_capabilities: string[]
+  status: 'draft' | 'active' | 'paused'
+  created_at: string
+  updated_at: string
+}
+
+type AutomationTrigger = {
+  automation_trigger_id: string
+  kind: 'once' | 'daily' | 'weekly'
+  timezone: string
+  local_time: string
+  weekday: number | null
+  next_run_at: string | null
+  enabled: boolean
+}
+type AutomationExecution = {
+  automation_execution_id: string
+  scheduled_for: string
+  status: 'claimed' | 'missed' | 'completed' | 'failed' | 'cancelled'
+  run_id: string | null
+  claimed_at: string
+  completed_at: string | null
+}
+type CreateAutomationInput = {
+  name: string
+  planSummary: string
+  allowedCapabilities: string[]
+  trigger: {
+    kind: 'once' | 'daily' | 'weekly'
+    timezone: string
+    localTime: string
+    weekday?: number
+    nextRunAt?: string
+  }
+}
+type UpdateAutomationInput = CreateAutomationInput
+
 type ConversationMessage = {
   message_id: string
   role: 'user' | 'assistant'
@@ -201,6 +242,45 @@ const desktopBridge = {
   restartApp: (): Promise<void> => ipcRenderer.invoke('desktop:restart-app'),
   listConversations: (): Promise<ConversationSummary[]> =>
     ipcRenderer.invoke('desktop:list-conversations'),
+  listAutomations: (): Promise<AutomationSummary[]> =>
+    ipcRenderer.invoke('desktop:list-automations'),
+  createAutomation: (input: CreateAutomationInput): Promise<AutomationSummary> =>
+    ipcRenderer.invoke('desktop:create-automation', input),
+  updateAutomation: (
+    automationId: string,
+    input: UpdateAutomationInput
+  ): Promise<AutomationSummary> =>
+    ipcRenderer.invoke('desktop:update-automation', automationId, input),
+  deleteAutomation: (automationId: string): Promise<void> =>
+    ipcRenderer.invoke('desktop:delete-automation', automationId),
+  updateAutomationStatus: (
+    automationId: string,
+    status: AutomationSummary['status']
+  ): Promise<AutomationSummary> =>
+    ipcRenderer.invoke('desktop:update-automation-status', automationId, status),
+  listAutomationTriggers: (automationId: string): Promise<AutomationTrigger[]> =>
+    ipcRenderer.invoke('desktop:list-automation-triggers', automationId),
+  listAutomationExecutions: (automationId: string): Promise<AutomationExecution[]> =>
+    ipcRenderer.invoke('desktop:list-automation-executions', automationId),
+  getAutomationExecutionMessages: (
+    automationId: string,
+    executionId: string
+  ): Promise<ConversationMessage[]> =>
+    ipcRenderer.invoke('desktop:get-automation-execution-messages', automationId, executionId),
+  runAutomationNow: (automationId: string): Promise<AutomationExecution> =>
+    ipcRenderer.invoke('desktop:run-automation-now', automationId),
+  createAutomationDraft: (automationId?: string, timezone = 'UTC'): Promise<ConversationSummary> =>
+    ipcRenderer.invoke('desktop:create-automation-draft', automationId, timezone),
+  listAutomationDraftMessages: (conversationId: string): Promise<ConversationMessage[]> =>
+    ipcRenderer.invoke('desktop:list-automation-draft-messages', conversationId),
+  submitAutomationDraftMessage: (
+    conversationId: string,
+    content: string,
+    tabId?: string
+  ): Promise<SubmittedMessage> =>
+    ipcRenderer.invoke('desktop:submit-automation-draft-message', conversationId, content, tabId),
+  deleteAutomationDraft: (conversationId: string): Promise<void> =>
+    ipcRenderer.invoke('desktop:delete-automation-draft', conversationId),
   listConversationMessages: (conversationId: string): Promise<ConversationMessage[]> =>
     ipcRenderer.invoke('desktop:list-conversation-messages', conversationId),
   listConversationRunHistory: (conversationId: string): Promise<RunHistory[]> =>

@@ -10,6 +10,7 @@ dependencies = [
     "jsonschema>=4.26,<5",
     "keyring>=25,<26",
     "pydantic>=2,<3",
+    "playwright>=1.49,<2",
     "send2trash>=2.1.0",
     "sqlalchemy[asyncio]>=2.0,<2.1",
     "uvicorn>=0.30,<1",
