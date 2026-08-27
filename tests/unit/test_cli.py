@@ -1,9 +1,11 @@
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
+from asagent.automation.browser.browser_service import AutomationBrowserService
 from asagent.chat.service import ChatService
 from asagent.cli import (
     _delete_stale_automation_drafts,
@@ -119,13 +121,18 @@ async def test_sidecar_startup_deletes_only_stale_automation_drafts() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("kind", "expects_tavily"),
-    (("chat", True), ("browser", False), ("automation_execution", False)),
+    ("kind", "expects_tavily", "expects_automation_browser"),
+    (
+        ("chat", True, False),
+        ("browser", False, False),
+        ("automation_execution", False, True),
+    ),
 )
-async def test_tavily_is_available_only_in_chat_tool_snapshots(
+async def test_conversation_kind_scopes_specialized_tool_snapshots(
     tmp_path: Path,
     kind: ConversationKind,
     expects_tavily: bool,
+    expects_automation_browser: bool,
 ) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
@@ -154,11 +161,16 @@ async def test_tavily_is_available_only_in_chat_tool_snapshots(
         run_id=RunId("run-test"),
         conversation_id=conversation_id,
         conversations=conversations,
+        automation_browser_service=AsyncMock(spec=AutomationBrowserService),
     )
 
     tool_ids = {definition.tool_id for definition in registry.definitions()}
     assert "builtin.echo" in tool_ids
     assert ("mcp:tavily:tavily_search:test" in tool_ids) is expects_tavily
+    assert (
+        any(tool_id.startswith("automation_browser.") for tool_id in tool_ids)
+        is expects_automation_browser
+    )
 
 
 @pytest.mark.asyncio

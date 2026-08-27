@@ -318,7 +318,10 @@ async def _registry_for_conversation(
     registry.register(FilesystemListTool(resolver))
     registry.register(FilesystemReadFileTool(resolver))
     registry.register(FilesystemSearchFilesTool(resolver))
-    if automation_browser_service is not None:
+    if (
+        conversation.kind == "automation_execution"
+        and automation_browser_service is not None
+    ):
         registry.register(AutomationBrowserNavigateTool(automation_browser_service))
         registry.register(AutomationBrowserSnapshotTool(automation_browser_service))
         registry.register(AutomationBrowserClickTool(automation_browser_service))
