@@ -18,6 +18,7 @@ import {
   MODEL_PROVIDER_PRESETS
 } from './model_presets'
 import { type AppLanguage, getStoredAppLanguage, LANGUAGE_STORAGE_KEY, t } from './i18n'
+import { splitLiveAndPersistedRunHistory } from './run_activity_visibility'
 
 type AppInfo = {
   appName: string
@@ -2262,20 +2263,11 @@ export default function App(): React.JSX.Element {
   const chatRunIsActive = activeRun?.conversationId === selectedConversationId
   const browserRunIsActive = activeRun?.conversationId === selectedBrowserConversationId
 
-  const visibleBrowserRunHistory = browserRunHistory.filter(
-    (history) => history.run.run_id !== runActivity?.runId
-  )
-  const allBrowserRunHistoryByMessage = runHistoryByAssistantMessage(
+  const { liveActivity: visibleBrowserActivity, persistedHistory: visibleBrowserRunHistory } =
+    splitLiveAndPersistedRunHistory(runActivity, selectedBrowserConversationId, browserRunHistory)
+  const browserRunHistoryByMessage = runHistoryByAssistantMessage(
     browserMessages,
-    browserRunHistory
-  )
-  const browserRunHistoryByMessage = new Map(
-    [...allBrowserRunHistoryByMessage.entries()]
-      .map(
-        ([messageId, items]) =>
-          [messageId, items.filter((history) => history.run.run_id !== runActivity?.runId)] as const
-      )
-      .filter(([, items]) => items.length > 0)
+    visibleBrowserRunHistory
   )
   const matchedBrowserRunIds = new Set(
     [...browserRunHistoryByMessage.values()].flatMap((items) =>
@@ -5174,13 +5166,6 @@ export default function App(): React.JSX.Element {
                         </div>
                       ) : (
                         (() => {
-                          const visibleBrowserActivity =
-                            runActivity?.conversationId === selectedBrowserConversationId &&
-                            !browserRunHistory.some(
-                              (history) => history.run.run_id === runActivity.runId
-                            )
-                              ? runActivity
-                              : null
                           const browserActivityAnchorIndex = browserMessages.reduce(
                             (lastIndex, message, index) =>
                               message.role === 'user' ? index : lastIndex,
