@@ -1175,6 +1175,7 @@ body.is-resizing-columns {
 }
 
 .automation-canvas-composer-card {
+  order: 2;
   position: relative;
   padding: 16px 18px 14px;
   background: var(--bg-raised);
@@ -1190,6 +1191,37 @@ body.is-resizing-columns {
     border-color 0.16s ease,
     box-shadow 0.16s ease;
   -webkit-app-region: no-drag;
+}
+
+.automation-input-needed {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--amber) 52%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--amber) 10%, var(--bg-subtle));
+  color: var(--text);
+}
+
+.automation-input-needed .automation-status-dot {
+  flex: 0 0 auto;
+  margin-top: 5px;
+  background: var(--amber);
+  box-shadow: 0 0 0 3px var(--brass-glow);
+}
+
+.automation-input-needed strong {
+  display: block;
+  font-size: 12px;
+  color: var(--brass);
+}
+
+.automation-input-needed p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .automation-canvas-composer-card:focus-within {
@@ -1287,6 +1319,7 @@ body.is-resizing-columns {
 }
 
 .automation-canvas-messages {
+  order: 1;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1330,6 +1363,7 @@ body.is-resizing-columns {
 }
 
 .automation-canvas-guide {
+  order: 1;
   display: flex;
   flex-direction: column;
   gap: 14px;

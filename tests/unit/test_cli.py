@@ -1,15 +1,18 @@
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
 
 from asagent.automation.browser.browser_service import AutomationBrowserService
+from asagent.automation.drafts import AutomationDraftContextStore
 from asagent.chat.service import ChatService
 from asagent.cli import (
     _delete_stale_automation_drafts,
     _registry_for_conversation,
+    _system_prompt_for_conversation,
     run_chat,
 )
 from asagent.core.conversation import Conversation, ConversationKind
@@ -21,6 +24,7 @@ from asagent.models.fake_provider import FakeModelProvider
 from asagent.storage.in_memory_conversation_repository import (
     InMemoryConversationRepository,
 )
+from asagent.storage.sqlite.automation_repository import SqliteAutomationRepository
 from asagent.tools.builtin.echo import EchoTool
 from asagent.tools.registry import ToolRegistry
 from asagent.workspace.settings import ConversationWorkspaceSettings
@@ -171,6 +175,83 @@ async def test_conversation_kind_scopes_specialized_tool_snapshots(
         any(tool_id.startswith("automation_browser.") for tool_id in tool_ids)
         is expects_automation_browser
     )
+
+
+@pytest.mark.asyncio
+async def test_automation_draft_registry_only_exposes_planning_tools(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    conversations = InMemoryConversationRepository()
+    conversation_id = ConversationId("automation-draft")
+    created_at = datetime(2026, 8, 29, 2, 0, tzinfo=UTC)
+    await conversations.save(
+        Conversation(
+            conversation_id,
+            UserId("local-user"),
+            created_at,
+            created_at,
+            kind="automation_draft",
+        )
+    )
+    drafts = AutomationDraftContextStore()
+    drafts.bind(conversation_id, None, "Australia/Perth")
+
+    registry = await _registry_for_conversation(
+        base_registry=ToolRegistry(),
+        workspace_settings=ConversationWorkspaceSettings(
+            scopes=InMemoryConversationFileScopeRepository(),
+            workspace_root=workspace_root,
+        ),
+        run_id=RunId("run-test"),
+        conversation_id=conversation_id,
+        conversations=conversations,
+        automations=cast(SqliteAutomationRepository, AsyncMock()),
+        automation_drafts=drafts,
+        automation_browser_service=AsyncMock(spec=AutomationBrowserService),
+    )
+
+    assert {definition.tool_id for definition in registry.definitions()} == {
+        "automation.save_draft",
+        "builtin.current_time",
+    }
+
+
+@pytest.mark.asyncio
+async def test_automation_draft_prompt_requires_missing_schedule_before_tools(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    conversations = InMemoryConversationRepository()
+    conversation_id = ConversationId("automation-draft")
+    created_at = datetime(2026, 8, 29, 2, 0, tzinfo=UTC)
+    await conversations.save(
+        Conversation(
+            conversation_id,
+            UserId("local-user"),
+            created_at,
+            created_at,
+            kind="automation_draft",
+        )
+    )
+    drafts = AutomationDraftContextStore()
+    drafts.bind(conversation_id, None, "Australia/Perth")
+
+    prompt = await _system_prompt_for_conversation(
+        workspace_settings=ConversationWorkspaceSettings(
+            scopes=InMemoryConversationFileScopeRepository(),
+            workspace_root=workspace_root,
+        ),
+        conversations=conversations,
+        conversation_id=conversation_id,
+        automation_drafts=drafts,
+    )
+
+    assert "If any required detail is missing, do not call any tool" in prompt
+    assert "Your entire response must be one concise question" in prompt
+    assert "Run now from the task detail page" in prompt
 
 
 @pytest.mark.asyncio

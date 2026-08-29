@@ -26,6 +26,10 @@ describe('i18n', () => {
     expect(t('zh-Hans', 'newScheduledTask')).toBe('新建定时任务')
     expect(t('en', 'planningScheduledTask')).toBe('Planning…')
     expect(t('zh-Hans', 'planningScheduledTask')).toBe('规划中…')
+    expect(t('en', 'needsYourInput')).toBe('Needs your input')
+    expect(t('zh-Hans', 'needsYourInput')).toBe('需要你的补充')
+    expect(t('en', 'savedScheduledTask')).toBe('Saved scheduled task')
+    expect(t('zh-Hans', 'savedScheduledTask')).toBe('已保存定时任务')
   })
 
   it('defaults to english when given unknown language', () => {

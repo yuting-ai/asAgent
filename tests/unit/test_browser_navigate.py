@@ -8,7 +8,7 @@ from asagent.bootstrap.browser_page_bridge import (
     BrowserPageBridgeClient,
 )
 from asagent.cli import _register_browser_tools
-from asagent.core.conversation import Conversation, ConversationKind
+from asagent.core.conversation import Conversation
 from asagent.core.ids import ConversationId, RunId, UserId
 from asagent.storage.in_memory_conversation_repository import (
     InMemoryConversationRepository,
@@ -98,8 +98,9 @@ async def test_browser_navigate_tool_returns_navigated_payload() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["browser", "automation_draft"])
-async def test_register_browser_tools_includes_navigate(kind: ConversationKind) -> None:
+async def test_register_browser_tools_includes_navigate_for_browser_conversation() -> (
+    None
+):
     conversations = InMemoryConversationRepository()
     created_at = datetime.now(UTC)
     conversation = Conversation(
@@ -107,7 +108,7 @@ async def test_register_browser_tools_includes_navigate(kind: ConversationKind) 
         user_id=UserId("local-user"),
         created_at=created_at,
         updated_at=created_at,
-        kind=kind,
+        kind="browser",
     )
     await conversations.save(conversation)
 
@@ -128,3 +129,35 @@ async def test_register_browser_tools_includes_navigate(kind: ConversationKind) 
 
     assert registry.get("browser.navigate").definition.tool_id == "browser.navigate"
     assert "browser.navigate" in permissions
+
+
+@pytest.mark.asyncio
+async def test_register_browser_tools_excludes_automation_draft() -> None:
+    conversations = InMemoryConversationRepository()
+    created_at = datetime.now(UTC)
+    conversation = Conversation(
+        conversation_id=ConversationId("conv-automation-draft"),
+        user_id=UserId("local-user"),
+        created_at=created_at,
+        updated_at=created_at,
+        kind="automation_draft",
+    )
+    await conversations.save(conversation)
+
+    bindings = BrowserRunBindings()
+    bindings.bind(RunId("run-1"), "tab-1")
+    registry = ToolRegistry()
+    permissions = await _register_browser_tools(
+        registry=registry,
+        conversations=conversations,
+        conversation_id=conversation.conversation_id,
+        run_id=RunId("run-1"),
+        browser_run_bindings=bindings,
+        browser_page_client=BrowserPageBridgeClient(
+            base_url="http://127.0.0.1:1",
+            token="bridge-token",
+        ),
+    )
+
+    assert registry.definitions() == ()
+    assert permissions == frozenset()

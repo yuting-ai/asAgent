@@ -10,6 +10,11 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+import {
+  findSavedAutomation,
+  isAwaitingAutomationInput,
+  plannerNeedsInputAfterRun
+} from './automation_draft'
 import { TOOL_APPROVAL_BANNER_ACTIONS, type ToolApprovalDecision } from './tool_approval'
 import {
   detectProviderPreset,
@@ -1198,6 +1203,7 @@ export default function App(): React.JSX.Element {
   const [automationDraftMessages, setAutomationDraftMessages] = useState<ConversationMessage[]>([])
   const [automationInlineInput, setAutomationInlineInput] = useState('')
   const [isAutomationCreating, setIsAutomationCreating] = useState(false)
+  const [automationPlannerNeedsInput, setAutomationPlannerNeedsInput] = useState(false)
   const [automationCreateStatus, setAutomationCreateStatus] = useState<string | null>(null)
   const [isAutomationRunningNow, setIsAutomationRunningNow] = useState(false)
   const [automationRunNowMessage, setAutomationRunNowMessage] = useState<string | null>(null)
@@ -1290,6 +1296,7 @@ export default function App(): React.JSX.Element {
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null)
   const browserAgentMessagesEndRef = useRef<HTMLDivElement | null>(null)
   const browserAgentInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const automationComposerInputRef = useRef<HTMLTextAreaElement | null>(null)
   const browserSurfaceRef = useRef<HTMLDivElement | null>(null)
   const browserAddressRef = useRef<HTMLInputElement | null>(null)
   const browserTabsRef = useRef(browserTabs)
@@ -1298,6 +1305,8 @@ export default function App(): React.JSX.Element {
   const selectedBrowserConversationIdRef = useRef(selectedBrowserConversationId)
   const automationDraftConversationIdRef = useRef(automationDraftConversationId)
   const automationDraftRunIdRef = useRef<string | null>(null)
+  const automationDraftTargetIdRef = useRef<string | null>(null)
+  const editingAutomationIdRef = useRef(editingAutomationId)
   const automationUpdatedAtByIdRef = useRef<Map<string, string>>(new Map())
   const automationDraftKnownVersionsRef = useRef<Map<string, string>>(new Map())
   const createNewChatSessionRef = useRef<() => void>(() => undefined)
@@ -1306,6 +1315,7 @@ export default function App(): React.JSX.Element {
   const copyFeedbackTimerRef = useRef<number | null>(null)
   const desktopLayoutRef = useRef(desktopLayout)
   const activeViewRef = useRef(activeView)
+  const appLanguageRef = useRef(appLanguage)
   const resizingColumnRef = useRef<ResizableColumn | null>(null)
   const railWidth = isRailCollapsed ? COLLAPSED_RAIL_WIDTH : desktopLayout.railWidth
   browserTabsRef.current = browserTabs
@@ -1313,6 +1323,8 @@ export default function App(): React.JSX.Element {
   selectedConversationIdRef.current = selectedConversationId
   automationDraftConversationIdRef.current = automationDraftConversationId
   selectedBrowserConversationIdRef.current = selectedBrowserConversationId
+  appLanguageRef.current = appLanguage
+  editingAutomationIdRef.current = editingAutomationId
   const [workspaceTrees, setWorkspaceTrees] = useState<Record<string, WorkspaceFileNode | null>>({})
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<string | null>(null)
@@ -1332,7 +1344,19 @@ export default function App(): React.JSX.Element {
     automationPreviews.find((automation) => automation.id === selectedAutomationId) ??
     automationPreviews[0] ??
     null
+  const lastAutomationDraftMessage = automationDraftMessages.at(-1) ?? null
+  const isAutomationAwaitingInput = isAwaitingAutomationInput(
+    isCreatingNewTask,
+    isAutomationCreating,
+    automationPlannerNeedsInput
+  )
   activeViewRef.current = activeView
+
+  useEffect(() => {
+    if (isAutomationAwaitingInput) {
+      automationComposerInputRef.current?.focus()
+    }
+  }, [isAutomationAwaitingInput, automationDraftMessages.length])
 
   useEffect(() => {
     if (backendStatus !== 'ready') return
@@ -1970,10 +1994,15 @@ export default function App(): React.JSX.Element {
         ])
           .then(([messages, automations]) => {
             setAutomationDraftMessages(messages)
-            const savedAutomation = automations.find(
-              (automation) =>
-                automationDraftKnownVersionsRef.current.get(automation.automation_id) !==
-                automation.updated_at
+            const savedAutomation = findSavedAutomation(
+              automations,
+              automationDraftKnownVersionsRef.current,
+              automationDraftTargetIdRef.current
+            )
+            const plannerNeedsInput = plannerNeedsInputAfterRun(
+              outcome,
+              savedAutomation !== undefined,
+              messages.at(-1)?.role ?? null
             )
             automationUpdatedAtByIdRef.current = new Map(
               automations.map((automation) => [automation.automation_id, automation.updated_at])
@@ -1992,18 +2021,39 @@ export default function App(): React.JSX.Element {
             setAutomationPreviews(values)
             if (savedAutomation !== undefined) {
               const savedId = savedAutomation.automation_id
+              const draftConversationId = automationDraftConversationIdRef.current
+              automationDraftConversationIdRef.current = null
+              automationDraftTargetIdRef.current = null
+              automationDraftKnownVersionsRef.current = new Map()
+              editingAutomationIdRef.current = null
               setSelectedAutomationId(savedId)
+              setIsCreatingNewTask(false)
               setEditingAutomationId(null)
-              setAutomationCreateStatus(`✓ Saved scheduled task: "${savedAutomation.name}"`)
+              setAutomationDraftConversationId(null)
+              setAutomationDraftMessages([])
+              setAutomationPlannerNeedsInput(false)
+              setAutomationInlineInput('')
+              setAutomationCreateStatus(
+                `✓ ${t(appLanguageRef.current, 'savedScheduledTask')}: "${savedAutomation.name}"`
+              )
               automationDraftKnownVersionsRef.current.set(savedId, savedAutomation.updated_at)
+              if (draftConversationId !== null) {
+                void window.desktop
+                  .deleteAutomationDraft(draftConversationId)
+                  .catch(() => undefined)
+              }
               window.setTimeout(() => {
                 setAutomationCreateStatus((curr) => (curr?.startsWith('✓') ? null : curr))
               }, 4000)
             } else {
               setAutomationCreateStatus(null)
+              setAutomationPlannerNeedsInput(plannerNeedsInput)
             }
           })
-          .catch(() => setAutomationLoadError('Scheduled tasks could not be refreshed.'))
+          .catch(() => {
+            setAutomationPlannerNeedsInput(false)
+            setAutomationLoadError('Scheduled tasks could not be refreshed.')
+          })
       }
     })
 
@@ -2011,6 +2061,7 @@ export default function App(): React.JSX.Element {
       if (error.runId === automationDraftRunIdRef.current) {
         automationDraftRunIdRef.current = null
         setIsAutomationCreating(false)
+        setAutomationPlannerNeedsInput(false)
         setAutomationCreateStatus(null)
         setAutomationLoadError('The scheduled-task planning response was interrupted.')
       }
@@ -3397,8 +3448,12 @@ export default function App(): React.JSX.Element {
     const conversationId = automationDraftConversationIdRef.current
     automationDraftConversationIdRef.current = null
     automationDraftRunIdRef.current = null
+    automationDraftTargetIdRef.current = null
+    automationDraftKnownVersionsRef.current = new Map()
+    editingAutomationIdRef.current = null
     setAutomationDraftConversationId(null)
     setAutomationDraftMessages([])
+    setAutomationPlannerNeedsInput(false)
     setAutomationCreateStatus(null)
     setAutomationInlineInput('')
     setEditingAutomationId(null)
@@ -3412,13 +3467,17 @@ export default function App(): React.JSX.Element {
     const content = automationInlineInput.trim()
     if (!content || isAutomationCreating) return
     setIsAutomationCreating(true)
+    setAutomationPlannerNeedsInput(false)
     setAutomationCreateStatus(t(appLanguage, 'planningScheduledTask'))
     setAutomationLoadError(null)
     try {
       let conversationId = automationDraftConversationIdRef.current
       if (conversationId === null) {
+        const targetAutomationId = editingAutomationIdRef.current
+        automationDraftTargetIdRef.current = targetAutomationId
+        automationDraftKnownVersionsRef.current = new Map(automationUpdatedAtByIdRef.current)
         const conversation = await window.desktop.createAutomationDraft(
-          editingAutomationId ?? undefined,
+          targetAutomationId ?? undefined,
           Intl.DateTimeFormat().resolvedOptions().timeZone
         )
         conversationId = conversation.conversation_id
@@ -3432,6 +3491,7 @@ export default function App(): React.JSX.Element {
       setAutomationDraftMessages(await window.desktop.listAutomationDraftMessages(conversationId))
     } catch {
       setIsAutomationCreating(false)
+      setAutomationPlannerNeedsInput(false)
       setAutomationCreateStatus(null)
       setAutomationLoadError('Failed to create or update the scheduled task.')
     }
@@ -3442,9 +3502,18 @@ export default function App(): React.JSX.Element {
     const target = automationPreviews.find((a) => a.id === automationId)
     if (!target) return
     discardAutomationDraft()
+    editingAutomationIdRef.current = automationId
     setEditingAutomationId(automationId)
     setIsCreatingNewTask(true)
     setAutomationInlineInput(`Update "${target.name}": `)
+  }
+
+  function startCreatingAutomation(): void {
+    if (isAutomationCreating) return
+    discardAutomationDraft()
+    editingAutomationIdRef.current = null
+    setEditingAutomationId(null)
+    setIsCreatingNewTask(true)
   }
 
   function runAutomationNow(automationId: string): void {
@@ -5647,10 +5716,8 @@ export default function App(): React.JSX.Element {
                   </div>
                   <button
                     className="automations-new-task-btn"
-                    onClick={() => {
-                      discardAutomationDraft()
-                      setIsCreatingNewTask(true)
-                    }}
+                    disabled={isAutomationCreating}
+                    onClick={startCreatingAutomation}
                     title={t(appLanguage, 'newTask')}
                     type="button"
                   >
@@ -5704,8 +5771,10 @@ export default function App(): React.JSX.Element {
                           ? ' selected'
                           : ''
                       }`}
+                      disabled={isAutomationCreating}
                       key={automation.id}
                       onClick={() => {
+                        discardAutomationDraft()
                         setSelectedAutomationId(automation.id)
                         setIsCreatingNewTask(false)
                       }}
@@ -5778,6 +5847,7 @@ export default function App(): React.JSX.Element {
                       <div className="automation-hero-actions">
                         <button
                           className="automation-action-btn"
+                          disabled={isAutomationCreating}
                           onClick={() => {
                             discardAutomationDraft()
                             setIsCreatingNewTask(false)
@@ -5791,15 +5861,33 @@ export default function App(): React.JSX.Element {
 
                     {/* Big Spacious Composer */}
                     <div className="automation-canvas-composer-card">
+                      {isAutomationAwaitingInput && lastAutomationDraftMessage !== null && (
+                        <div
+                          aria-live="polite"
+                          className="automation-input-needed"
+                          id="automation-planning-question"
+                          role="status"
+                        >
+                          <span aria-hidden="true" className="automation-status-dot" />
+                          <div>
+                            <strong>{t(appLanguage, 'needsYourInput')}</strong>
+                            <p>{lastAutomationDraftMessage.content}</p>
+                          </div>
+                        </div>
+                      )}
                       <form
                         className="automation-canvas-form"
                         onSubmit={(e) => void submitAutomationInline(e)}
                       >
                         <div className="automation-canvas-textarea-wrapper">
                           <textarea
+                            aria-describedby={
+                              isAutomationAwaitingInput ? 'automation-planning-question' : undefined
+                            }
                             aria-label={t(appLanguage, 'describeScheduledTask')}
                             className="automation-canvas-textarea"
                             disabled={isAutomationCreating}
+                            ref={automationComposerInputRef}
                             onChange={(e) => setAutomationInlineInput(e.target.value)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' && !e.shiftKey) {
@@ -5818,7 +5906,9 @@ export default function App(): React.JSX.Element {
                                       automationPreviews.find((a) => a.id === editingAutomationId)
                                         ?.name ?? 'plan'
                                     }"… Type changes to update.`
-                                : t(appLanguage, 'draftPromptHint')
+                                : isAutomationAwaitingInput
+                                  ? t(appLanguage, 'replyToContinuePlanning')
+                                  : t(appLanguage, 'draftPromptHint')
                             }
                             rows={4}
                             value={automationInlineInput}
@@ -6015,7 +6105,7 @@ export default function App(): React.JSX.Element {
                     <p>{t(appLanguage, 'createFirstAutomation')}</p>
                     <button
                       className="settings-button settings-button-primary"
-                      onClick={() => setIsCreatingNewTask(true)}
+                      onClick={startCreatingAutomation}
                       type="button"
                     >
                       {t(appLanguage, 'newTask')}
@@ -6107,6 +6197,12 @@ export default function App(): React.JSX.Element {
                           <span className="automation-create-status-dot" />
                         )}
                         <span>{automationRunNowMessage}</span>
+                      </div>
+                    )}
+
+                    {automationCreateStatus !== null && (
+                      <div aria-live="polite" className="automation-hero-run-banner" role="status">
+                        <span>{automationCreateStatus}</span>
                       </div>
                     )}
 

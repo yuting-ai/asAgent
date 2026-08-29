@@ -255,7 +255,7 @@ async def _registry_for_conversation(
     file_changes: SqliteFileChangeRepository | None = None,
     file_change_snapshots: FileChangeSnapshotStore | None = None,
 ) -> ToolRegistry:
-    """Add this Run's Conversation-scoped file and automation browser tools to an isolated registry."""
+    """Build an isolated Tool Registry for the Run's Conversation kind."""
 
     conversation = await conversations.get(conversation_id)
     if conversation is None:
@@ -278,15 +278,6 @@ async def _registry_for_conversation(
                 now=now,
             )
         )
-        if automation_browser_service is not None:
-            registry.register(AutomationBrowserNavigateTool(automation_browser_service))
-            registry.register(AutomationBrowserSnapshotTool(automation_browser_service))
-            registry.register(AutomationBrowserClickTool(automation_browser_service))
-            registry.register(AutomationBrowserFillTool(automation_browser_service))
-            registry.register(AutomationBrowserSelectTool(automation_browser_service))
-            registry.register(AutomationBrowserWaitTool(automation_browser_service))
-            registry.register(AutomationBrowserReadPageTool(automation_browser_service))
-            registry.register(AutomationBrowserCloseTool(automation_browser_service))
         return registry
 
     status = await workspace_settings.get_status(conversation_id)
@@ -353,14 +344,14 @@ async def _register_browser_tools(
     browser_run_bindings: BrowserRunBindings | None,
     browser_page_client: BrowserPageBridgeClient | None,
 ) -> frozenset[str]:
-    """Register page tools only for a bound Browser or automation-draft Run."""
+    """Register visible page tools only for a bound Browser Conversation Run."""
 
     tab_id = None if browser_run_bindings is None else browser_run_bindings.take(run_id)
     if tab_id is None or browser_page_client is None or browser_run_bindings is None:
         return frozenset()
 
     conversation = await conversations.get(conversation_id)
-    if conversation is None or conversation.kind not in {"browser", "automation_draft"}:
+    if conversation is None or conversation.kind != "browser":
         return frozenset()
 
     registry.register(
@@ -445,15 +436,17 @@ async def _system_prompt_for_conversation(
                 )
         return (
             "You are in a dedicated automation planning conversation. Help the user express "
-            "the task and schedule in natural language. Ask one concise question when a required "
-            "detail is missing. When the name, complete repeatable instructions, frequency, local "
+            "the task and schedule in natural language. Before using any tool, check that the name, "
+            "complete repeatable instructions, frequency, local time, and timezone are all known. "
+            "If any required detail is missing, do not call any tool and do not execute, inspect, "
+            "or test the task. Your entire response must be one concise question that asks only for "
+            "the missing information. When the name, complete repeatable instructions, frequency, local "
             "time, and IANA timezone are unambiguous, call automation.save_draft. The user's "
             f"current local timezone is {automation_drafts.timezone(conversation_id) if automation_drafts else 'UTC'}; "
             "use it unless the user specifies another timezone. For weekly "
             "schedules also determine weekday; for once schedules determine a timezone-aware "
-            "future instant. Do not execute the task itself and do not use unrelated tools. "
-            "A visible automation browser may be available. Use its browser tools when the user "
-            "asks you to inspect or test a webpage while refining the plan. "
+            "future instant. Automation planning never executes, inspects, or tests the task itself. "
+            "After saving, the user can use Run now from the task detail page to test the real task. "
             "New automations are saved as Draft and must be enabled separately. "
             f"{target_context}"
         )
