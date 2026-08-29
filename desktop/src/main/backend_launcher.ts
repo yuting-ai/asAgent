@@ -207,6 +207,7 @@ export type WorkspaceSettingsInput = {
 type BackendLauncherOptions = {
   projectRoot: string
   appHome: string
+  backendExecutable?: string
   spawnBackend?: typeof spawn
   fetchBackend?: typeof fetch
   startupTimeoutMs?: number
@@ -316,6 +317,7 @@ function parseSseEvent(frame: string): RunEvent | null {
 export class BackendLauncher {
   private readonly projectRoot: string
   private readonly appHome: string
+  private readonly backendExecutable: string | undefined
   private readonly spawnBackend: typeof spawn
   private readonly fetchBackend: typeof fetch
   private readonly startupTimeoutMs: number
@@ -338,6 +340,7 @@ export class BackendLauncher {
   constructor(options: BackendLauncherOptions) {
     this.projectRoot = options.projectRoot
     this.appHome = options.appHome
+    this.backendExecutable = options.backendExecutable
     this.spawnBackend = options.spawnBackend ?? spawn
     this.fetchBackend = options.fetchBackend ?? fetch
     this.startupTimeoutMs = options.startupTimeoutMs ?? 5_000
@@ -801,24 +804,34 @@ export class BackendLauncher {
     }
 
     const token = randomBytes(32).toString('base64url')
-    const command = ['run']
+    let child: ChildProcess
 
-    if (this.environmentFile !== undefined) {
-      command.push('--env-file', this.environmentFile)
+    if (this.backendExecutable !== undefined) {
+      const commandArgs = ['serve', '--bootstrap-stdin', '--app-home', this.appHome, '--port', '0']
+      child = this.spawnBackend(this.backendExecutable, commandArgs, {
+        cwd: this.projectRoot,
+        stdio: 'pipe'
+      })
+    } else {
+      const command = ['run']
+
+      if (this.environmentFile !== undefined) {
+        command.push('--env-file', this.environmentFile)
+      }
+
+      command.push('asagent', 'serve', '--bootstrap-stdin')
+
+      if (this.providerProfile !== undefined && this.secretEnvironmentName !== undefined) {
+        command.push('--profile', this.providerProfile, '--secret-env', this.secretEnvironmentName)
+      }
+
+      command.push('--app-home', this.appHome, '--port', '0')
+
+      child = this.spawnBackend('uv', command, {
+        cwd: this.projectRoot,
+        stdio: 'pipe'
+      })
     }
-
-    command.push('asagent', 'serve', '--bootstrap-stdin')
-
-    if (this.providerProfile !== undefined && this.secretEnvironmentName !== undefined) {
-      command.push('--profile', this.providerProfile, '--secret-env', this.secretEnvironmentName)
-    }
-
-    command.push('--app-home', this.appHome, '--port', '0')
-
-    const child = this.spawnBackend('uv', command, {
-      cwd: this.projectRoot,
-      stdio: 'pipe'
-    })
 
     if (child.stdin === null || child.stdout === null) {
       child.kill('SIGTERM')

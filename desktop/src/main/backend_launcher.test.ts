@@ -86,6 +86,34 @@ describe('BackendLauncher', () => {
     )
   })
 
+  it('spawns packaged backend binary directly when backendExecutable is provided', async () => {
+    const child = createChild()
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+
+    const launcher = new BackendLauncher({
+      projectRoot: '/resources',
+      appHome: '/userData',
+      backendExecutable: '/resources/backend/asagent-backend/asagent-backend',
+      spawnBackend,
+      fetchBackend: vi.fn(async () => new Response(null, { status: 200 }))
+    })
+
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+
+    await expect(starting).resolves.toBeUndefined()
+    expect(spawnBackend).toHaveBeenCalledWith(
+      '/resources/backend/asagent-backend/asagent-backend',
+      ['serve', '--bootstrap-stdin', '--app-home', '/userData', '--port', '0'],
+      expect.objectContaining({
+        cwd: '/resources',
+        stdio: 'pipe'
+      })
+    )
+  })
+
   it('passes only real Provider configuration names to the Python Sidecar', async () => {
     const child = createChild()
     const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn

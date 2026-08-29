@@ -43,6 +43,9 @@ const runWatchers = new Map<string, () => void>()
 let dataProcessingMode: 'local' | 'external' = 'local'
 
 function desktopAppHome(): string {
+  if (app.isPackaged) {
+    return app.getPath('userData')
+  }
   return join(app.getAppPath(), '..', '.local-data')
 }
 
@@ -276,14 +279,30 @@ function parseWorkspaceSettings(value: unknown): {
   }
 }
 
-function createDevelopmentBackendLauncher(browserBridge?: {
+function createBackendLauncher(browserBridge?: {
   baseUrl: string
   token: string
 }): BackendLauncher {
+  const appHome = desktopAppHome()
+
+  if (app.isPackaged) {
+    const backendExecutable = join(
+      process.resourcesPath,
+      'backend',
+      'asagent-backend',
+      'asagent-backend'
+    )
+    return new BackendLauncher({
+      backendExecutable,
+      projectRoot: process.resourcesPath,
+      appHome,
+      browserBridge
+    })
+  }
+
   const projectRoot = join(app.getAppPath(), '..')
   const providerProfile = process.env['ASAGENT_DESKTOP_PROFILE']
   const secretEnvironmentName = process.env['ASAGENT_DESKTOP_SECRET_ENV']
-  const appHome = desktopAppHome()
 
   if (providerProfile === undefined && secretEnvironmentName === undefined) {
     dataProcessingMode = 'local'
@@ -512,7 +531,7 @@ app.whenReady().then(async () => {
     return
   }
 
-  backendLauncher = createDevelopmentBackendLauncher(bridgeInfo)
+  backendLauncher = createBackendLauncher(bridgeInfo)
 
   try {
     await backendLauncher.start()
