@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 
 const READY_PREFIX = 'ASAGENT_READY '
+const ANSI_ESCAPE_PATTERN = new RegExp(String.raw`\x1B\[[0-?]*[ -/]*[@-~]`, 'g')
 
 type ServerReady = {
   host: string
@@ -214,6 +215,7 @@ type BackendLauncherOptions = {
   healthTimeoutMs?: number
   healthRetryIntervalMs?: number
   stopTimeoutMs?: number
+  onDiagnosticOutput?: (stream: 'stdout' | 'stderr', output: string) => void
   providerProfile?: string
   secretEnvironmentName?: string
   environmentFile?: string
@@ -221,6 +223,13 @@ type BackendLauncherOptions = {
     baseUrl: string
     token: string
   }
+}
+
+function sanitizeDiagnosticOutput(output: string): string {
+  return output
+    .replace(ANSI_ESCAPE_PATTERN, '')
+    .replace(/("token"\s*:\s*")[^"]+("?)/gi, '$1[REDACTED]$2')
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1[REDACTED]')
 }
 
 function parseReadyRecord(line: string): ServerReady | null {
@@ -324,6 +333,8 @@ export class BackendLauncher {
   private readonly healthTimeoutMs: number
   private readonly healthRetryIntervalMs: number
   private readonly stopTimeoutMs: number
+  private readonly onDiagnosticOutput:
+    ((stream: 'stdout' | 'stderr', output: string) => void) | undefined
   private readonly providerProfile: string | undefined
   private readonly secretEnvironmentName: string | undefined
   private readonly environmentFile: string | undefined
@@ -343,10 +354,11 @@ export class BackendLauncher {
     this.backendExecutable = options.backendExecutable
     this.spawnBackend = options.spawnBackend ?? spawn
     this.fetchBackend = options.fetchBackend ?? fetch
-    this.startupTimeoutMs = options.startupTimeoutMs ?? 5_000
-    this.healthTimeoutMs = options.healthTimeoutMs ?? 5_000
+    this.startupTimeoutMs = options.startupTimeoutMs ?? 15_000
+    this.healthTimeoutMs = options.healthTimeoutMs ?? 15_000
     this.healthRetryIntervalMs = options.healthRetryIntervalMs ?? 100
     this.stopTimeoutMs = options.stopTimeoutMs ?? 3_000
+    this.onDiagnosticOutput = options.onDiagnosticOutput
     this.providerProfile = options.providerProfile
     this.secretEnvironmentName = options.secretEnvironmentName
     this.environmentFile = options.environmentFile
@@ -810,6 +822,7 @@ export class BackendLauncher {
       const commandArgs = ['serve', '--bootstrap-stdin', '--app-home', this.appHome, '--port', '0']
       child = this.spawnBackend(this.backendExecutable, commandArgs, {
         cwd: this.projectRoot,
+        env: process.env,
         stdio: 'pipe'
       })
     } else {
@@ -829,6 +842,7 @@ export class BackendLauncher {
 
       child = this.spawnBackend('uv', command, {
         cwd: this.projectRoot,
+        env: process.env,
         stdio: 'pipe'
       })
     }
@@ -840,7 +854,13 @@ export class BackendLauncher {
 
     this.child = child
     this.token = token
-    child.stderr?.resume()
+    const ready = this.waitForReady(child)
+    child.stdout.on('data', (chunk: Buffer) => {
+      this.emitDiagnosticOutput('stdout', chunk)
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      this.emitDiagnosticOutput('stderr', chunk)
+    })
     const bootstrap: Record<string, unknown> = { token }
     if (this.browserBridge !== undefined) {
       bootstrap['browser_bridge'] = {
@@ -851,12 +871,19 @@ export class BackendLauncher {
     child.stdin.end(`${JSON.stringify(bootstrap)}\n`)
 
     try {
-      const ready = await this.waitForReady(child)
-      await this.waitForHealthy(ready, token)
-      this.ready = ready
+      const readyRecord = await ready
+      await this.waitForHealthy(readyRecord, token)
+      this.ready = readyRecord
     } catch (error) {
       await this.stop()
       throw error
+    }
+  }
+
+  private emitDiagnosticOutput(stream: 'stdout' | 'stderr', chunk: Buffer): void {
+    const output = sanitizeDiagnosticOutput(chunk.toString('utf8'))
+    if (output.length > 0) {
+      this.onDiagnosticOutput?.(stream, output)
     }
   }
 
@@ -935,8 +962,9 @@ export class BackendLauncher {
         fail(error)
       }
 
-      const onExit = (): void => {
-        fail(new Error('Backend stopped before it became ready.'))
+      const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+        const reason = signal !== null ? `signal ${signal}` : `exit code ${code ?? 'unknown'}`
+        fail(new Error(`Backend stopped before it became ready (${reason}).`))
       }
 
       const timeout = setTimeout(() => {

@@ -59,15 +59,18 @@ describe('BackendLauncher', () => {
 
     const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
     const fetchBackend = vi.fn(async () => new Response(null, { status: 200 }))
+    const diagnostics: Array<{ stream: 'stdout' | 'stderr'; output: string }> = []
 
     const launcher = new BackendLauncher({
       projectRoot: '/project',
       appHome: '/project/.local-data',
       spawnBackend,
-      fetchBackend
+      fetchBackend,
+      onDiagnosticOutput: (stream, output) => diagnostics.push({ stream, output })
     })
 
     const starting = launcher.start()
+    child.stderr.write('starting with {"token":"secret-value"}\n')
     child.stdout.write(
       'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
     )
@@ -76,6 +79,11 @@ describe('BackendLauncher', () => {
 
     expect(launcher.isReady).toBe(true)
     expect(bootstrap).toMatch(/^\{"token":"[^"]+"\}\n$/)
+    expect(diagnostics).toContainEqual({
+      stream: 'stderr',
+      output: 'starting with {"token":"[REDACTED]"}\n'
+    })
+    expect(diagnostics.some(({ output }) => output.includes('secret-value'))).toBe(false)
     expect(fetchBackend).toHaveBeenCalledWith(
       'http://127.0.0.1:43123/api/v1/health',
       expect.objectContaining({
@@ -109,6 +117,7 @@ describe('BackendLauncher', () => {
       ['serve', '--bootstrap-stdin', '--app-home', '/userData', '--port', '0'],
       expect.objectContaining({
         cwd: '/resources',
+        env: process.env,
         stdio: 'pipe'
       })
     )

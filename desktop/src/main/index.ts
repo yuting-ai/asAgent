@@ -42,6 +42,10 @@ let isQuitting = false
 const runWatchers = new Map<string, () => void>()
 let dataProcessingMode: 'local' | 'external' = 'local'
 
+if (!app.isPackaged) {
+  app.setPath('userData', join(app.getAppPath(), '..', '.local-data', 'electron-user-data'))
+}
+
 function desktopAppHome(): string {
   if (app.isPackaged) {
     return app.getPath('userData')
@@ -284,6 +288,12 @@ function createBackendLauncher(browserBridge?: {
   token: string
 }): BackendLauncher {
   const appHome = desktopAppHome()
+  const onDiagnosticOutput = app.isPackaged
+    ? undefined
+    : (stream: 'stdout' | 'stderr', output: string): void => {
+        const destination = stream === 'stderr' ? process.stderr : process.stdout
+        destination.write(`[asAgent backend ${stream}] ${output}`)
+      }
 
   if (app.isPackaged) {
     const backendExecutable = join(
@@ -296,7 +306,8 @@ function createBackendLauncher(browserBridge?: {
       backendExecutable,
       projectRoot: process.resourcesPath,
       appHome,
-      browserBridge
+      browserBridge,
+      onDiagnosticOutput
     })
   }
 
@@ -309,7 +320,8 @@ function createBackendLauncher(browserBridge?: {
     return new BackendLauncher({
       projectRoot,
       appHome,
-      browserBridge
+      browserBridge,
+      onDiagnosticOutput
     })
   }
 
@@ -324,7 +336,8 @@ function createBackendLauncher(browserBridge?: {
     providerProfile,
     secretEnvironmentName,
     environmentFile: join(projectRoot, '.env'),
-    browserBridge
+    browserBridge,
+    onDiagnosticOutput
   })
 }
 
