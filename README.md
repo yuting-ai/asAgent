@@ -231,7 +231,8 @@ Local endpoints may omit an API key. External endpoints require a saved key. On 
 > [!NOTE]
 > Currently, prebuilt packages are provided for **Apple Silicon (M-series / arm64)** Mac computers only. Intel-based Macs are not yet supported.
 
-- 📥 **Latest Release**: [Download the latest macOS DMG from GitHub Releases](https://github.com/yuting-ai/asAgent/releases/latest)
+- 📥 **Direct Download**: [Download asAgent-arm64.dmg (Latest)](https://github.com/yuting-ai/asAgent/releases/latest/download/asAgent-arm64.dmg)
+- 📦 **Release Notes & All Releases**: [GitHub Releases](https://github.com/yuting-ai/asAgent/releases/latest)
 - 🔐 **Code Signed & Notarized**: Official releases are signed with an Apple Developer ID and notarized by Apple for seamless installation on macOS.
 
 ---

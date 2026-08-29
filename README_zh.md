@@ -231,7 +231,8 @@ Settings 当前提供以下 OpenAI-compatible Preset。DeepSeek 是端到端开�
 > [!NOTE]
 > 目前预编译安装包仅支持 **Apple 芯片 (Apple Silicon / M 系列芯片，arm64)** 的 Mac 电脑，暂不支持 Intel 芯片。
 
-- 📥 **最新下载**：[从 GitHub Releases 获取最新版 macOS DMG 安装包](https://github.com/yuting-ai/asAgent/releases/latest)
+- 📥 **直接下载**：[点击直接下载最新版 asAgent-arm64.dmg](https://github.com/yuting-ai/asAgent/releases/latest/download/asAgent-arm64.dmg)
+- 📦 **发行说明与历史版本**：[GitHub Releases 页面](https://github.com/yuting-ai/asAgent/releases/latest)
 - 🔐 **官方签名与公证**：所有官方发布版本均已通过 Apple Developer ID 签名并完成苹果官方公证（Notarization），开箱即用，无系统安全拦截。
 
 ---
