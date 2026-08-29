@@ -8,7 +8,7 @@
 
 **English** • [简体中文](README_zh.md)
 
-[▶ Watch the product demo](#demo) • [Quickstart](#quickstart) • [Features](#features) • [Project status](#project-status--roadmap)
+[📥 Download](#download--installation) • [▶ Watch the product demo](#demo) • [Quickstart](#quickstart) • [Features](#features) • [Project status](#project-status--roadmap)
 
 </div>
 
@@ -223,6 +223,16 @@ Local endpoints may omit an API key. External endpoints require a saved key. On 
 - [ ] MCP pagination, notifications, hot refresh, and Streamable HTTP transport
 - [ ] Release-ready Electron packaging with bundled Sidecar, product metadata, signing/notarization, clean-machine testing, and updates
 - [ ] Supported headless/Docker server distribution
+
+---
+
+## Download & Installation
+
+> [!NOTE]
+> Currently, prebuilt packages are provided for **Apple Silicon (M-series / arm64)** Mac computers only. Intel-based Macs are not yet supported.
+
+- 📥 **Latest Release**: [Download the latest macOS DMG from GitHub Releases](https://github.com/yuting-ai/asAgent/releases/latest)
+- 🔐 **Code Signed & Notarized**: Official releases are signed with an Apple Developer ID and notarized by Apple for seamless installation on macOS.
 
 ---
 

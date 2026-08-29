@@ -8,7 +8,7 @@
 
 [English](README.md) • **简体中文**
 
-[▶ 观看产品演示](#演示) • [快速开始](#快速开始) • [核心能力](#核心能力) • [项目状态](#项目状态与路线图)
+[📥 下载安装](#下载与安装-download--installation) • [▶ 观看产品演示](#演示) • [快速开始](#快速开始) • [核心能力](#核心能力) • [项目状态](#项目状态与路线图)
 
 </div>
 
@@ -223,6 +223,16 @@ Settings 当前提供以下 OpenAI-compatible Preset。DeepSeek 是端到端开�
 - [ ] MCP 分页、通知、热刷新和 Streamable HTTP Transport
 - [ ] 包含 Sidecar、正式产品元数据、签名/公证、干净机器测试和更新能力的可发布 Electron 安装包
 - [ ] 受支持的无头/Docker Server 发行方式
+
+---
+
+## 下载与安装 (Download & Installation)
+
+> [!NOTE]
+> 目前预编译安装包仅支持 **Apple 芯片 (Apple Silicon / M 系列芯片，arm64)** 的 Mac 电脑，暂不支持 Intel 芯片。
+
+- 📥 **最新下载**：[从 GitHub Releases 获取最新版 macOS DMG 安装包](https://github.com/yuting-ai/asAgent/releases/latest)
+- 🔐 **官方签名与公证**：所有官方发布版本均已通过 Apple Developer ID 签名并完成苹果官方公证（Notarization），开箱即用，无系统安全拦截。
 
 ---
 
