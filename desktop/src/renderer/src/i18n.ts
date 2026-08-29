@@ -199,6 +199,19 @@ export const TRANSLATIONS = {
     snapshotUnitSingle: 'snapshot',
     snapshotUnit: 'snapshots',
 
+    aboutCategory: 'About & Updates',
+    aboutTitle: 'About asAgent',
+    aboutCopy: 'A desktop AI agent that turns conversations into visible, controllable actions.',
+    currentVersionLabel: 'Current version',
+    checkForUpdates: 'Check for updates',
+    checkingForUpdates: 'Checking for updates…',
+    upToDate: "You're up to date",
+    updateAvailable: 'Update available',
+    newVersionFound: 'A new version of asAgent is available.',
+    downloadUpdate: 'Download update',
+    releaseNotesTitle: 'Release notes',
+    checkUpdateFailed: 'Could not check for updates. Check your connection and try again.',
+
     // Scheduled tasks View
     automationsTitle: 'Scheduled tasks',
     scheduledTasksSubtitle: 'Plan a scheduled task through a private, multi-turn conversation.',
@@ -485,6 +498,19 @@ export const TRANSLATIONS = {
     retentionNever: '永久保留（不自动清理）',
     snapshotUnitSingle: '个快照',
     snapshotUnit: '个快照',
+
+    aboutCategory: '关于与更新',
+    aboutTitle: '关于 asAgent',
+    aboutCopy: '一个将对话转化为可见、可控行动的桌面 AI Agent。',
+    currentVersionLabel: '当前版本',
+    checkForUpdates: '检查更新',
+    checkingForUpdates: '正在检查更新…',
+    upToDate: '已是最新版本',
+    updateAvailable: '发现新版本',
+    newVersionFound: 'asAgent 发布了新版本。',
+    downloadUpdate: '前往下载更新',
+    releaseNotesTitle: '更新日志',
+    checkUpdateFailed: '无法检查更新，请检查网络连接后重试。',
 
     // Scheduled tasks View
     automationsTitle: '定时任务',

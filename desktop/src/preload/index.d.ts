@@ -217,6 +217,15 @@ interface FilePreviewResult {
   isBinary: boolean
 }
 
+interface UpdateCheckResult {
+  currentVersion: string
+  latestVersion: string
+  hasUpdate: boolean
+  releaseUrl: string
+  releaseNotes: string
+  publishedAt: string
+}
+
 interface DesktopBridge {
   getAppInfo(): Promise<DesktopAppInfo>
   showBrowser(
@@ -229,6 +238,8 @@ interface DesktopBridge {
   controlBrowser(tabId: string, action: 'back' | 'forward' | 'reload' | 'home'): Promise<void>
   getBrowserSession(): Promise<BrowserSessionSnapshot>
   setBrowserTabConversation(tabId: string, conversationId: string | null): Promise<void>
+  getAppVersion(): Promise<string>
+  checkForUpdates(): Promise<UpdateCheckResult>
   openExternalLink(url: string): Promise<void>
   copyText(content: string): Promise<void>
   getBackendStatus(): Promise<{ status: 'ready' | 'unavailable' }>

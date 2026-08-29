@@ -213,12 +213,24 @@ type FilePreviewResult = {
   isBinary: boolean
 }
 
+type UpdateCheckResult = {
+  currentVersion: string
+  latestVersion: string
+  hasUpdate: boolean
+  releaseUrl: string
+  releaseNotes: string
+  publishedAt: string
+}
+
 const desktopBridge = {
   getAppInfo: (): Promise<{
     appName: string
     version: string
     dataProcessingMode: 'local' | 'external'
   }> => ipcRenderer.invoke('desktop:get-app-info'),
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke('desktop:get-app-version'),
+  checkForUpdates: (): Promise<UpdateCheckResult> =>
+    ipcRenderer.invoke('desktop:check-for-updates'),
   showBrowser: (
     tabId: string,
     bounds: { x: number; y: number; width: number; height: number }

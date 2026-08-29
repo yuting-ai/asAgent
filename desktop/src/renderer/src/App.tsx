@@ -208,6 +208,15 @@ type WorkspaceFileNode = {
   children?: WorkspaceFileNode[]
 }
 
+type UpdateCheckResult = {
+  currentVersion: string
+  latestVersion: string
+  hasUpdate: boolean
+  releaseUrl: string
+  releaseNotes: string
+  publishedAt: string
+}
+
 type FilePreviewResult = {
   path: string
   name: string
@@ -1289,6 +1298,10 @@ export default function App(): React.JSX.Element {
   const [browserSearchEngine, setBrowserSearchEngine] =
     useState<BrowserSearchEngine>(getStoredSearchEngine)
   const [appLanguage, setAppLanguage] = useState<AppLanguage>(getStoredAppLanguage)
+  const [appVersion, setAppVersion] = useState<string>('')
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null)
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false)
+  const [updateCheckError, setUpdateCheckError] = useState<string | null>(null)
   const [isRailCollapsed, setIsRailCollapsed] = useState(false)
   const [resizingColumn, setResizingColumn] = useState<ResizableColumn | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
@@ -1828,6 +1841,44 @@ export default function App(): React.JSX.Element {
     void loadStorageSettings()
     return () => {
       cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    void window.desktop.getAppVersion().then((version) => {
+      setAppVersion(version)
+    })
+
+    const LAST_CHECK_KEY = 'asagent:last_update_check'
+    const CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000
+
+    async function runSilentCheck(): Promise<void> {
+      const now = Date.now()
+      const lastCheck = Number(window.localStorage.getItem(LAST_CHECK_KEY) || 0)
+      if (now - lastCheck < CHECK_INTERVAL_MS) {
+        return
+      }
+
+      try {
+        const result = await window.desktop.checkForUpdates()
+        setUpdateResult(result)
+        window.localStorage.setItem(LAST_CHECK_KEY, String(now))
+      } catch {
+        // Silent background check errors are ignored
+      }
+    }
+
+    const timer = setTimeout(() => {
+      void runSilentCheck()
+    }, 3000)
+
+    const interval = setInterval(() => {
+      void runSilentCheck()
+    }, CHECK_INTERVAL_MS)
+
+    return () => {
+      clearTimeout(timer)
+      clearInterval(interval)
     }
   }, [])
 
@@ -3186,6 +3237,23 @@ export default function App(): React.JSX.Element {
     }
   }
 
+  async function handleManualCheckForUpdates(): Promise<void> {
+    if (isCheckingUpdate) {
+      return
+    }
+
+    setIsCheckingUpdate(true)
+    setUpdateCheckError(null)
+    try {
+      const result = await window.desktop.checkForUpdates()
+      setUpdateResult(result)
+    } catch {
+      setUpdateCheckError(t(appLanguage, 'checkUpdateFailed'))
+    } finally {
+      setIsCheckingUpdate(false)
+    }
+  }
+
   async function handleAddWorkspacePath(): Promise<void> {
     if (isWorkspaceBusy || workspaceSettings === null || selectedConversationId === null) {
       return
@@ -4168,6 +4236,9 @@ export default function App(): React.JSX.Element {
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
               <span className="rail-item-label">{t(appLanguage, 'settings')}</span>
+              {updateResult?.hasUpdate ? (
+                <span className="rail-update-badge" title={t(appLanguage, 'updateAvailable')} />
+              ) : null}
             </button>
             <button
               aria-controls="primary-sidebar"
@@ -6970,6 +7041,92 @@ export default function App(): React.JSX.Element {
                 {storageActionError !== null ? (
                   <p className="settings-section-error">{storageActionError}</p>
                 ) : null}
+              </section>
+
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div>
+                    <div className="settings-section-eyebrow">
+                      {t(appLanguage, 'aboutCategory')}
+                    </div>
+                    <div className="settings-section-title">{t(appLanguage, 'aboutTitle')}</div>
+                    <p className="settings-section-copy">{t(appLanguage, 'aboutCopy')}</p>
+                  </div>
+                </div>
+
+                <div className="settings-key-form">
+                  <div className="storage-usage-row">
+                    <span className="settings-field-label">
+                      {t(appLanguage, 'currentVersionLabel')}
+                    </span>
+                    <span
+                      className="storage-usage-value"
+                      style={{ fontFamily: 'var(--font-mono, monospace)' }}
+                    >
+                      v{appVersion || '0.0.1'}
+                    </span>
+                  </div>
+
+                  <div className="settings-card-actions" style={{ marginTop: '14px' }}>
+                    <button
+                      className="settings-button settings-button-secondary"
+                      disabled={isCheckingUpdate}
+                      onClick={() => {
+                        void handleManualCheckForUpdates()
+                      }}
+                      type="button"
+                    >
+                      {isCheckingUpdate
+                        ? t(appLanguage, 'checkingForUpdates')
+                        : t(appLanguage, 'checkForUpdates')}
+                    </button>
+                  </div>
+
+                  {updateResult !== null && updateResult.hasUpdate ? (
+                    <div className="update-available-banner">
+                      <div className="update-available-header">
+                        <span className="update-available-badge">
+                          {t(appLanguage, 'updateAvailable')}: {updateResult.latestVersion}
+                        </span>
+                        <p className="update-available-copy">{t(appLanguage, 'newVersionFound')}</p>
+                      </div>
+                      {updateResult.releaseNotes ? (
+                        <div className="update-release-notes">
+                          <div className="update-notes-title">
+                            {t(appLanguage, 'releaseNotesTitle')}
+                          </div>
+                          <pre className="update-notes-content">{updateResult.releaseNotes}</pre>
+                        </div>
+                      ) : null}
+                      <div style={{ marginTop: '12px' }}>
+                        <button
+                          className="settings-button settings-button-primary"
+                          onClick={() => {
+                            void window.desktop.openExternalLink(updateResult.releaseUrl)
+                          }}
+                          type="button"
+                        >
+                          {t(appLanguage, 'downloadUpdate')}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {updateResult !== null && !updateResult.hasUpdate && !isCheckingUpdate ? (
+                    <p
+                      className="settings-section-status"
+                      style={{ color: 'var(--success, #2e7d32)', marginTop: '10px' }}
+                    >
+                      ✓ {t(appLanguage, 'upToDate')} (v{appVersion || '0.0.1'})
+                    </p>
+                  ) : null}
+
+                  {updateCheckError !== null ? (
+                    <p className="settings-section-error" style={{ marginTop: '10px' }}>
+                      {updateCheckError}
+                    </p>
+                  ) : null}
+                </div>
               </section>
             </div>
           </section>

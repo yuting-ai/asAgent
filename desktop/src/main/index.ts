@@ -33,6 +33,7 @@ import {
 } from './browser_view'
 import { listWorkspaceTree, readFilePreview } from './workspace_tree'
 import { parseExternalWebUrl } from './external_url'
+import { UpdateChecker } from './update_checker'
 
 let backendLauncher: BackendLauncher | undefined
 let visibleBrowser: VisibleBrowser | undefined
@@ -690,6 +691,27 @@ app.whenReady().then(async () => {
       scheduleBrowserSessionSave()
     }
   )
+  ipcMain.handle('desktop:get-app-version', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    return app.getVersion()
+  })
+
+  ipcMain.handle('desktop:check-for-updates', async (event) => {
+    const frame = event.senderFrame
+    if (frame === null) {
+      throw new Error('Untrusted renderer IPC request.')
+    }
+
+    assertTrustedRenderer(frame.url)
+    const updateChecker = new UpdateChecker({ currentVersion: app.getVersion() })
+    return updateChecker.checkForUpdates()
+  })
+
   ipcMain.handle('desktop:open-external-link', (event, url: unknown) => {
     const frame = event.senderFrame
     if (frame === null) {
