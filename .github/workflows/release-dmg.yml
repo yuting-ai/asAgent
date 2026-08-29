@@ -2,8 +2,6 @@ name: Build & Sign macOS DMG
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
   workflow_dispatch:
