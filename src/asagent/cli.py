@@ -516,6 +516,7 @@ def _normalize_subprocess_path(
     current_path: str | None,
     *,
     platform_name: str | None = None,
+    user_home: Path | None = None,
 ) -> str:
     current = platform_name if platform_name is not None else sys.platform
     parts: list[str] = [
@@ -525,13 +526,14 @@ def _normalize_subprocess_path(
 
     if current == "darwin":
         tool_dirs = [d for d in _MACOS_STANDARD_TOOL_DIRS if d not in seen]
-        user_home = Path.home()
+        home = user_home if user_home is not None else Path.home()
         user_dirs = [
-            str(user_home / sub)
+            str(home / sub)
             for sub in (".cargo/bin", ".local/bin")
-            if str(user_home / sub) not in seen
+            if str(home / sub) not in seen
         ]
-        prepend_dirs = tool_dirs + user_dirs
+        nvm_node_dirs = _nvm_node_bin_directories(home, seen=seen)
+        prepend_dirs = tool_dirs + nvm_node_dirs + user_dirs
         parts = prepend_dirs + parts
         seen.update(prepend_dirs)
 
@@ -543,6 +545,41 @@ def _normalize_subprocess_path(
     return os.pathsep.join(parts)
 
 
+def _nvm_node_bin_directories(
+    user_home: Path,
+    *,
+    seen: set[str],
+) -> list[str]:
+    """Return installed NVM Node bin directories, newest version first."""
+
+    versions_dir = user_home / ".nvm" / "versions" / "node"
+    if any(
+        Path(existing).name == "bin" and Path(existing).parent.parent == versions_dir
+        for existing in seen
+    ):
+        return []
+
+    try:
+        version_dirs = tuple(versions_dir.iterdir())
+    except OSError:
+        return []
+
+    candidates: list[tuple[tuple[int, int, int], str]] = []
+    for version_dir in version_dirs:
+        version = version_dir.name.removeprefix("v").split(".")
+        if len(version) != 3 or any(not part.isdigit() for part in version):
+            continue
+
+        bin_dir = str(version_dir / "bin")
+        if bin_dir in seen or not Path(bin_dir).is_dir():
+            continue
+        version_key = (int(version[0]), int(version[1]), int(version[2]))
+        candidates.append((version_key, bin_dir))
+
+    candidates.sort(reverse=True)
+    return [bin_dir for _, bin_dir in candidates]
+
+
 def _mcp_subprocess_environment(
     environment: Mapping[str, str],
     *,
@@ -550,16 +587,21 @@ def _mcp_subprocess_environment(
 ) -> dict[str, str]:
     """Return the intentionally small environment inherited by MCP children."""
 
+    home_value = environment.get("HOME") or str(Path.home())
+    user_home = Path(home_value)
     env: dict[str, str] = {}
     for name in _MCP_SUBPROCESS_ENVIRONMENT_NAMES:
         value = environment.get(name)
         if name == "PATH":
-            env["PATH"] = _normalize_subprocess_path(value, platform_name=platform_name)
+            env["PATH"] = _normalize_subprocess_path(
+                value,
+                platform_name=platform_name,
+                user_home=user_home,
+            )
+        elif name == "HOME":
+            env["HOME"] = home_value
         elif value is not None:
             env[name] = value
-
-    if "HOME" not in env:
-        env["HOME"] = str(Path.home())
 
     return env
 

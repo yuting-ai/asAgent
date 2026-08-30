@@ -191,6 +191,54 @@ def test_normalize_subprocess_path_augments_macos_gui_path() -> None:
     assert "HOME" in env
 
 
+def test_normalize_subprocess_path_discovers_nvm_node_versions(
+    tmp_path: Path,
+) -> None:
+    from asagent.cli import _mcp_subprocess_environment
+
+    older_bin = tmp_path / ".nvm" / "versions" / "node" / "v20.12.2" / "bin"
+    newer_bin = tmp_path / ".nvm" / "versions" / "node" / "v24.11.1" / "bin"
+    invalid_bin = tmp_path / ".nvm" / "versions" / "node" / "latest" / "bin"
+    older_bin.mkdir(parents=True)
+    newer_bin.mkdir(parents=True)
+    invalid_bin.mkdir(parents=True)
+
+    env = _mcp_subprocess_environment(
+        {
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "HOME": str(tmp_path),
+        },
+        platform_name="darwin",
+    )
+
+    path_parts = env["PATH"].split(":")
+    assert str(newer_bin) in path_parts
+    assert str(older_bin) in path_parts
+    assert path_parts.index(str(newer_bin)) < path_parts.index(str(older_bin))
+    assert str(invalid_bin) not in path_parts
+
+
+def test_normalize_subprocess_path_preserves_active_nvm_version(tmp_path: Path) -> None:
+    from asagent.cli import _mcp_subprocess_environment
+
+    active_bin = tmp_path / ".nvm" / "versions" / "node" / "v20.12.2" / "bin"
+    newer_bin = tmp_path / ".nvm" / "versions" / "node" / "v24.11.1" / "bin"
+    active_bin.mkdir(parents=True)
+    newer_bin.mkdir(parents=True)
+
+    env = _mcp_subprocess_environment(
+        {
+            "PATH": f"{active_bin}:/usr/bin:/bin",
+            "HOME": str(tmp_path),
+        },
+        platform_name="darwin",
+    )
+
+    path_parts = env["PATH"].split(":")
+    assert str(active_bin) in path_parts
+    assert str(newer_bin) not in path_parts
+
+
 def test_normalize_subprocess_path_preserves_linux_path() -> None:
     from asagent.cli import _normalize_subprocess_path
 
