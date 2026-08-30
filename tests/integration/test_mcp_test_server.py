@@ -16,11 +16,12 @@ _REQUEST_METADATA: Final = {
 }
 
 
-async def _start_server() -> asyncio.subprocess.Process:
+async def _start_server(*args: str) -> asyncio.subprocess.Process:
     return await asyncio.create_subprocess_exec(
         sys.executable,
         "-u",
         str(_SERVER_PATH),
+        *args,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -211,6 +212,95 @@ async def test_mcp_test_server_keeps_protocol_and_tool_errors_distinct() -> None
             "error": {
                 "code": -32602,
                 "message": "Unknown tool: missing",
+            },
+        }
+    finally:
+        await _stop(process)
+
+
+async def test_modern_server_emits_subscribed_tool_list_change() -> None:
+    process = await _start_server("--emit-tool-list-change")
+    try:
+        await _send(
+            process,
+            request_id=1,
+            method="server/discover",
+            params={},
+        )
+        discovered = await _read_response(process)
+        result = discovered.get("result")
+        assert isinstance(result, dict)
+        assert result.get("capabilities") == {
+            "tools": {"listChanged": True},
+        }
+
+        await _send(
+            process,
+            request_id=2,
+            method="subscriptions/listen",
+            params={
+                "notifications": {
+                    "toolsListChanged": True,
+                },
+            },
+        )
+        acknowledged = await _read_response(process)
+        changed = await _read_response(process)
+        completed = await _read_response(process)
+
+        assert acknowledged == {
+            "jsonrpc": "2.0",
+            "method": "notifications/subscriptions/acknowledged",
+            "params": {
+                "notifications": {"toolsListChanged": True},
+                "_meta": {
+                    "io.modelcontextprotocol/subscriptionId": 2,
+                },
+            },
+        }
+        assert changed == {
+            "jsonrpc": "2.0",
+            "method": "notifications/tools/list_changed",
+            "params": {
+                "_meta": {
+                    "io.modelcontextprotocol/subscriptionId": 2,
+                },
+            },
+        }
+        assert completed == {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {
+                "resultType": "complete",
+                "_meta": {
+                    "io.modelcontextprotocol/subscriptionId": 2,
+                },
+            },
+        }
+    finally:
+        await _stop(process)
+
+
+async def test_modern_server_rejects_listen_without_list_changed_capability() -> None:
+    process = await _start_server()
+    try:
+        await _send(
+            process,
+            request_id=1,
+            method="subscriptions/listen",
+            params={
+                "notifications": {
+                    "toolsListChanged": True,
+                },
+            },
+        )
+        response = await _read_response(process)
+        assert response == {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {
+                "code": -32602,
+                "message": "subscriptions/listen is not supported without --emit-tool-list-change",
             },
         }
     finally:

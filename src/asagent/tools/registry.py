@@ -22,6 +22,9 @@ class ToolRegistry:
     def definitions(self) -> tuple[ToolDefinition, ...]:
         return tuple(tool.definition for tool in self._tools.values())
 
+    def replace_with(self, other: "ToolRegistry") -> None:
+        self._tools = dict(other._tools)
+
     def copy(self) -> "ToolRegistry":
         """Return a new registry containing the same tool instances.
 

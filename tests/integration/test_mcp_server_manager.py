@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -7,6 +8,8 @@ import pytest
 
 from asagent.core.connection import CredentialStore
 from asagent.core.ids import ConnectionId
+from asagent.core.tool import Tool
+from asagent.core.tool_definition import ToolDefinition
 from asagent.tools.mcp import McpProtocolError
 from asagent.tools.mcp_config import McpServerConfigs
 from asagent.tools.mcp_manager import McpServerCredentialError, McpServerManager
@@ -304,5 +307,205 @@ async def test_manager_rejects_missing_configured_connection_credential(
             await manager.start()
 
         assert registry.definitions() == ()
+    finally:
+        await manager.aclose()
+
+
+class _StubBuiltinTool:
+    def __init__(self, tool_id: str) -> None:
+        self._definition = ToolDefinition(
+            tool_id=tool_id,
+            display_name=tool_id,
+            description="Builtin stub tool.",
+            input_schema={"type": "object"},
+            risk_level="low",
+            required_permissions=frozenset(),
+            requires_approval=False,
+            timeout_seconds=1.0,
+        )
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._definition
+
+    async def execute(self, arguments: object) -> str:
+        return "builtin-stub"
+
+
+@pytest.mark.asyncio
+async def test_manager_atomic_recomposition_and_dynamic_refresh(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    builtin_tool: Tool = _StubBuiltinTool("builtin.echo")
+    registry.register(builtin_tool)
+
+    manager = McpServerManager(
+        configs=_configs(
+            working_directory=tmp_path,
+            servers={
+                "static-server": _SERVER_COMMAND,
+                "dynamic-server": (
+                    *_SERVER_COMMAND,
+                    "--emit-tool-list-change",
+                ),
+            },
+        ),
+        registry=registry,
+    )
+
+    try:
+        # Pre-capture run snapshot before dynamic refresh propagates
+        await manager.start()
+
+        # Immediately after startup, wait briefly or poll for the dynamic update
+        # Give enough time for notification + list_tools to recompose
+        for _ in range(50):
+            tool_ids = {d.tool_id for d in registry.definitions()}
+            if any("dynamic-server:multiply" in tid for tid in tool_ids):
+                break
+            await asyncio.sleep(0.05)
+
+        tool_ids = {d.tool_id for d in registry.definitions()}
+        assert "builtin.echo" in tool_ids
+        assert any("static-server:add:" in tid for tid in tool_ids)
+        assert any("dynamic-server:add:" in tid for tid in tool_ids)
+        assert any("dynamic-server:multiply:" in tid for tid in tool_ids)
+
+        # Snapshot of new Run
+        new_run_snapshot = registry.copy()
+        new_run_tool_ids = {d.tool_id for d in new_run_snapshot.definitions()}
+        assert new_run_tool_ids == tool_ids
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_manager_preserves_previous_run_snapshots_during_and_after_refresh(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    builtin_tool: Tool = _StubBuiltinTool("builtin.calculator")
+    registry.register(builtin_tool)
+
+    manager = McpServerManager(
+        configs=_configs(
+            working_directory=tmp_path,
+            servers={
+                "static-server": _SERVER_COMMAND,
+                "dynamic-server": (
+                    *_SERVER_COMMAND,
+                    "--emit-tool-list-change",
+                ),
+            },
+        ),
+        registry=registry,
+    )
+
+    try:
+        await manager.start()
+
+        # Run 1 snapshot contains initial MCP tool "add"
+        run1_registry = registry.copy()
+        run1_tool_ids = {d.tool_id for d in run1_registry.definitions()}
+        assert "builtin.calculator" in run1_tool_ids
+        assert any("static-server:add:" in tid for tid in run1_tool_ids)
+        assert any("dynamic-server:add:" in tid for tid in run1_tool_ids)
+        assert not any("dynamic-server:multiply:" in tid for tid in run1_tool_ids)
+
+        # Wait for dynamic refresh to propagate
+        for _ in range(50):
+            tool_ids = {d.tool_id for d in registry.definitions()}
+            if any("dynamic-server:multiply" in tid for tid in tool_ids):
+                break
+            await asyncio.sleep(0.05)
+
+        # Verify run1_registry was NEVER mutated by the refresh and still only has "add"
+        run1_tool_ids_after_refresh = {d.tool_id for d in run1_registry.definitions()}
+        assert run1_tool_ids_after_refresh == run1_tool_ids
+        assert not any(
+            "dynamic-server:multiply:" in tid for tid in run1_tool_ids_after_refresh
+        )
+
+        # Verify a new Run snapshot created after refresh sees "multiply"
+        run2_registry = registry.copy()
+        run2_tool_ids = {d.tool_id for d in run2_registry.definitions()}
+        assert "builtin.calculator" in run2_tool_ids
+        assert any("static-server:add:" in tid for tid in run2_tool_ids)
+        assert any("dynamic-server:add:" in tid for tid in run2_tool_ids)
+        assert any("dynamic-server:multiply:" in tid for tid in run2_tool_ids)
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_manager_rolls_back_base_registry_when_later_server_fails(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    builtin_tool: Tool = _StubBuiltinTool("builtin.echo")
+    registry.register(builtin_tool)
+
+    manager = McpServerManager(
+        configs=_configs(
+            working_directory=tmp_path,
+            servers={
+                "dynamic-server": (
+                    *_SERVER_COMMAND,
+                    "--emit-tool-list-change",
+                ),
+                "failing-server": _EXITING_SERVER_COMMAND,
+            },
+        ),
+        registry=registry,
+    )
+
+    try:
+        with pytest.raises(McpProtocolError, match="closed stdout"):
+            await manager.start()
+
+        # Target registry must have rolled back cleanly to base registry without partial MCP tools
+        tool_ids = tuple(d.tool_id for d in registry.definitions())
+        assert tool_ids == ("builtin.echo",)
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_session_and_manager_keep_last_valid_tools_if_refresh_fails(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    builtin_tool: Tool = _StubBuiltinTool("builtin.echo")
+    registry.register(builtin_tool)
+
+    manager = McpServerManager(
+        configs=_configs(
+            working_directory=tmp_path,
+            servers={
+                "flaky-dynamic-server": (
+                    *_SERVER_COMMAND,
+                    "--emit-tool-list-change",
+                    "--fail-tool-list-on-refresh",
+                ),
+            },
+        ),
+        registry=registry,
+    )
+
+    try:
+        await manager.start()
+
+        # Initial startup succeeded with "add" tool
+        tool_ids = {d.tool_id for d in registry.definitions()}
+        assert "builtin.echo" in tool_ids
+        assert any("flaky-dynamic-server:add:" in tid for tid in tool_ids)
+
+        # Give time for failed refresh to run and be safely caught/discarded
+        await asyncio.sleep(0.1)
+
+        # Still contains previous valid tools intact
+        tool_ids_after = {d.tool_id for d in registry.definitions()}
+        assert tool_ids_after == tool_ids
     finally:
         await manager.aclose()

@@ -67,3 +67,26 @@ def test_copy_keeps_tools_without_sharing_registry_mutations() -> None:
     assert copied.get("builtin.echo") is original
     assert copied.get("builtin.calculator") is copied_only
     assert registry.definitions() == (original.definition,)
+
+
+def test_replace_with_updates_tools_atomically() -> None:
+    original: Tool = StubTool("builtin.echo")
+    replacement: Tool = StubTool("builtin.calculator")
+
+    target = ToolRegistry()
+    target.register(original)
+    old_copy = target.copy()
+
+    source = ToolRegistry()
+    source.register(replacement)
+
+    target.replace_with(source)
+    new_copy = target.copy()
+
+    assert tuple(tool.tool_id for tool in old_copy.definitions()) == ("builtin.echo",)
+    assert tuple(tool.tool_id for tool in target.definitions()) == (
+        "builtin.calculator",
+    )
+    assert tuple(tool.tool_id for tool in new_copy.definitions()) == (
+        "builtin.calculator",
+    )

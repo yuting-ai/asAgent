@@ -1,7 +1,7 @@
 import asyncio
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -15,6 +15,7 @@ _LEGACY_PROTOCOL_VERSION: Final = "2025-11-25"
 _DEFAULT_REQUEST_TIMEOUT_SECONDS: Final = 5.0
 _CLOSE_TIMEOUT_SECONDS: Final = 2.0
 _MCP_TOOL_TIMEOUT_SECONDS: Final = 10.0
+_MAX_TOOL_LIST_PAGES: Final = 100
 
 
 class McpClientError(RuntimeError):
@@ -41,6 +42,7 @@ class McpServerInfo:
     name: str
     version: str
     supports_tools: bool
+    supports_tool_list_changed: bool
     instructions: str | None
 
 
@@ -169,8 +171,18 @@ class McpClient:
         self._process: asyncio.subprocess.Process | None = None
         self._server_info: McpServerInfo | None = None
         self._next_request_id = 1
-        self._request_lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()
         self._uses_legacy_protocol = False
+
+        self._pending_requests: dict[int, asyncio.Future[Mapping[str, object]]] = {}
+        self._reader_task: asyncio.Task[None] | None = None
+        self._transport_error: Exception | None = None
+
+        self._subscription_id: int | None = None
+        self._subscription_ack_future: asyncio.Future[None] | None = None
+        self._subscription_queue: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
+        self._subscription_worker_task: asyncio.Task[None] | None = None
+        self._subscription_listen_task: asyncio.Task[None] | None = None
 
     async def start(self) -> McpServerInfo:
         if self._process is not None:
@@ -213,24 +225,154 @@ class McpClient:
 
         return self._server_info
 
+    async def start_tool_list_subscription(
+        self,
+        on_tools_changed: Callable[[], Awaitable[None]],
+    ) -> None:
+        server_info = self._require_server_info()
+        if not server_info.supports_tool_list_changed:
+            return
+
+        if self._subscription_worker_task is not None:
+            raise RuntimeError("Tool list subscription is already started")
+
+        request_id = self._next_request_id
+        self._next_request_id += 1
+        self._subscription_id = request_id
+        ack_future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._subscription_ack_future = ack_future
+
+        async def _worker() -> None:
+            while True:
+                try:
+                    await self._subscription_queue.get()
+                except asyncio.CancelledError:
+                    break
+                try:
+                    await on_tools_changed()
+                except Exception:
+                    pass
+                finally:
+                    self._subscription_queue.task_done()
+
+                if self._process is None:
+                    break
+
+        self._subscription_worker_task = asyncio.create_task(_worker())
+
+        listen_future: asyncio.Future[Mapping[str, object]] = (
+            asyncio.get_running_loop().create_future()
+        )
+        self._pending_requests[request_id] = listen_future
+
+        params = {
+            "notifications": {"toolsListChanged": True},
+            "_meta": self._request_metadata(),
+        }
+        payload = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "subscriptions/listen",
+            "params": params,
+        }
+
+        try:
+            async with self._write_lock:
+                process = self._require_process()
+                if process.stdin is None:
+                    raise McpProtocolError("MCP server stdin is unavailable")
+                process.stdin.write(
+                    json.dumps(payload, separators=(",", ":")).encode() + b"\n",
+                )
+                await process.stdin.drain()
+
+            await asyncio.wait_for(
+                ack_future,
+                timeout=self._request_timeout_seconds,
+            )
+        except TimeoutError as error:
+            await self.aclose()
+            raise McpRequestTimeoutError(
+                "Subscription acknowledgment timed out"
+            ) from error
+        except BaseException:
+            await self.aclose()
+            raise
+        finally:
+            # A failed ack has no listen-completion task to consume the other
+            # Future's error. Retrieving it does not change what await raises.
+            for future in (ack_future, listen_future):
+                if future.done() and not future.cancelled():
+                    future.exception()
+
+        async def _wait_for_listen_completion() -> None:
+            try:
+                response = await listen_future
+                result = _parse_response_payload(response)
+                if result.get("resultType") != "complete":
+                    raise McpProtocolError("subscriptions/listen did not complete")
+                # Only a normal final response drains changes. On cancellation,
+                # the worker may itself be waiting for this task in aclose().
+                await self._subscription_queue.join()
+            except Exception:
+                pass
+            finally:
+                worker = self._subscription_worker_task
+                self._subscription_worker_task = None
+                self._subscription_id = None
+                self._subscription_ack_future = None
+                self._discard_pending_tool_changes()
+                await _cancel_and_wait(worker)
+
+        self._subscription_listen_task = asyncio.create_task(
+            _wait_for_listen_completion()
+        )
+
     async def list_tools(self) -> tuple[McpToolDescription, ...]:
         server_info = self._require_server_info()
         if not server_info.supports_tools:
             raise McpProtocolError("MCP server does not declare tools capability")
 
-        result = await self._request(
-            "tools/list",
-            {},
-            include_metadata=not self._uses_legacy_protocol,
-        )
-        if not self._uses_legacy_protocol and result.get("resultType") != "complete":
-            raise McpProtocolError("tools/list did not complete")
+        tools: list[McpToolDescription] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
 
-        raw_tools = result.get("tools")
-        if not isinstance(raw_tools, list):
-            raise McpProtocolError("tools/list response has invalid tools")
+        for _ in range(_MAX_TOOL_LIST_PAGES):
+            params: dict[str, object] = {}
+            if cursor is not None:
+                params["cursor"] = cursor
 
-        return tuple(_parse_tool(raw_tool) for raw_tool in raw_tools)
+            result = await self._request(
+                "tools/list",
+                params,
+                include_metadata=not self._uses_legacy_protocol,
+            )
+            if (
+                not self._uses_legacy_protocol
+                and result.get("resultType") != "complete"
+            ):
+                raise McpProtocolError("tools/list did not complete")
+
+            raw_tools = result.get("tools")
+            if not isinstance(raw_tools, list):
+                raise McpProtocolError("tools/list response has invalid tools")
+
+            tools.extend(_parse_tool(raw_tool) for raw_tool in raw_tools)
+
+            if "nextCursor" not in result:
+                return tuple(tools)
+
+            next_cursor = result["nextCursor"]
+            if not isinstance(next_cursor, str):
+                raise McpProtocolError("tools/list response has invalid nextCursor")
+
+            if next_cursor in seen_cursors:
+                raise McpProtocolError("tools/list returned a repeated nextCursor")
+
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+
+        raise McpProtocolError("tools/list exceeded maximum page count")
 
     async def call_tool(
         self,
@@ -280,10 +422,33 @@ class McpClient:
         )
 
     async def aclose(self) -> None:
+        if self._subscription_ack_future is not None:
+            if not self._subscription_ack_future.done():
+                self._subscription_ack_future.set_exception(
+                    McpProtocolError("MCP client was closed"),
+                )
+            self._subscription_ack_future = None
+
+        worker = self._subscription_worker_task
+        listen_task = self._subscription_listen_task
+        reader = self._reader_task
+        self._subscription_worker_task = None
+        self._subscription_listen_task = None
+        self._reader_task = None
+
+        for future in list(self._pending_requests.values()):
+            if not future.done():
+                future.cancel()
+        self._pending_requests.clear()
+
+        await _cancel_and_wait(worker, listen_task, reader)
+        self._discard_pending_tool_changes()
+
         process = self._process
         self._process = None
         self._server_info = None
         self._uses_legacy_protocol = False
+        self._subscription_id = None
 
         if process is None:
             return
@@ -301,8 +466,17 @@ class McpClient:
                 process.kill()
                 await process.wait()
 
+    def _discard_pending_tool_changes(self) -> None:
+        # Pair only queued signals with task_done(); an in-flight callback owns
+        # its own queue item and completes it in the worker's finally block.
+        while not self._subscription_queue.empty():
+            self._subscription_queue.get_nowait()
+            self._subscription_queue.task_done()
+
     async def _start_process(self) -> None:
         self._next_request_id = 1
+        self._transport_error = None
+        self._subscription_ack_future = None
         self._process = await asyncio.create_subprocess_exec(
             *self._command,
             stdin=asyncio.subprocess.PIPE,
@@ -311,6 +485,100 @@ class McpClient:
             cwd=self._working_directory,
             env=self._environment,
         )
+        self._reader_task = asyncio.create_task(self._stdout_reader())
+
+    async def _stdout_reader(self) -> None:
+        process = self._require_process()
+        if process.stdout is None:
+            return
+
+        try:
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    raise McpProtocolError("MCP server closed stdout unexpectedly")
+
+                try:
+                    payload: object = json.loads(line)
+                except json.JSONDecodeError as error:
+                    raise McpProtocolError(
+                        "MCP server returned invalid JSON"
+                    ) from error
+
+                message = _as_object(payload)
+                if message is None or message.get("jsonrpc") != "2.0":
+                    raise McpProtocolError(
+                        "MCP server returned an invalid JSON-RPC message"
+                    )
+
+                if "method" in message:
+                    method = message.get("method")
+                    params = _as_object(message.get("params")) or {}
+                    meta = _as_object(params.get("_meta")) or {}
+                    sub_id = meta.get("io.modelcontextprotocol/subscriptionId")
+
+                    if method == "notifications/subscriptions/acknowledged":
+                        if (
+                            self._subscription_id is None
+                            or sub_id != self._subscription_id
+                        ):
+                            raise McpProtocolError(
+                                "MCP server sent unexpected subscription acknowledgment"
+                            )
+                        if (
+                            self._subscription_ack_future is not None
+                            and not self._subscription_ack_future.done()
+                        ):
+                            self._subscription_ack_future.set_result(None)
+                    elif method == "notifications/tools/list_changed":
+                        if (
+                            self._subscription_id is None
+                            or sub_id != self._subscription_id
+                        ):
+                            raise McpProtocolError(
+                                "MCP server sent unexpected tool list changed notification"
+                            )
+                        if (
+                            self._subscription_ack_future is None
+                            or not self._subscription_ack_future.done()
+                        ):
+                            raise McpProtocolError(
+                                "MCP server emitted tools/list_changed before acknowledgment"
+                            )
+                        try:
+                            self._subscription_queue.put_nowait(None)
+                        except asyncio.QueueFull:
+                            pass
+                    else:
+                        pass
+                    continue
+
+                request_id = message.get("id")
+                if not isinstance(request_id, int) or isinstance(request_id, bool):
+                    raise McpProtocolError("MCP server message has invalid id")
+
+                future = self._pending_requests.pop(request_id, None)
+                if future is None:
+                    raise McpProtocolError(
+                        f"MCP server response id has no matching pending request: {request_id}"
+                    )
+
+                if not future.done():
+                    future.set_result(message)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as error:
+            self._transport_error = error
+            if (
+                self._subscription_ack_future is not None
+                and not self._subscription_ack_future.done()
+            ):
+                self._subscription_ack_future.set_exception(error)
+            for future in list(self._pending_requests.values()):
+                if not future.done():
+                    future.set_exception(error)
+            self._pending_requests.clear()
 
     async def _notify(
         self,
@@ -321,7 +589,7 @@ class McpClient:
         if process.stdin is None:
             raise McpProtocolError("MCP server stdin is unavailable")
 
-        async with self._request_lock:
+        async with self._write_lock:
             payload = {
                 "jsonrpc": "2.0",
                 "method": method,
@@ -339,45 +607,54 @@ class McpClient:
         *,
         include_metadata: bool = True,
     ) -> Mapping[str, object]:
+        if self._transport_error is not None:
+            raise McpProtocolError("MCP transport is broken") from self._transport_error
+
         process = self._require_process()
-        if process.stdin is None or process.stdout is None:
-            raise McpProtocolError("MCP server stdio streams are unavailable")
+        if process.stdin is None:
+            raise McpProtocolError("MCP server stdin is unavailable")
 
-        async with self._request_lock:
-            request_id = self._next_request_id
-            self._next_request_id += 1
+        request_id = self._next_request_id
+        self._next_request_id += 1
 
-            request_params = dict(params)
-            if include_metadata:
-                request_params["_meta"] = self._request_metadata()
+        future: asyncio.Future[Mapping[str, object]] = (
+            asyncio.get_running_loop().create_future()
+        )
+        self._pending_requests[request_id] = future
 
-            payload = {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "method": method,
-                "params": request_params,
-            }
-            process.stdin.write(
-                json.dumps(payload, separators=(",", ":")).encode() + b"\n",
-            )
-            await process.stdin.drain()
+        request_params = dict(params)
+        if include_metadata:
+            request_params["_meta"] = self._request_metadata()
 
-            try:
-                line = await asyncio.wait_for(
-                    process.stdout.readline(),
-                    timeout=self._request_timeout_seconds,
+        payload = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": method,
+            "params": request_params,
+        }
+
+        try:
+            async with self._write_lock:
+                process.stdin.write(
+                    json.dumps(payload, separators=(",", ":")).encode() + b"\n",
                 )
-            except TimeoutError as error:
-                await self.aclose()
-                raise McpRequestTimeoutError(
-                    f"MCP request timed out: {method}",
-                ) from error
+                await process.stdin.drain()
 
-            if not line:
-                await self.aclose()
-                raise McpProtocolError("MCP server closed stdout unexpectedly")
+            response = await asyncio.wait_for(
+                future,
+                timeout=self._request_timeout_seconds,
+            )
+        except TimeoutError as error:
+            await self.aclose()
+            raise McpRequestTimeoutError(
+                f"MCP request timed out: {method}",
+            ) from error
+        except BaseException:
+            self._pending_requests.pop(request_id, None)
+            await self.aclose()
+            raise
 
-            return _parse_response(line, request_id)
+        return _parse_response_payload(response)
 
     def _request_metadata(self) -> dict[str, object]:
         return {
@@ -402,25 +679,31 @@ class McpClient:
 
 
 class McpServerSession:
-    """Owns one MCP client process and its one-time tool import."""
+    """Owns one MCP client process, its tool list subscription, and private ToolRegistry."""
 
     def __init__(
         self,
         *,
         client: McpClient,
-        registry: ToolRegistry,
         server_name: str,
         allowed_tools: tuple[str, ...] | None = None,
+        on_registry_updated: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         if not server_name:
             raise ValueError("server_name must not be empty")
 
         self._client = client
-        self._registry = registry
         self._server_name = server_name
         self._allowed_tools = allowed_tools
+        self._on_registry_updated = on_registry_updated
+        self._registry = ToolRegistry()
         self._started = False
         self._closed = False
+        self._refresh_lock = asyncio.Lock()
+
+    @property
+    def registry(self) -> ToolRegistry:
+        return self._registry
 
     async def start(self) -> McpServerInfo:
         if self._closed:
@@ -430,19 +713,37 @@ class McpServerSession:
 
         try:
             server_info = await self._client.start()
-            await register_mcp_tools(
-                self._registry,
-                self._client,
-                server_name=self._server_name,
-                allowed_tools=self._allowed_tools,
-            )
+            await self._refresh_registry_internal()
+
+            if server_info.supports_tool_list_changed:
+                await self._client.start_tool_list_subscription(
+                    self._handle_tools_changed,
+                )
         except BaseException:
-            await self._client.aclose()
-            self._closed = True
+            await self.aclose()
             raise
 
         self._started = True
         return server_info
+
+    async def _handle_tools_changed(self) -> None:
+        async with self._refresh_lock:
+            try:
+                await self._refresh_registry_internal()
+                if self._on_registry_updated is not None:
+                    await self._on_registry_updated()
+            except Exception:
+                pass
+
+    async def _refresh_registry_internal(self) -> None:
+        temporary_registry = ToolRegistry()
+        await register_mcp_tools(
+            temporary_registry,
+            self._client,
+            server_name=self._server_name,
+            allowed_tools=self._allowed_tools,
+        )
+        self._registry.replace_with(temporary_registry)
 
     async def aclose(self) -> None:
         if self._closed:
@@ -452,18 +753,7 @@ class McpServerSession:
         await self._client.aclose()
 
 
-def _parse_response(line: bytes, request_id: int) -> Mapping[str, object]:
-    try:
-        payload: object = json.loads(line)
-    except json.JSONDecodeError as error:
-        raise McpProtocolError("MCP server returned invalid JSON") from error
-
-    response = _as_object(payload)
-    if response is None or response.get("jsonrpc") != "2.0":
-        raise McpProtocolError("MCP server returned an invalid JSON-RPC response")
-    if response.get("id") != request_id:
-        raise McpProtocolError("MCP server response id does not match request")
-
+def _parse_response_payload(response: Mapping[str, object]) -> Mapping[str, object]:
     remote_error = _as_object(response.get("error"))
     if remote_error is not None:
         code = remote_error.get("code")
@@ -471,10 +761,7 @@ def _parse_response(line: bytes, request_id: int) -> Mapping[str, object]:
         if (
             isinstance(code, int)
             and not isinstance(code, bool)
-            and isinstance(
-                message,
-                str,
-            )
+            and isinstance(message, str)
         ):
             raise McpRemoteError(code=code, message=message)
         raise McpProtocolError("MCP server returned an invalid error response")
@@ -512,6 +799,7 @@ def _parse_legacy_server_info(result: Mapping[str, object]) -> McpServerInfo:
         name=name,
         version=version,
         supports_tools=isinstance(capabilities.get("tools"), Mapping),
+        supports_tool_list_changed=False,
         instructions=instructions,
     )
 
@@ -547,11 +835,18 @@ def _parse_server_info(result: Mapping[str, object]) -> McpServerInfo:
     if instructions is not None and not isinstance(instructions, str):
         raise McpProtocolError("server/discover response has invalid instructions")
 
+    tools_capability = _as_object(capabilities.get("tools"))
+    supports_tools = tools_capability is not None
+    supports_tool_list_changed = (
+        tools_capability.get("listChanged") is True if tools_capability else False
+    )
+
     return McpServerInfo(
         protocol_version=_PROTOCOL_VERSION,
         name=name,
         version=version,
-        supports_tools=isinstance(capabilities.get("tools"), Mapping),
+        supports_tools=supports_tools,
+        supports_tool_list_changed=supports_tool_list_changed,
         instructions=instructions,
     )
 
@@ -616,3 +911,16 @@ def _schema_hash(input_schema: Mapping[str, object]) -> str:
         ensure_ascii=False,
     )
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+async def _cancel_and_wait(*tasks: asyncio.Task[None] | None) -> None:
+    current = asyncio.current_task()
+    active = [
+        task
+        for task in tasks
+        if task is not None and task is not current and not task.done()
+    ]
+    for task in active:
+        task.cancel()
+    if active:
+        await asyncio.gather(*active, return_exceptions=True)

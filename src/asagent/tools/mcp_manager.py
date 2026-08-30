@@ -13,7 +13,7 @@ class McpServerCredentialError(RuntimeError):
 
 
 class McpServerManager:
-    """Owns configured MCP sessions and imports tools only after full startup."""
+    """Owns configured MCP sessions and imports tools atomically."""
 
     def __init__(
         self,
@@ -24,10 +24,12 @@ class McpServerManager:
         credential_store: CredentialStore | None = None,
     ) -> None:
         self._configs = configs
-        self._registry = registry
+        self._target_registry = registry
+        self._base_registry = registry.copy()
         self._environment = {} if environment is None else dict(environment)
         self._credential_store = credential_store
         self._sessions: list[McpServerSession] = []
+        self._recompose_lock = asyncio.Lock()
         self._started = False
         self._closed = False
 
@@ -37,8 +39,6 @@ class McpServerManager:
         if self._started:
             raise RuntimeError("MCP server manager is already started")
 
-        staging_registry = ToolRegistry()
-
         try:
             for server_name, config in self._configs.servers.items():
                 session = McpServerSession(
@@ -47,30 +47,41 @@ class McpServerManager:
                         working_directory=config.working_directory,
                         environment=self._environment_for(config),
                     ),
-                    registry=staging_registry,
                     server_name=server_name,
                     allowed_tools=config.allowed_tools,
+                    on_registry_updated=self._recompose_registry,
                 )
                 self._sessions.append(session)
                 await session.start()
 
-            existing_tool_ids = {
-                definition.tool_id for definition in self._registry.definitions()
-            }
-            staged_definitions = staging_registry.definitions()
-            if any(
-                definition.tool_id in existing_tool_ids
-                for definition in staged_definitions
-            ):
-                raise ValueError("MCP tool_id is already registered")
-
-            for definition in staged_definitions:
-                self._registry.register(staging_registry.get(definition.tool_id))
+            self._started = True
+            await self._recompose_registry()
         except BaseException:
+            self._target_registry.replace_with(self._base_registry)
             await self.aclose()
             raise
 
-        self._started = True
+    async def _recompose_registry(self) -> None:
+        if not self._started:
+            return
+
+        async with self._recompose_lock:
+            composite = self._base_registry.copy()
+            existing_tool_ids = {
+                definition.tool_id for definition in composite.definitions()
+            }
+
+            for session in self._sessions:
+                for definition in session.registry.definitions():
+                    if definition.tool_id in existing_tool_ids:
+                        raise ValueError(
+                            f"MCP tool_id is already registered: {definition.tool_id}",
+                        )
+                    tool = session.registry.get(definition.tool_id)
+                    composite.register(tool)
+                    existing_tool_ids.add(definition.tool_id)
+
+            self._target_registry.replace_with(composite)
 
     async def aclose(self) -> None:
         if self._closed:
