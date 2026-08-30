@@ -21,7 +21,8 @@ class FilesystemListTool:
             display_name="List files",
             description=(
                 "Lists files, directories, and symbolic links in one authorized "
-                "directory without reading file contents."
+                "directory without reading file contents. "
+                "Path must resolve to a directory, not a file."
             ),
             input_schema={
                 "type": "object",

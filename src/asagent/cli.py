@@ -117,11 +117,13 @@ from asagent.tools.browser_fill import BrowserFillTool
 from asagent.tools.browser_inspect_interactive import BrowserInspectInteractiveTool
 from asagent.tools.browser_navigate import BrowserNavigateTool
 from asagent.tools.browser_read_current_page import BrowserReadCurrentPageTool
+from asagent.tools.browser_read_current_pdf import BrowserReadCurrentPdfTool
 from asagent.tools.browser_run_bindings import BrowserRunBindings
 from asagent.tools.browser_select import BrowserSelectTool
 from asagent.tools.browser_wait import BrowserWaitTool
 from asagent.tools.builtin.calculator import CalculatorTool
 from asagent.tools.builtin.current_time import CurrentTimeTool
+from asagent.tools.builtin.document_extract_text import DocumentExtractTextTool
 from asagent.tools.builtin.echo import EchoTool
 from asagent.tools.builtin.filesystem_changes import (
     FilesystemCreateFileTool,
@@ -308,6 +310,7 @@ async def _registry_for_conversation(
             )
     registry.register(FilesystemListTool(resolver))
     registry.register(FilesystemReadFileTool(resolver))
+    registry.register(DocumentExtractTextTool(resolver))
     registry.register(FilesystemSearchFilesTool(resolver))
     if (
         conversation.kind == "automation_execution"
@@ -396,6 +399,12 @@ async def _register_browser_tools(
             tab_id=tab_id,
         ),
     )
+    registry.register(
+        BrowserReadCurrentPdfTool(
+            client=browser_page_client,
+            tab_id=tab_id,
+        ),
+    )
     return (
         _BROWSER_TOOL_PERMISSIONS
         | _BROWSER_FILL_PERMISSIONS
@@ -455,8 +464,9 @@ async def _system_prompt_for_conversation(
 
     browser_context = (
         "You are operating the user's visible browser tab. Use the browser "
-        "tools listed for this run to perform requested page operations. Take "
-        "a browser.take_snapshot before acting on unfamiliar page elements, "
+        "tools listed for this run to perform requested page operations. "
+        "If the current page is a PDF document, use browser.read_current_pdf to extract its text. "
+        "Take a browser.take_snapshot before acting on unfamiliar page elements, "
         "then use only its returned refs. Do not claim browser capability is "
         "unavailable without taking a snapshot first. Browser tools act only "
         "on the visible tab and cannot read credentials; ask the user to enter "

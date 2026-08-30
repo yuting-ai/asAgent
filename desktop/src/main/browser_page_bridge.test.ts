@@ -30,20 +30,36 @@ function createFakeResponse(): ServerResponse & {
   writeHead: ReturnType<typeof vi.fn>
   end: ReturnType<typeof vi.fn>
   statusCode?: number
+  headers: Record<string, string | number | readonly string[]>
   body?: string
+  rawBody?: string | Buffer
 } {
-  const response = {
-    writeHead: vi.fn((statusCode: number) => {
-      response.statusCode = statusCode
-    }),
-    end: vi.fn((payload?: string) => {
-      response.body = payload
+  const response = Object.assign(new EventEmitter(), {
+    headers: {},
+    writeHead: vi.fn(
+      (statusCode: number, headers?: Record<string, string | number | readonly string[]>) => {
+        response.statusCode = statusCode
+        if (headers) {
+          response.headers = headers
+        }
+      }
+    ),
+    end: vi.fn((payload?: string | Buffer) => {
+      response.rawBody = payload
+      response.body =
+        typeof payload === 'string'
+          ? payload
+          : payload instanceof Buffer
+            ? payload.toString('utf8')
+            : undefined
     })
-  } as ServerResponse & {
+  }) as ServerResponse & {
     writeHead: ReturnType<typeof vi.fn>
     end: ReturnType<typeof vi.fn>
     statusCode?: number
+    headers: Record<string, string | number | readonly string[]>
     body?: string
+    rawBody?: string | Buffer
   }
   return response
 }
@@ -84,6 +100,11 @@ describe('BrowserPageBridge', () => {
       url: 'https://example.com/',
       text: 'Hello'
     }))
+    const readCurrentPdf = vi.fn(async (tabId: string) => ({
+      documentId: `doc-${tabId}`,
+      data: Buffer.from('%PDF-1.4 sample content %%EOF')
+    }))
+    const validateCurrentPdf = vi.fn<(tabId: string, documentId: string) => void>()
     const inspectInteractive = vi.fn(async () => ({
       url: 'https://example.com/',
       elements: [
@@ -152,6 +173,8 @@ describe('BrowserPageBridge', () => {
 
     const bridge = new BrowserPageBridge({
       readCurrentPage,
+      readCurrentPdf,
+      validateCurrentPdf,
       inspectInteractive,
       navigateCurrentPage,
       clickCurrentPage,
@@ -473,6 +496,150 @@ describe('BrowserPageBridge', () => {
       }
     })
 
+    const pdfUnauthorized = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest('POST', '/read-current-pdf', {}, JSON.stringify({ tab_id: 'tab-1' })),
+      pdfUnauthorized
+    )
+    await vi.waitFor(() => expect(pdfUnauthorized.end).toHaveBeenCalled())
+    expect(pdfUnauthorized.statusCode).toBe(401)
+    expect(readCurrentPdf).not.toHaveBeenCalled()
+
+    const pdfMissingTab = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/read-current-pdf',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({})
+      ),
+      pdfMissingTab
+    )
+    await vi.waitFor(() => expect(pdfMissingTab.end).toHaveBeenCalled())
+    expect(pdfMissingTab.statusCode).toBe(400)
+    expect(readCurrentPdf).not.toHaveBeenCalled()
+
+    const pdfAuthorized = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/read-current-pdf',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1' })
+      ),
+      pdfAuthorized
+    )
+    await vi.waitFor(() => expect(pdfAuthorized.end).toHaveBeenCalled())
+    expect(pdfAuthorized.statusCode).toBe(200)
+    expect(pdfAuthorized.headers['Content-Type']).toBe('application/pdf')
+    expect(pdfAuthorized.headers['X-Document-Id']).toBe('doc-tab-1')
+    expect(pdfAuthorized.headers['Content-Length']).toBe(
+      Buffer.from('%PDF-1.4 sample content %%EOF').byteLength
+    )
+    expect(pdfAuthorized.body).toBe('%PDF-1.4 sample content %%EOF')
+    expect(readCurrentPdf).toHaveBeenCalledWith('tab-1', expect.any(AbortSignal))
+    expect(pdfAuthorized.listenerCount('close')).toBe(0)
+
+    const documentId = `doc-${'a'.repeat(32)}`
+    for (const [headers, body, status] of [
+      [{}, { tab_id: 'tab-1', document_id: documentId }, 401],
+      [{ authorization: 'Bearer bridge-token' }, { tab_id: 'tab-1' }, 400],
+      [{ authorization: 'Bearer bridge-token' }, { tab_id: 'tab-1', document_id: documentId }, 200]
+    ] as const) {
+      const validation = createFakeResponse()
+      requestHandler?.(
+        createFakeRequest('POST', '/validate-current-pdf', headers, JSON.stringify(body)),
+        validation
+      )
+      await vi.waitFor(() => expect(validation.end).toHaveBeenCalled())
+      expect(validation.statusCode).toBe(status)
+    }
+    expect(validateCurrentPdf).toHaveBeenLastCalledWith('tab-1', documentId)
+    expect(readCurrentPdf).toHaveBeenCalledTimes(1)
+
+    validateCurrentPdf.mockImplementationOnce(() => {
+      throw new Error('PDF document changed; start a new browser run')
+    })
+    const invalidated = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/validate-current-pdf',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1', document_id: documentId })
+      ),
+      invalidated
+    )
+    await vi.waitFor(() => expect(invalidated.end).toHaveBeenCalled())
+    expect(invalidated.statusCode).toBe(409)
+
+    readCurrentPdf.mockRejectedValueOnce(new Error('PDF exceeds the 20 MiB limit'))
+    const pdfError = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/read-current-pdf',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1' })
+      ),
+      pdfError
+    )
+    await vi.waitFor(() => expect(pdfError.end).toHaveBeenCalled())
+    expect(pdfError.statusCode).toBe(409)
+    expect(JSON.parse(pdfError.body ?? '')).toEqual({
+      detail: 'PDF exceeds the 20 MiB limit'
+    })
+    expect(pdfError.listenerCount('close')).toBe(0)
+
+    const pendingFetch: { signal?: AbortSignal } = {}
+    readCurrentPdf.mockImplementationOnce(async (_tabId: string, signal?: AbortSignal) => {
+      pendingFetch.signal = signal
+      return new Promise((_, reject) => {
+        signal?.addEventListener('abort', () => reject(new Error('PDF fetch was cancelled')), {
+          once: true
+        })
+      })
+    })
+    const disconnected = createFakeResponse()
+    const disconnectedRequest = createFakeRequest(
+      'POST',
+      '/read-current-pdf',
+      { authorization: 'Bearer bridge-token' },
+      JSON.stringify({ tab_id: 'tab-1' })
+    )
+    requestHandler?.(disconnectedRequest, disconnected)
+    await vi.waitFor(() => expect(pendingFetch.signal).toBeDefined())
+    Object.assign(disconnected, { destroyed: true })
+    disconnected.emit('close')
+    await vi.waitFor(() => expect(pendingFetch.signal?.aborted).toBe(true))
+    await vi.waitFor(() => expect(disconnected.listenerCount('close')).toBe(0))
+    expect(disconnectedRequest.listenerCount('aborted')).toBe(0)
+    expect(disconnected.writeHead).not.toHaveBeenCalled()
+    expect(disconnected.end).not.toHaveBeenCalled()
+
+    pendingFetch.signal = undefined
+    readCurrentPdf.mockImplementationOnce(async (_tabId: string, signal?: AbortSignal) => {
+      pendingFetch.signal = signal
+      return new Promise((_, reject) => {
+        signal?.addEventListener('abort', () => reject(new Error('PDF fetch was cancelled')), {
+          once: true
+        })
+      })
+    })
+    const stopping = createFakeResponse()
+    requestHandler?.(
+      createFakeRequest(
+        'POST',
+        '/read-current-pdf',
+        { authorization: 'Bearer bridge-token' },
+        JSON.stringify({ tab_id: 'tab-1' })
+      ),
+      stopping
+    )
+    await vi.waitFor(() => expect(pendingFetch.signal).toBeDefined())
     await bridge.stop()
+    await vi.waitFor(() => expect(stopping.end).toHaveBeenCalled())
+    await vi.waitFor(() => expect(pendingFetch.signal?.aborted).toBe(true))
+    expect(stopping.listenerCount('close')).toBe(0)
   })
 })

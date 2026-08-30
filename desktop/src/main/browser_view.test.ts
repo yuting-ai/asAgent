@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events'
 import type { Session, WebContentsViewConstructorOptions } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -11,7 +12,8 @@ import {
   type BrowserHostWindow,
   type BrowserNavigationEvent,
   type BrowserPageView,
-  type BrowserTabState
+  type BrowserTabState,
+  type VisibleBrowserOptions
 } from './browser_view'
 
 type FakeWebContents = BrowserPageView['webContents'] & {
@@ -38,6 +40,9 @@ type FakePageView = BrowserPageView & {
   setBounds: ReturnType<typeof vi.fn>
   setVisible: ReturnType<typeof vi.fn>
   webContents: FakeWebContents
+  emit(event: string, navigationEvent: BrowserNavigationEvent, url?: string): void
+  listenerCount(event: string): number
+  options: WebContentsViewConstructorOptions
 }
 
 function createFakeFrame(
@@ -62,12 +67,12 @@ function createFakeFrame(
 }
 
 function createFakeView(options: WebContentsViewConstructorOptions): FakePageView {
-  const listeners = new Map<string, (event: BrowserNavigationEvent, url?: string) => void>()
+  const listeners = new EventEmitter()
   const executeJavaScript = vi.fn(async () => ({ title: '', text: '', elements: [] }))
   const mainFrame = createFakeFrame({ executeJavaScript })
   const webContents = {
     loadURL: vi.fn(async () => undefined),
-    close: vi.fn(),
+    close: vi.fn(() => listeners.emit('destroyed')),
     getURL: vi.fn(() => ''),
     getTitle: vi.fn(() => ''),
     canGoBack: vi.fn(() => false),
@@ -80,7 +85,7 @@ function createFakeView(options: WebContentsViewConstructorOptions): FakePageVie
     sendInputEvent: vi.fn(),
     setWindowOpenHandler: vi.fn(),
     on: vi.fn((event: string, listener: (event: BrowserNavigationEvent, url?: string) => void) => {
-      listeners.set(event, listener)
+      listeners.on(event, listener)
     })
   }
 
@@ -89,8 +94,9 @@ function createFakeView(options: WebContentsViewConstructorOptions): FakePageVie
     setVisible: vi.fn(),
     webContents,
     emit(event: string, navigationEvent: BrowserNavigationEvent, url?: string) {
-      listeners.get(event)?.(navigationEvent, url)
+      listeners.emit(event, navigationEvent, url)
     },
+    listenerCount: (event: string) => listeners.listenerCount(event),
     options
   } as FakePageView & {
     emit(event: string, navigationEvent: BrowserNavigationEvent, url?: string): void
@@ -126,16 +132,24 @@ function createFakeWindow(): BrowserHostWindow & {
   }
 }
 
-function createBrowser(): {
+function createBrowser(options?: Partial<VisibleBrowserOptions>): {
   browser: VisibleBrowser
   createView: ReturnType<typeof vi.fn>
   session: Session
 } {
-  const session = { id: 'browser-profile' } as unknown as Session
-  const createView = vi.fn((options: WebContentsViewConstructorOptions) => createFakeView(options))
+  const session = options?.session ?? ({ id: 'browser-profile' } as unknown as Session)
+  const createView =
+    (options?.createView as
+      ((opts: WebContentsViewConstructorOptions) => BrowserPageView) | undefined) ??
+    vi.fn((viewOptions: WebContentsViewConstructorOptions) => createFakeView(viewOptions))
   return {
-    browser: new VisibleBrowser({ session, createView }),
-    createView,
+    browser: new VisibleBrowser({
+      session,
+      createView,
+      onTabState: options?.onTabState,
+      fetchPdf: options?.fetchPdf
+    }),
+    createView: createView as ReturnType<typeof vi.fn>,
     session
   }
 }
@@ -1817,5 +1831,397 @@ describe('VisibleBrowser window.open', () => {
       'page changed; inspect interactive elements again'
     )
     expect(child.executeJavaScript).toHaveBeenCalledTimes(1)
+  })
+
+  describe('readCurrentPdf', () => {
+    it('rejects when the tab is missing or not visible', async () => {
+      const { browser } = createBrowser()
+      await expect(browser.readCurrentPdf('tab-missing')).rejects.toThrow(
+        'current browser tab is not visible'
+      )
+    })
+
+    it('rejects when current URL is not an HTTP or HTTPS document', async () => {
+      const { browser, createView } = createBrowser()
+      const window = createFakeWindow()
+      browser.show(window, bounds, 'tab-1')
+      const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+      view.webContents.getURL.mockReturnValue('about:blank')
+
+      await expect(browser.readCurrentPdf('tab-1')).rejects.toThrow(
+        'current page is not an HTTP or HTTPS PDF document'
+      )
+    })
+
+    it('successfully reads PDF bytes and generates stable documentId for identical URL', async () => {
+      const pdfBytes = Buffer.from('%PDF-1.4 sample PDF body %%EOF')
+      const fetchPdf = vi.fn(async () => pdfBytes)
+
+      const { browser, createView } = createBrowser({ fetchPdf })
+      const window = createFakeWindow()
+      browser.show(window, bounds, 'tab-1')
+      const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+      view.webContents.getURL.mockReturnValue('https://example.com/document.pdf')
+
+      const result1 = await browser.readCurrentPdf('tab-1')
+      expect(result1.data).toEqual(pdfBytes)
+      expect(result1.documentId).toMatch(/^doc-[0-9a-f]{32}$/)
+
+      // Second read returns the exact same documentId token
+      const result2 = await browser.readCurrentPdf('tab-1')
+      expect(result2.documentId).toBe(result1.documentId)
+      expect(fetchPdf).toHaveBeenCalledTimes(2)
+    })
+
+    it('invalidates documentId token when tab navigates to a different URL', async () => {
+      const pdfBytes = Buffer.from('%PDF-1.4 new PDF %%EOF')
+      const fetchPdf = vi.fn(async () => pdfBytes)
+
+      const { browser, createView } = createBrowser({ fetchPdf })
+      const window = createFakeWindow()
+      browser.show(window, bounds, 'tab-1')
+      const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+      view.webContents.getURL.mockReturnValue('https://example.com/doc1.pdf')
+
+      const result1 = await browser.readCurrentPdf('tab-1')
+      expect(result1.documentId).toMatch(/^doc-[0-9a-f]{32}$/)
+
+      // Tab navigates to doc2.pdf
+      view.webContents.getURL.mockReturnValue('https://example.com/doc2.pdf')
+      view.emit('did-navigate', { preventDefault: () => undefined }, 'https://example.com/doc2.pdf')
+
+      const result2 = await browser.readCurrentPdf('tab-1')
+      expect(result2.documentId).toMatch(/^doc-[0-9a-f]{32}$/)
+      expect(result2.documentId).not.toBe(result1.documentId)
+    })
+
+    it('rejects when PDF size exceeds 20 MiB limit', async () => {
+      const fetchPdf = vi.fn(async () => {
+        throw new Error('PDF exceeds the 20 MiB limit')
+      })
+
+      const { browser, createView } = createBrowser({ fetchPdf })
+      const window = createFakeWindow()
+      browser.show(window, bounds, 'tab-1')
+      const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+      view.webContents.getURL.mockReturnValue('https://example.com/giant.pdf')
+
+      await expect(browser.readCurrentPdf('tab-1')).rejects.toThrow('PDF exceeds the 20 MiB limit')
+    })
+
+    it('rejects when document does not contain a valid %PDF- magic header', async () => {
+      const invalidBytes = Buffer.from('<html><body>Not a PDF</body></html>')
+      const fetchPdf = vi.fn(async () => invalidBytes)
+
+      const { browser, createView } = createBrowser({ fetchPdf })
+      const window = createFakeWindow()
+      browser.show(window, bounds, 'tab-1')
+      const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+      view.webContents.getURL.mockReturnValue('https://example.com/fake.pdf')
+
+      await expect(browser.readCurrentPdf('tab-1')).rejects.toThrow(
+        'document does not have a valid PDF header'
+      )
+    })
+
+    it('rejects when fetch is aborted or times out', async () => {
+      const fetchPdf = vi.fn(async (_url, _session, signal: AbortSignal) => {
+        return new Promise<Buffer>((_, reject) => {
+          signal.addEventListener('abort', () => {
+            reject(new Error('PDF fetch was cancelled'))
+          })
+        })
+      })
+
+      const { browser, createView } = createBrowser({ fetchPdf })
+      const window = createFakeWindow()
+      browser.show(window, bounds, 'tab-1')
+      const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+      view.webContents.getURL.mockReturnValue('https://example.com/pending.pdf')
+
+      const pending = browser.readCurrentPdf('tab-1')
+      // Simulate navigation during fetch
+      view.emit('will-navigate', { preventDefault: () => undefined }, 'https://example.com/other')
+
+      await expect(pending).rejects.toThrow('PDF fetch was cancelled')
+    })
+
+    it('validates identity without fetching and rejects a reload of the same URL', async () => {
+      const fetchPdf = vi.fn(async () => Buffer.from('%PDF-1.4 fixture'))
+      const { browser, createView } = createBrowser({ fetchPdf })
+      browser.show(createFakeWindow(), bounds, 'tab-1')
+      const view = createView.mock.results[0]!.value as FakePageView
+      view.webContents.getURL.mockReturnValue('https://example.com/doc.pdf')
+      const doc = await browser.readCurrentPdf('tab-1')
+      browser.validateCurrentPdf('tab-1', doc.documentId)
+      expect(fetchPdf).toHaveBeenCalledTimes(1)
+      void browser.control('tab-1', 'reload')
+      expect(() => browser.validateCurrentPdf('tab-1', doc.documentId)).toThrow(
+        'PDF document changed'
+      )
+    })
+
+    it('does not accumulate WebContents listeners on success or failure', async () => {
+      const fetchPdf = vi.fn(async () => Buffer.from('%PDF-1.4 fixture'))
+      const { browser, createView } = createBrowser({ fetchPdf })
+      browser.show(createFakeWindow(), bounds, 'tab-1')
+      const view = createView.mock.results[0]!.value as FakePageView
+      view.webContents.getURL.mockReturnValue('https://example.com/doc.pdf')
+      const events = ['will-navigate', 'will-redirect', 'did-start-navigation', 'destroyed']
+      const counts = events.map((event) => view.listenerCount(event))
+      for (let i = 0; i < 12; i++) {
+        await browser.readCurrentPdf('tab-1')
+        fetchPdf.mockRejectedValueOnce(new Error('failed to fetch PDF document'))
+        await expect(browser.readCurrentPdf('tab-1')).rejects.toThrow(
+          'failed to fetch PDF document'
+        )
+      }
+      expect(events.map((event) => view.listenerCount(event))).toEqual(counts)
+    })
+
+    it.each([
+      'close',
+      'hide',
+      'switch',
+      'reload',
+      'navigate',
+      'agent-navigation',
+      'programmatic-navigation',
+      'destroy',
+      'dispose',
+      'disconnect'
+    ])('cancels an in-flight PDF read on %s', async (action) => {
+      let fetchSignal: AbortSignal | undefined
+      const fetchPdf = vi.fn(async (_url, _session, signal: AbortSignal) => {
+        fetchSignal = signal
+        return new Promise<Buffer>((_, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('PDF fetch was cancelled')), {
+            once: true
+          })
+        })
+      })
+      const { browser, createView } = createBrowser({ fetchPdf })
+      const window = createFakeWindow()
+      browser.show(window, bounds, 'tab-1')
+      const view = createView.mock.results[0]!.value as FakePageView
+      view.webContents.getURL.mockReturnValue('https://example.com/doc.pdf')
+      const controller = new AbortController()
+      const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
+      const pending = browser.readCurrentPdf('tab-1', controller.signal)
+      const rejected = expect(pending).rejects.toThrow('PDF fetch was cancelled')
+      switch (action) {
+        case 'close':
+          browser.closeTab('tab-1')
+          break
+        case 'hide':
+          browser.hide()
+          break
+        case 'switch':
+          browser.show(window, bounds, 'tab-2')
+          break
+        case 'reload':
+          await browser.control('tab-1', 'reload')
+          break
+        case 'navigate':
+          await browser.navigate('tab-1', 'https://example.com/other')
+          break
+        case 'agent-navigation':
+          await browser.navigateCurrentPage('tab-1', 'https://example.com/other')
+          break
+        case 'programmatic-navigation':
+          view.emit('did-start-navigation', { preventDefault: vi.fn(), isMainFrame: true })
+          break
+        case 'destroy':
+          view.webContents.close()
+          break
+        case 'dispose':
+          browser.dispose()
+          break
+        case 'disconnect':
+          controller.abort()
+          break
+      }
+      await rejected
+      expect(fetchSignal?.aborted).toBe(true)
+      expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function))
+    })
+
+    it('never returns bytes after the tab closes even if the fetch ignores cancellation', async () => {
+      let finish!: (data: Buffer) => void
+      const fetchPdf = vi.fn(
+        () =>
+          new Promise<Buffer>((resolve) => {
+            finish = resolve
+          })
+      )
+      const { browser, createView } = createBrowser({ fetchPdf })
+      browser.show(createFakeWindow(), bounds, 'tab-1')
+      const view = createView.mock.results[0]!.value as FakePageView
+      view.webContents.getURL.mockReturnValue('https://example.com/doc.pdf')
+      const pending = browser.readCurrentPdf('tab-1')
+      const rejected = expect(pending).rejects.toThrow('PDF fetch was cancelled')
+      browser.closeTab('tab-1')
+      finish(Buffer.from('%PDF-1.4 fixture'))
+      await rejected
+    })
+
+    it('enforces the network deadline and removes the external abort listener', async () => {
+      vi.useFakeTimers()
+      try {
+        const fetchPdf = vi.fn(
+          async (_url, _session, signal: AbortSignal) =>
+            new Promise<Buffer>((_, reject) => {
+              signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+            })
+        )
+        const { browser, createView } = createBrowser({ fetchPdf })
+        browser.show(createFakeWindow(), bounds, 'tab-1')
+        const view = createView.mock.results[0]!.value as FakePageView
+        view.webContents.getURL.mockReturnValue('https://example.com/doc.pdf')
+        const controller = new AbortController()
+        const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
+        const rejected = expect(browser.readCurrentPdf('tab-1', controller.signal)).rejects.toThrow(
+          'PDF fetch timed out'
+        )
+        await vi.advanceTimersByTimeAsync(15000)
+        await rejected
+        expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function))
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    describe('defaultFetchPdf network pipeline', () => {
+      it.each(['redirect', 'html', 'http-error'])(
+        'cancels unused response bodies on %s',
+        async (kind) => {
+          const cancel = vi.fn()
+          const body = new ReadableStream<Uint8Array>({ cancel })
+          const response =
+            kind === 'redirect'
+              ? new Response(body, {
+                  status: 302,
+                  headers: { location: 'https://example.com/final.pdf' }
+                })
+              : new Response(body, {
+                  status: kind === 'http-error' ? 500 : 200,
+                  headers: { 'content-type': 'text/html' }
+                })
+          const sessionFetch = vi
+            .fn()
+            .mockResolvedValueOnce(response)
+            .mockResolvedValue(new Response(Buffer.from('%PDF-1.4 fixture')))
+          const session = { fetch: sessionFetch } as unknown as Session
+          const { browser, createView } = createBrowser({ session })
+          browser.show(createFakeWindow(), bounds, 'tab-1')
+          const view = createView.mock.results[0]!.value as FakePageView
+          view.webContents.getURL.mockReturnValue('https://example.com/doc.pdf')
+          if (kind === 'redirect') await browser.readCurrentPdf('tab-1')
+          else await expect(browser.readCurrentPdf('tab-1')).rejects.toThrow()
+          expect(cancel).toHaveBeenCalledTimes(1)
+        }
+      )
+
+      it('follows valid HTTPS redirects up to target PDF', async () => {
+        const pdfBytes = Buffer.from('%PDF-1.4 redirected content %%EOF')
+        const sessionFetch = vi.fn(async (url: string) => {
+          if (url === 'https://example.com/initial.pdf') {
+            return new Response(null, {
+              status: 302,
+              headers: { location: 'https://example.com/target.pdf' }
+            })
+          }
+          return new Response(pdfBytes, {
+            status: 200,
+            headers: { 'content-type': 'application/pdf' }
+          })
+        })
+
+        const session = { id: 'test-session', fetch: sessionFetch } as unknown as Session
+        const { browser, createView } = createBrowser({ session })
+        const window = createFakeWindow()
+        browser.show(window, bounds, 'tab-1')
+        const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+        view.webContents.getURL.mockReturnValue('https://example.com/initial.pdf')
+
+        const result = await browser.readCurrentPdf('tab-1')
+        expect(result.data).toEqual(pdfBytes)
+        expect(sessionFetch).toHaveBeenCalledTimes(2)
+      })
+
+      it('blocks redirects to file:// protocol', async () => {
+        const sessionFetch = vi.fn(async () => {
+          return new Response(null, {
+            status: 302,
+            headers: { location: 'file:///etc/passwd' }
+          })
+        })
+
+        const session = { id: 'test-session', fetch: sessionFetch } as unknown as Session
+        const { browser, createView } = createBrowser({ session })
+        const window = createFakeWindow()
+        browser.show(window, bounds, 'tab-1')
+        const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+        view.webContents.getURL.mockReturnValue('https://example.com/doc.pdf')
+
+        await expect(browser.readCurrentPdf('tab-1')).rejects.toThrow(
+          'redirect to non-http(s) protocol is forbidden'
+        )
+      })
+
+      it('rejects responses with text/html content-type', async () => {
+        const sessionFetch = vi.fn(async () => {
+          return new Response('<html><body>Login Page</body></html>', {
+            status: 200,
+            headers: { 'content-type': 'text/html; charset=utf-8' }
+          })
+        })
+
+        const session = { id: 'test-session', fetch: sessionFetch } as unknown as Session
+        const { browser, createView } = createBrowser({ session })
+        const window = createFakeWindow()
+        browser.show(window, bounds, 'tab-1')
+        const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+        view.webContents.getURL.mockReturnValue('https://example.com/protected.pdf')
+
+        await expect(browser.readCurrentPdf('tab-1')).rejects.toThrow(
+          'current page is not an HTTP or HTTPS PDF document'
+        )
+      })
+
+      it('aborts and rejects when stream exceeds 20 MiB limit', async () => {
+        const chunk = new Uint8Array(5 * 1024 * 1024) // 5 MiB chunk
+        let chunksSent = 0
+        const stream = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (chunksSent < 5) {
+              chunksSent++
+              controller.enqueue(chunk)
+            } else {
+              controller.close()
+            }
+          }
+        })
+
+        const sessionFetch = vi.fn(async () => {
+          return new Response(stream, {
+            status: 200,
+            headers: { 'content-type': 'application/pdf' }
+          })
+        })
+
+        const session = { id: 'test-session', fetch: sessionFetch } as unknown as Session
+        const { browser, createView } = createBrowser({ session })
+        const window = createFakeWindow()
+        browser.show(window, bounds, 'tab-1')
+        const view = createView.mock.results[0]?.value as ReturnType<typeof createFakeView>
+        view.webContents.getURL.mockReturnValue('https://example.com/stream-huge.pdf')
+
+        await expect(browser.readCurrentPdf('tab-1')).rejects.toThrow(
+          'PDF exceeds the 20 MiB limit'
+        )
+      })
+    })
   })
 })

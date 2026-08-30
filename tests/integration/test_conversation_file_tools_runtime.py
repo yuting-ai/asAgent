@@ -1,7 +1,12 @@
+import io
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import aiosqlite
+import pypdf
 import pytest
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from asagent.cli import _alembic_config_path, build_persistent_agent_runtime
 from asagent.core.conversation import Conversation
@@ -135,9 +140,10 @@ async def test_runtime_uses_only_the_current_conversations_file_scope(
 
         assert first.run.status is RunStatus.COMPLETED
         assert second.run.status is RunStatus.COMPLETED
-        assert tuple(tool.name for tool in provider.requests[0].tools[-3:]) == (
+        assert tuple(tool.name for tool in provider.requests[0].tools[-4:]) == (
             "filesystem_list",
             "filesystem_read_file",
+            "document_extract_text",
             "filesystem_search_files",
         )
         assert "Folder: " + str(external_folder.resolve()) in (
@@ -237,6 +243,271 @@ async def test_runtime_registers_and_executes_reversible_file_write_tools(
         }
     finally:
         await changes.aclose()
+        await finisher.aclose()
+        await starter.aclose()
+        await runs.aclose()
+        await scopes.aclose()
+        await conversations.aclose()
+
+
+def _make_pdf(pages_text: list[str]) -> bytes:
+    writer = pypdf.PdfWriter()
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }
+    )
+    for text in pages_text:
+        page = writer.add_blank_page(width=300, height=300)
+        page[NameObject("/Resources")] = DictionaryObject(
+            {
+                NameObject("/Font"): DictionaryObject(
+                    {
+                        NameObject("/F1"): font,
+                    }
+                )
+            }
+        )
+        stream = DecodedStreamObject()
+        escaped_text = (
+            text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        )
+        stream.set_data(
+            f"BT /F1 12 Tf 50 250 Td ({escaped_text}) Tj ET".encode(
+                "latin1", errors="replace"
+            )
+        )
+        page[NameObject("/Contents")] = stream
+
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_runtime_extracts_pdf_text_end_to_end(
+    tmp_path: Path,
+) -> None:
+    paths = AppPaths.from_root(tmp_path / "app-home")
+    paths.workspace_dir.mkdir(parents=True)
+    database_path = paths.data_dir / "asagent.sqlite3"
+    upgrade_sqlite_database(
+        database_path=database_path,
+        alembic_config_path=_alembic_config_path(),
+    )
+    conversations = SqliteConversationRepository(database_path)
+    scopes = SqliteConversationFileScopeRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    starter = SqliteRunStarter(database_path)
+    finisher = SqliteRunFinisher(database_path)
+    conversation_id = ConversationId("conversation-pdf")
+
+    pdf_bytes = _make_pdf(
+        [
+            "Page 1 Overview",
+            "Page 2 Financial Summary",
+            "Page 3 Appendix",
+        ]
+    )
+    pdf_path = paths.workspace_dir / "report.pdf"
+    pdf_path.write_bytes(pdf_bytes)
+
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="extract-pdf-1",
+                        name="document_extract_text",
+                        arguments={
+                            "path": str(pdf_path),
+                            "start_page": 2,
+                            "end_page": 2,
+                        },
+                    ),
+                ),
+            ),
+            ModelResponse(text="Page 2 contains Financial Summary.", tool_calls=()),
+        ),
+    )
+    now = datetime(2026, 8, 30, 10, 0, tzinfo=UTC)
+
+    try:
+        await conversations.save(
+            Conversation(conversation_id, UserId("local-user"), now, now)
+        )
+        runtime = build_persistent_agent_runtime(
+            model=provider,
+            conversations=conversations,
+            runs=runs,
+            starter=starter,
+            finisher=finisher,
+            workspace_settings=ConversationWorkspaceSettings(
+                scopes=scopes,
+                workspace_root=paths.workspace_dir,
+            ),
+        )
+
+        result = await runtime.run(
+            conversation_id=conversation_id,
+            content="Extract page 2 from report.pdf.",
+            model_name="fake-model",
+            system_prompt="Use tools.",
+        )
+
+        assert result.run.status is RunStatus.COMPLETED
+        assert result.assistant_message is not None
+        assert result.assistant_message.content == "Page 2 contains Financial Summary."
+
+        # Verify tool call recorded in SQLite
+        tool_calls = await runs.list_tool_calls(result.run.run_id)
+        assert len(tool_calls) == 1
+        assert tool_calls[0].tool_id == "document.extract_text"
+        assert tool_calls[0].model_call_id == "extract-pdf-1"
+        assert tool_calls[0].error is None
+        assert tool_calls[0].result is not None
+        parsed_result = json.loads(tool_calls[0].result)
+        assert parsed_result["format"] == "pdf"
+        assert parsed_result["page_count"] == 3
+        assert parsed_result["start_page"] == 2
+        assert parsed_result["start_char_offset"] == 0
+        assert parsed_result["end_page"] == 2
+        assert parsed_result["pages"][0]["text"] == "Page 2 Financial Summary"
+        assert parsed_result["next_position"] == {"page": 3, "char_offset": 0}
+        assert parsed_result["text_layer_found"] is True
+        assert parsed_result["truncated"] is False
+
+        # Verify events: no approval requested event
+        events = await runs.list_events(result.run.run_id)
+        event_types = [e.event_type for e in events]
+        assert "tool.approval_requested" not in event_types
+        assert "tool.requested" in event_types
+        assert "tool.completed" in event_types
+        assert "run.completed" in event_types
+
+        # Verify model message history pairing
+        assert provider.requests[1].messages[-1].role is ModelMessageRole.TOOL
+        assert provider.requests[1].messages[-1].tool_call_id == "extract-pdf-1"
+
+        # Verify original PDF file was not modified
+        assert pdf_path.read_bytes() == pdf_bytes
+
+        # Verify no extra files created in workspace
+        assert list(paths.workspace_dir.iterdir()) == [pdf_path]
+
+        # Verify SQLite tables contain only expected system tables
+        async with aiosqlite.connect(database_path) as db:
+            async with db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ) as cursor:
+                tables = [row[0] for row in await cursor.fetchall()]
+        assert "document_extract_text" not in tables
+        assert "pdf_extracts" not in tables
+    finally:
+        await finisher.aclose()
+        await starter.aclose()
+        await runs.aclose()
+        await scopes.aclose()
+        await conversations.aclose()
+
+
+@pytest.mark.asyncio
+async def test_runtime_handles_pdf_errors_and_maintains_next_run(
+    tmp_path: Path,
+) -> None:
+    paths = AppPaths.from_root(tmp_path / "app-home")
+    paths.workspace_dir.mkdir(parents=True)
+    database_path = paths.data_dir / "asagent.sqlite3"
+    upgrade_sqlite_database(
+        database_path=database_path,
+        alembic_config_path=_alembic_config_path(),
+    )
+    conversations = SqliteConversationRepository(database_path)
+    scopes = SqliteConversationFileScopeRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    starter = SqliteRunStarter(database_path)
+    finisher = SqliteRunFinisher(database_path)
+    conversation_id = ConversationId("conversation-pdf-err")
+
+    corrupted_pdf = paths.workspace_dir / "corrupted.pdf"
+    corrupted_pdf.write_bytes(b"%PDF-broken-stream")
+
+    provider = FakeModelProvider(
+        responses=(
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="extract-broken",
+                        name="document_extract_text",
+                        arguments={"path": str(corrupted_pdf)},
+                    ),
+                ),
+            ),
+            ModelResponse(text="The PDF is corrupted.", tool_calls=()),
+            # Next Run responses:
+            ModelResponse(
+                text=None,
+                tool_calls=(
+                    ModelToolCall(
+                        call_id="call-time",
+                        name="builtin_current_time",
+                        arguments={},
+                    ),
+                ),
+            ),
+            ModelResponse(text="It is now UTC time.", tool_calls=()),
+        ),
+    )
+    now = datetime(2026, 8, 30, 10, 30, tzinfo=UTC)
+
+    try:
+        await conversations.save(
+            Conversation(conversation_id, UserId("local-user"), now, now)
+        )
+        runtime = build_persistent_agent_runtime(
+            model=provider,
+            conversations=conversations,
+            runs=runs,
+            starter=starter,
+            finisher=finisher,
+            workspace_settings=ConversationWorkspaceSettings(
+                scopes=scopes,
+                workspace_root=paths.workspace_dir,
+            ),
+        )
+
+        # Run 1: Fails tool execution cleanly and returns text
+        first = await runtime.run(
+            conversation_id=conversation_id,
+            content="Extract corrupted.pdf.",
+            model_name="fake-model",
+            system_prompt="Use tools.",
+        )
+
+        assert first.run.status is RunStatus.COMPLETED
+        assert first.assistant_message is not None
+        assert first.assistant_message.content == "The PDF is corrupted."
+        assert provider.requests[1].messages[-1].role is ModelMessageRole.TOOL
+        assert (
+            provider.requests[1].messages[-1].content == "Error: tool execution failed."
+        )
+
+        # Run 2: Next run in the same conversation succeeds without issue
+        second = await runtime.run(
+            conversation_id=conversation_id,
+            content="What time is it?",
+            model_name="fake-model",
+            system_prompt="Use tools.",
+        )
+
+        assert second.run.status is RunStatus.COMPLETED
+        assert second.assistant_message is not None
+        assert second.assistant_message.content == "It is now UTC time."
+    finally:
         await finisher.aclose()
         await starter.aclose()
         await runs.aclose()

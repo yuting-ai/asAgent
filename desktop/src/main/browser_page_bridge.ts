@@ -12,6 +12,7 @@ import {
   type BrowserInteractiveSnapshot,
   type BrowserNavigateResult,
   type BrowserPageContent,
+  type BrowserPdfDocument,
   type BrowserSelectResult,
   type BrowserSubmitResult,
   type BrowserWaitResult
@@ -19,6 +20,8 @@ import {
 
 export type BrowserPageBridgeOptions = {
   readCurrentPage: (tabId: string) => Promise<BrowserPageContent>
+  readCurrentPdf: (tabId: string, signal: AbortSignal) => Promise<BrowserPdfDocument>
+  validateCurrentPdf: (tabId: string, documentId: string) => void
   inspectInteractive: (tabId: string) => Promise<BrowserInteractiveSnapshot>
   navigateCurrentPage: (tabId: string, url: string) => Promise<BrowserNavigateResult>
   clickCurrentPage: (tabId: string, targetId: string) => Promise<BrowserClickResult>
@@ -86,6 +89,9 @@ function isKnownOperationError(detail: string): boolean {
 
 export class BrowserPageBridge {
   private readonly readCurrentPage: (tabId: string) => Promise<BrowserPageContent>
+  private readonly readCurrentPdf: BrowserPageBridgeOptions['readCurrentPdf']
+  private readonly validateCurrentPdf: BrowserPageBridgeOptions['validateCurrentPdf']
+  private readonly pdfRequests = new Set<AbortController>()
   private readonly inspectInteractive: (tabId: string) => Promise<BrowserInteractiveSnapshot>
   private readonly navigateCurrentPage: (
     tabId: string,
@@ -120,6 +126,8 @@ export class BrowserPageBridge {
 
   constructor(options: BrowserPageBridgeOptions) {
     this.readCurrentPage = options.readCurrentPage
+    this.readCurrentPdf = options.readCurrentPdf
+    this.validateCurrentPdf = options.validateCurrentPdf
     this.inspectInteractive = options.inspectInteractive
     this.navigateCurrentPage = options.navigateCurrentPage
     this.clickCurrentPage = options.clickCurrentPage
@@ -172,6 +180,7 @@ export class BrowserPageBridge {
   }
 
   async stop(): Promise<void> {
+    for (const controller of this.pdfRequests) controller.abort()
     const server = this.server
     this.server = undefined
     this.info = undefined
@@ -193,6 +202,8 @@ export class BrowserPageBridge {
       if (
         request.method !== 'POST' ||
         (request.url !== '/read-current-page' &&
+          request.url !== '/read-current-pdf' &&
+          request.url !== '/validate-current-pdf' &&
           request.url !== '/inspect-interactive' &&
           request.url !== '/navigate-current-page' &&
           request.url !== '/click-current-page' &&
@@ -234,6 +245,44 @@ export class BrowserPageBridge {
       if (request.url === '/read-current-page') {
         const page = await this.readCurrentPage(tabId.trim())
         writeJson(response, 200, page)
+        return
+      }
+
+      if (request.url === '/validate-current-pdf') {
+        const documentId = record['document_id']
+        if (typeof documentId !== 'string' || !/^doc-[a-f0-9]{32}$/.test(documentId)) {
+          writeJson(response, 400, { detail: 'invalid request' })
+          return
+        }
+        this.validateCurrentPdf(tabId.trim(), documentId)
+        writeJson(response, 200, { document_id: documentId })
+        return
+      }
+
+      if (request.url === '/read-current-pdf') {
+        const controller = new AbortController()
+        const onDisconnect = (): void => {
+          if (!response.writableFinished) controller.abort()
+        }
+        response.on('close', onDisconnect)
+        request.on('aborted', onDisconnect)
+        this.pdfRequests.add(controller)
+        try {
+          if (response.destroyed || request.aborted) controller.abort()
+          const doc = await this.readCurrentPdf(tabId.trim(), controller.signal)
+          if (controller.signal.aborted || response.destroyed) return
+          this.validateCurrentPdf(tabId.trim(), doc.documentId)
+          response.writeHead(200, {
+            'Content-Type': 'application/pdf',
+            'X-Document-Id': doc.documentId,
+            'Content-Length': doc.data.byteLength
+          })
+          response.end(doc.data)
+        } finally {
+          response.off('close', onDisconnect)
+          request.off('aborted', onDisconnect)
+          this.pdfRequests.delete(controller)
+        }
         return
       }
 
@@ -315,6 +364,7 @@ export class BrowserPageBridge {
       const result = await this.clickCurrentPage(tabId.trim(), targetId)
       writeJson(response, 200, result)
     } catch (error) {
+      if (response.destroyed) return
       const detail = normalizeBrowserOperationError(error)
       writeJson(response, 409, {
         detail: isKnownOperationError(detail) ? detail : 'target was not found'

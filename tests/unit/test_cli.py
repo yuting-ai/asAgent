@@ -170,6 +170,7 @@ async def test_conversation_kind_scopes_specialized_tool_snapshots(
 
     tool_ids = {definition.tool_id for definition in registry.definitions()}
     assert "builtin.echo" in tool_ids
+    assert "document.extract_text" in tool_ids
     assert ("mcp:tavily:tavily_search:test" in tool_ids) is expects_tavily
     assert (
         any(tool_id.startswith("automation_browser.") for tool_id in tool_ids)

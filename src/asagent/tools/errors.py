@@ -26,6 +26,14 @@ SAFE_BROWSER_OPERATION_ERRORS = frozenset(
         "option is disabled",
         "page changed; inspect interactive elements again",
         "current browser tab is not visible",
+        "current page is not an HTTP or HTTPS PDF document",
+        "PDF exceeds the 20 MiB limit",
+        "document does not have a valid PDF header",
+        "failed to fetch PDF document",
+        "redirect to non-http(s) protocol is forbidden",
+        "PDF fetch was cancelled",
+        "PDF fetch timed out",
+        "PDF document changed; start a new browser run",
     }
 )
 

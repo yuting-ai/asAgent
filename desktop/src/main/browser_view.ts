@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import type { Session, WebContentsViewConstructorOptions } from 'electron'
 
 import { parseBrowserWebUrl } from './external_url'
@@ -20,6 +21,11 @@ export type BrowserPageContent = {
   title: string
   url: string
   text: string
+}
+
+export type BrowserPdfDocument = {
+  documentId: string
+  data: Buffer
 }
 
 export type BrowserClickResult = {
@@ -99,6 +105,9 @@ export const BROWSER_SELECT_OPTION_LIMIT = 50
 export const BROWSER_SELECT_OPTION_TEXT_LIMIT = 120
 export const BROWSER_WAIT_POLL_INTERVAL_MS = 500
 export const BROWSER_WAIT_SETTLE_QUIET_MS = 500
+export const BROWSER_PDF_MAX_BYTES = 20 * 1024 * 1024
+export const BROWSER_PDF_TIMEOUT_MS = 15_000
+export const BROWSER_PDF_MAX_REDIRECTS = 5
 
 export const BROWSER_OPERATION_ERRORS = [
   'target was not found',
@@ -110,7 +119,15 @@ export const BROWSER_OPERATION_ERRORS = [
   'option was not found',
   'option is disabled',
   'page changed; inspect interactive elements again',
-  'current browser tab is not visible'
+  'current browser tab is not visible',
+  'current page is not an HTTP or HTTPS PDF document',
+  'PDF exceeds the 20 MiB limit',
+  'document does not have a valid PDF header',
+  'failed to fetch PDF document',
+  'redirect to non-http(s) protocol is forbidden',
+  'PDF fetch was cancelled',
+  'PDF fetch timed out',
+  'PDF document changed; start a new browser run'
 ] as const
 
 export type BrowserOperationError = (typeof BROWSER_OPERATION_ERRORS)[number]
@@ -200,6 +217,7 @@ export type BrowserViewBounds = {
 export type BrowserNavigationEvent = {
   preventDefault(): void
   url?: string
+  isMainFrame?: boolean
 }
 
 export type BrowserPageView = {
@@ -233,8 +251,15 @@ export type BrowserPageView = {
         | 'did-frame-navigate'
         | 'did-navigate'
         | 'did-navigate-in-page'
+        | 'did-start-navigation'
+        | 'destroyed'
         | 'page-title-updated',
-      listener: (event: BrowserNavigationEvent, urlOrTitle?: string) => void
+      listener: (
+        event: BrowserNavigationEvent,
+        urlOrTitle?: string,
+        isInPlace?: boolean,
+        isMainFrame?: boolean
+      ) => void
     ): void
   }
 }
@@ -252,6 +277,7 @@ export type VisibleBrowserOptions = {
   session: Session
   createView: (options: WebContentsViewConstructorOptions) => BrowserPageView
   onTabState?: (state: BrowserTabState) => void
+  fetchPdf?: (url: string, session: Session, signal: AbortSignal) => Promise<Buffer>
 }
 
 export function parseBrowserViewBounds(value: unknown): BrowserViewBounds {
@@ -1033,13 +1059,111 @@ function denyUnsafeNavigation(event: BrowserNavigationEvent, url?: string): void
   }
 }
 
+async function defaultFetchPdf(
+  url: string,
+  session: Session,
+  signal: AbortSignal
+): Promise<Buffer> {
+  let currentUrl = url
+  let redirectCount = 0
+
+  while (redirectCount <= BROWSER_PDF_MAX_REDIRECTS) {
+    if (signal.aborted) {
+      throw new Error('PDF fetch was cancelled')
+    }
+
+    let response: Response
+    try {
+      response = await session.fetch(currentUrl, {
+        method: 'GET',
+        signal,
+        redirect: 'manual'
+      })
+    } catch (error) {
+      if (signal.aborted) {
+        throw new Error('PDF fetch was cancelled')
+      }
+      throw error
+    }
+
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      await response.body?.cancel()
+      const location = response.headers.get('location')
+      if (!location) {
+        throw new Error('failed to fetch PDF document')
+      }
+      let nextUrl: URL
+      try {
+        nextUrl = new URL(location, currentUrl)
+      } catch {
+        throw new Error('redirect to non-http(s) protocol is forbidden')
+      }
+      if (nextUrl.protocol !== 'http:' && nextUrl.protocol !== 'https:') {
+        throw new Error('redirect to non-http(s) protocol is forbidden')
+      }
+      currentUrl = nextUrl.toString()
+      redirectCount++
+      if (redirectCount > BROWSER_PDF_MAX_REDIRECTS) {
+        throw new Error('failed to fetch PDF document')
+      }
+      continue
+    }
+
+    if (!response.ok) {
+      await response.body?.cancel()
+      throw new Error('failed to fetch PDF document')
+    }
+
+    const contentType = response.headers.get('content-type') || ''
+    const lowerContentType = contentType.toLowerCase()
+    if (lowerContentType.includes('text/html') || lowerContentType.includes('application/json')) {
+      await response.body?.cancel()
+      throw new Error('current page is not an HTTP or HTTPS PDF document')
+    }
+
+    if (!response.body) {
+      throw new Error('document does not have a valid PDF header')
+    }
+
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let totalBytes = 0
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) {
+          break
+        }
+        if (value) {
+          totalBytes += value.byteLength
+          if (totalBytes > BROWSER_PDF_MAX_BYTES) {
+            await reader.cancel()
+            throw new Error('PDF exceeds the 20 MiB limit')
+          }
+          chunks.push(value)
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
+
+    return Buffer.concat(chunks)
+  }
+
+  throw new Error('failed to fetch PDF document')
+}
+
 export class VisibleBrowser {
   private readonly session: Session
   private readonly createView: (options: WebContentsViewConstructorOptions) => BrowserPageView
   private readonly onTabState: ((state: BrowserTabState) => void) | undefined
+  private readonly fetchPdf: (url: string, session: Session, signal: AbortSignal) => Promise<Buffer>
   private readonly tabs = new Map<string, BrowserPageView>()
   private readonly interactionSnapshots = new Map<string, Map<string, InteractionTargetRecord>>()
   private readonly lastActionPageState = new Map<string, string>()
+  private readonly tabDocumentTokens = new Map<string, { url: string; token: string }>()
+  private readonly activePdfRequests = new Map<string, Set<AbortController>>()
   private hostWindow: BrowserHostWindow | undefined
   private lastBounds: BrowserViewBounds | undefined
   private visibleTabId: string | undefined
@@ -1049,6 +1173,7 @@ export class VisibleBrowser {
     this.session = options.session
     this.createView = options.createView
     this.onTabState = options.onTabState
+    this.fetchPdf = options.fetchPdf ?? defaultFetchPdf
   }
 
   show(window: BrowserHostWindow, bounds: BrowserViewBounds, tabId: string): void {
@@ -1089,6 +1214,7 @@ export class VisibleBrowser {
   async navigate(tabId: string, url: string): Promise<string> {
     this.assertNotDisposed()
     const safeUrl = parseBrowserWebUrl(url)
+    this.invalidatePdfDocument(parseBrowserTabId(tabId))
     await loadTabUrl(this.ensureView(parseBrowserTabId(tabId)), safeUrl)
     return browserDisplayUrl(safeUrl)
   }
@@ -1104,20 +1230,24 @@ export class VisibleBrowser {
     switch (action) {
       case 'back':
         if (view.webContents.canGoBack()) {
+          this.invalidatePdfDocument(id)
           view.webContents.goBack()
         }
         break
       case 'forward':
         if (view.webContents.canGoForward()) {
+          this.invalidatePdfDocument(id)
           view.webContents.goForward()
         }
         break
       case 'reload':
         if (!isBlankBrowserUrl(view.webContents.getURL())) {
+          this.invalidatePdfDocument(id)
           view.webContents.reload()
         }
         break
       case 'home':
+        this.invalidatePdfDocument(id)
         await loadTabUrl(view, BROWSER_HOME_URL)
         break
     }
@@ -1139,6 +1269,7 @@ export class VisibleBrowser {
       this.hostWindow.contentView.removeChildView(view)
     }
 
+    this.invalidatePdfDocument(closedTabId)
     view.webContents.close()
     this.tabs.delete(closedTabId)
     this.interactionSnapshots.delete(closedTabId)
@@ -1216,6 +1347,103 @@ export class VisibleBrowser {
       url: browserDisplayUrl(view.webContents.getURL()),
       text: truncateBrowserText(textParts.join('\n\n'), BROWSER_PAGE_TEXT_LIMIT)
     }
+  }
+
+  validateCurrentPdf(tabId: string, documentId: string): void {
+    this.assertNotDisposed()
+    const id = parseBrowserTabId(tabId)
+    this.assertVisibleTab(id)
+    const entry = this.tabDocumentTokens.get(id)
+    if (entry?.token !== documentId || entry.url !== this.tabs.get(id)?.webContents.getURL()) {
+      throw new Error('PDF document changed; start a new browser run')
+    }
+  }
+
+  async readCurrentPdf(tabId: string, signal?: AbortSignal): Promise<BrowserPdfDocument> {
+    this.assertNotDisposed()
+    const id = parseBrowserTabId(tabId)
+    if (this.visibleTabId !== id) {
+      throw new Error('current browser tab is not visible')
+    }
+
+    const view = this.tabs.get(id)
+    if (view === undefined) {
+      throw new Error('current browser tab is not visible')
+    }
+
+    const currentUrl = view.webContents.getURL()
+    let parsedUrl: URL
+    try {
+      parsedUrl = new URL(currentUrl)
+    } catch {
+      throw new Error('current page is not an HTTP or HTTPS PDF document')
+    }
+
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      throw new Error('current page is not an HTTP or HTTPS PDF document')
+    }
+
+    let docEntry = this.tabDocumentTokens.get(id)
+    if (docEntry === undefined || docEntry.url !== currentUrl) {
+      const token = `doc-${randomBytes(16).toString('hex')}`
+      docEntry = { url: currentUrl, token }
+      this.tabDocumentTokens.set(id, docEntry)
+    }
+    const documentId = docEntry.token
+
+    const abortController = new AbortController()
+    const onAbort = (): void => {
+      abortController.abort(new Error('PDF fetch was cancelled'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
+    const requests = this.activePdfRequests.get(id) ?? new Set<AbortController>()
+    requests.add(abortController)
+    this.activePdfRequests.set(id, requests)
+    const timer = setTimeout(() => {
+      abortController.abort(new Error('PDF fetch timed out'))
+    }, BROWSER_PDF_TIMEOUT_MS)
+
+    try {
+      abortController.signal.throwIfAborted()
+      const data = await this.fetchPdf(currentUrl, this.session, abortController.signal)
+      abortController.signal.throwIfAborted()
+      this.validateCurrentPdf(id, documentId)
+      if (data.length > BROWSER_PDF_MAX_BYTES) {
+        throw new Error('PDF exceeds the 20 MiB limit')
+      }
+      const headerSample = data.subarray(0, 1024).toString('latin1')
+      if (!headerSample.includes('%PDF-')) {
+        throw new Error('document does not have a valid PDF header')
+      }
+      return {
+        documentId,
+        data
+      }
+    } catch (error) {
+      if (abortController.signal.aborted) {
+        if (abortController.signal.reason instanceof Error) {
+          throw abortController.signal.reason
+        }
+        throw new Error('PDF fetch timed out')
+      }
+      throw error
+    } finally {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      requests.delete(abortController)
+      if (requests.size === 0 && this.activePdfRequests.get(id) === requests) {
+        this.activePdfRequests.delete(id)
+      }
+    }
+  }
+
+  private invalidatePdfDocument(tabId: string): void {
+    this.tabDocumentTokens.delete(tabId)
+    for (const controller of this.activePdfRequests.get(tabId) ?? []) {
+      controller.abort(new Error('PDF fetch was cancelled'))
+    }
+    this.activePdfRequests.delete(tabId)
   }
 
   async waitForCurrentPage(tabId: string, seconds: number): Promise<BrowserWaitResult> {
@@ -1366,6 +1594,7 @@ export class VisibleBrowser {
 
     const view = this.ensureView(id)
     const safeUrl = parseBrowserWebUrl(url)
+    this.invalidatePdfDocument(id)
     await loadTabUrl(view, safeUrl)
     const displayUrl = browserDisplayUrl(safeUrl)
     const page = await this.readCurrentPage(id).catch(() => undefined)
@@ -1848,6 +2077,7 @@ export class VisibleBrowser {
     }
 
     this.disposed = true
+    for (const tabId of this.tabs.keys()) this.invalidatePdfDocument(tabId)
     for (const view of this.tabs.values()) {
       if (this.hostWindow !== undefined && !this.hostWindow.isDestroyed()) {
         this.hostWindow.contentView.removeChildView(view)
@@ -1875,6 +2105,7 @@ export class VisibleBrowser {
     }
 
     const view = this.tabs.get(this.visibleTabId)
+    this.invalidatePdfDocument(this.visibleTabId)
     this.visibleTabId = undefined
     if (view === undefined) {
       return
@@ -1964,8 +2195,16 @@ export class VisibleBrowser {
       this.handleWindowOpen(details?.url)
       return { action: 'deny' }
     })
-    view.webContents.on('will-navigate', denyUnsafeNavigation)
-    view.webContents.on('will-redirect', denyUnsafeNavigation)
+    const onDocumentNavigate = (event: BrowserNavigationEvent, url?: string): void => {
+      denyUnsafeNavigation(event, url)
+      this.invalidatePdfDocument(tabId)
+    }
+    view.webContents.on('will-navigate', onDocumentNavigate)
+    view.webContents.on('will-redirect', onDocumentNavigate)
+    view.webContents.on('did-start-navigation', (event, _url, _inPlace, isMainFrame) => {
+      if ((event.isMainFrame ?? isMainFrame) !== false) this.invalidatePdfDocument(tabId)
+    })
+    view.webContents.on('destroyed', () => this.invalidatePdfDocument(tabId))
     const clearInteractionSnapshot = (): void => {
       this.interactionSnapshots.delete(tabId)
     }
@@ -1978,6 +2217,7 @@ export class VisibleBrowser {
       this.publishTabState(tabId, view)
     }
     const onNavigated = (): void => {
+      this.invalidatePdfDocument(tabId)
       clearInteractionSnapshot()
       publish()
     }

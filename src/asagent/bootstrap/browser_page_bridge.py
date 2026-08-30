@@ -14,6 +14,12 @@ class BrowserPageContent:
 
 
 @dataclass(frozen=True, slots=True)
+class BrowserPdfDocument:
+    document_id: str
+    data: bytes
+
+
+@dataclass(frozen=True, slots=True)
 class BrowserSelectOption:
     value: str
     label: str
@@ -110,6 +116,30 @@ class BrowserPageBridgeClient:
         )
         return _page_content_from_payload(payload)
 
+    async def read_current_pdf(self, tab_id: str) -> BrowserPdfDocument:
+        response = await self._post_raw(
+            "/read-current-pdf",
+            {"tab_id": tab_id},
+            failure_message="current browser tab is not visible",
+            timeout_seconds=20.0,
+        )
+        document_id = response.headers.get("x-document-id")
+        if not document_id:
+            raise BrowserPageBridgeError("bridge response missing document identity")
+        return BrowserPdfDocument(document_id=document_id, data=response.content)
+
+    async def validate_current_pdf(self, tab_id: str, document_id: str) -> None:
+        payload = await self._post_json(
+            "/validate-current-pdf",
+            {"tab_id": tab_id, "document_id": document_id},
+            failure_message="current browser tab is not visible",
+            timeout_seconds=2.0,
+        )
+        if not isinstance(payload, dict) or payload.get("document_id") != document_id:
+            raise BrowserPageBridgeError(
+                "bridge response has invalid document identity"
+            )
+
     async def inspect_interactive(self, tab_id: str) -> BrowserInteractiveSnapshot:
         payload = await self._post_json(
             "/inspect-interactive",
@@ -194,6 +224,25 @@ class BrowserPageBridgeClient:
         failure_message: str,
         timeout_seconds: float | None = None,
     ) -> Any:
+        response = await self._post_raw(
+            path,
+            body,
+            failure_message=failure_message,
+            timeout_seconds=timeout_seconds,
+        )
+        try:
+            return response.json()
+        except ValueError as error:
+            raise BrowserPageBridgeError(failure_message) from error
+
+    async def _post_raw(
+        self,
+        path: str,
+        body: dict[str, object],
+        *,
+        failure_message: str,
+        timeout_seconds: float | None = None,
+    ) -> httpx.Response:
         client = self._http_client
         owns_client = client is None
         if client is None:
@@ -223,10 +272,7 @@ class BrowserPageBridgeClient:
                 raise ToolOperationError(detail)
             raise BrowserPageBridgeError(failure_message)
 
-        try:
-            return response.json()
-        except ValueError as error:
-            raise BrowserPageBridgeError(failure_message) from error
+        return response
 
 
 def _detail_from_error_payload(response: httpx.Response) -> str | None:

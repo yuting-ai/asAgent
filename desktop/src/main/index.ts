@@ -488,6 +488,18 @@ app.whenReady().then(async () => {
       }
       return visibleBrowser.readCurrentPage(tabId)
     },
+    readCurrentPdf: (tabId, signal) => {
+      if (visibleBrowser === undefined) {
+        throw new Error('current browser tab is not visible')
+      }
+      return visibleBrowser.readCurrentPdf(tabId, signal)
+    },
+    validateCurrentPdf: (tabId, documentId) => {
+      if (visibleBrowser === undefined) {
+        throw new Error('current browser tab is not visible')
+      }
+      visibleBrowser.validateCurrentPdf(tabId, documentId)
+    },
     inspectInteractive: (tabId) => {
       if (visibleBrowser === undefined) {
         throw new Error('current browser tab is not visible')

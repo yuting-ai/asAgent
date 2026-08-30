@@ -19,7 +19,8 @@ class FilesystemReadFileTool:
             tool_id="filesystem.read_file",
             display_name="Read file",
             description=(
-                "Reads the UTF-8 text content of one authorized file. "
+                "Reads plain UTF-8 text files (such as .txt, .md, .py, .json). "
+                "Do NOT use for binary documents like PDF files (use document.extract_text instead). "
                 "Files larger than 65536 bytes are rejected."
             ),
             input_schema={
