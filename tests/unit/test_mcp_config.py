@@ -183,11 +183,12 @@ def test_normalize_subprocess_path_augments_macos_gui_path() -> None:
     parts = normalized.split(":")
     assert len(parts) == len(set(parts))
 
-    # Test _mcp_subprocess_environment includes normalized PATH on darwin
+    # Test _mcp_subprocess_environment includes normalized PATH and HOME on darwin
     env = _mcp_subprocess_environment(
         {"PATH": minimal_gui_path}, platform_name="darwin"
     )
     assert "/opt/homebrew/bin" in env["PATH"]
+    assert "HOME" in env
 
 
 def test_normalize_subprocess_path_preserves_linux_path() -> None:

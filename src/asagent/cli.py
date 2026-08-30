@@ -158,7 +158,19 @@ _BROWSER_TOOL_PERMISSIONS = (
     | _BROWSER_CLICK_PERMISSIONS
     | _BROWSER_WAIT_PERMISSIONS
 )
-_MCP_SUBPROCESS_ENVIRONMENT_NAMES = ("PATH",)
+_MCP_SUBPROCESS_ENVIRONMENT_NAMES = (
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+)
 
 
 class _EchoModelProvider:
@@ -545,6 +557,10 @@ def _mcp_subprocess_environment(
             env["PATH"] = _normalize_subprocess_path(value, platform_name=platform_name)
         elif value is not None:
             env[name] = value
+
+    if "HOME" not in env:
+        env["HOME"] = str(Path.home())
+
     return env
 
 

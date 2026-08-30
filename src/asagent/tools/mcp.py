@@ -481,7 +481,7 @@ class McpClient:
             *self._command,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
             cwd=self._working_directory,
             env=self._environment,
         )
@@ -496,7 +496,23 @@ class McpClient:
             while True:
                 line = await process.stdout.readline()
                 if not line:
-                    raise McpProtocolError("MCP server closed stdout unexpectedly")
+                    stderr_output = ""
+                    if process.stderr is not None:
+                        try:
+                            stderr_bytes = await asyncio.wait_for(
+                                process.stderr.read(2048),
+                                timeout=0.5,
+                            )
+                            stderr_output = stderr_bytes.decode(
+                                "utf-8",
+                                errors="replace",
+                            ).strip()
+                        except Exception:
+                            pass
+                    err_msg = "MCP server closed stdout unexpectedly"
+                    if stderr_output:
+                        err_msg = f"{err_msg}: {stderr_output}"
+                    raise McpProtocolError(err_msg)
 
                 try:
                     payload: object = json.loads(line)
