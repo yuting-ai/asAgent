@@ -31,6 +31,7 @@ asAgent brings chat, browser assistance, scheduled tasks, and reversible file op
 
 - Chat with OpenAI-compatible models and inspect each run.
 - Ask the agent to read and interact with pages in a visible browser.
+- Chat with PDF documents — extract and read text from authorized local PDFs or online PDFs directly in browser tabs without saving temporary files.
 - Create one-time, daily, and weekly automated tasks.
 - Read and modify authorized files with snapshots and recovery safeguards.
 
@@ -50,7 +51,8 @@ asAgent currently has no telemetry integration. External model providers, Tavily
 ### 2. Conversation-scoped workspace and reversible file changes
 
 - **Scoped access:** Each Chat conversation starts with its own asAgent Workspace and can be granted additional folders or individual files. Real-path resolution prevents `..` and symlink escape.
-- **Read tools:** `filesystem.list`, `filesystem.read_file`, and `filesystem.search_files` operate only inside the current conversation's allowed scope.
+- **Read tools:** `filesystem.list`, `filesystem.read_file`, `filesystem.search_files`, and `document.extract_text` operate only inside the current conversation's allowed scope.
+- **Local PDF text extraction:** `document.extract_text` extracts text layers from authorized `.pdf` files page-by-page with character-offset pagination, without loading entire multi-megabyte documents into model context at once.
 - **Write tools:** `filesystem.create_file`, `filesystem.replace_file`, and `filesystem.delete_file` are currently allowed without a per-operation approval prompt inside an explicitly authorized scope. Create and replace accept complete UTF-8 file content; there is no line-level edit tool yet.
 - **Undo safety:** SQLite stores FileChange metadata and hashes, while private pre-change snapshots are stored under the application data directory. Snapshots are full pre-change bytes, not SQLite diffs. The current limits are 20 MiB per snapshot and 200 MiB in total, with configurable retention and manual cleanup.
 - **Safer deletion:** Deleted files are moved to the operating system Trash. When a private snapshot is available, the chat also offers a guarded Undo action.
@@ -59,7 +61,8 @@ asAgent currently has no telemetry integration. External model providers, Tavily
 ### 3. Visible Browser assistant and isolated automation browser
 
 - **Visible Browser conversations:** Electron owns a persistent `WebContentsView` session and keeps page credentials, cookies, DOM selectors, and storage out of Python and the Renderer.
-- **Page tools:** Bound Browser runs can use `browser.navigate`, `browser.read_current_page`, `browser.take_snapshot`, `browser.click`, `browser.fill`, `browser.select`, and `browser.wait`.
+- **Page tools:** Bound Browser runs can use `browser.navigate`, `browser.read_current_page`, `browser.read_current_pdf`, `browser.take_snapshot`, `browser.click`, `browser.fill`, `browser.select`, and `browser.wait`.
+- **Online PDF memory reading:** `browser.read_current_pdf` extracts text directly from the active tab's streaming PDF preview in memory (up to 20 MiB), enabling reading online papers and manuals with zero disk footprint.
 - **Semantic snapshots:** `browser.take_snapshot` returns bounded `ref`, name, role, tag, disabled state, and native select options. It does not expose full HTML or CSS selectors.
 - **Page Assistant:** A side panel can discuss the current page and perform visible interactions on the bound tab.
 - **Background isolation:** Scheduled tasks use a separate Playwright-over-CDP automation service and an independent browser profile. This path requires a supported system browser such as Google Chrome, Microsoft Edge, or Chromium.
@@ -144,13 +147,13 @@ The older `dev:deepseek` developer entry also requires a matching non-sensitive 
 ### 3. Testing & quality assurance
 
 ```bash
-# Python tests (currently 530 collected tests)
+# Python tests (currently 622 collected tests)
 uv run pytest
 
 # Python lint, formatting check, strict typing, lock and diff checks
 scripts/check.sh
 
-# Desktop type checking, linting, and tests (currently 133 tests)
+# Desktop type checking, linting, and tests (currently 176 tests)
 npm --prefix desktop run typecheck
 npm --prefix desktop run lint
 npm --prefix desktop test

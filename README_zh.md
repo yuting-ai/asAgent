@@ -31,6 +31,7 @@ asAgent 将对话、浏览器辅助、定时任务和可撤回文件操作集中
 
 - 与兼容 OpenAI 接口的模型对话，并查看每次运行过程。
 - 让 Agent 在可见浏览器中读取网页并执行交互。
+- 与 PDF 文档对话 —— 直接提取并阅读授权的本地 PDF 文件或浏览器标签页中的在线 PDF 内容，无需落地临时文件。
 - 创建单次、每日和每周自动化任务。
 - 在授权范围内读取和修改文件，并通过快照与恢复机制降低风险。
 
@@ -50,7 +51,8 @@ asAgent 当前没有接入遥测服务。外部模型服务商、Tavily 和用�
 ### 2. 会话级工作区与可撤回文件变更
 
 - **范围隔离：** 每个 Chat Conversation 默认拥有自己的 asAgent Workspace，并可额外授权文件夹或单个文件；真实路径解析阻止 `..` 和符号链接逃逸。
-- **只读工具：** `filesystem.list`、`filesystem.read_file` 和 `filesystem.search_files` 只能访问当前会话已授权范围。
+- **只读工具：** `filesystem.list`、`filesystem.read_file`、`filesystem.search_files` 和 `document.extract_text` 只能访问当前会话已授权范围。
+- **本地 PDF 文本提取：** `document.extract_text` 支持按页和字符偏移量对授权工作区内的 `.pdf` 文件进行分页提取，避免一次性向模型注入超大文本。
 - **写入工具：** `filesystem.create_file`、`filesystem.replace_file` 和 `filesystem.delete_file` 当前在用户已明确授权的路径范围内免逐次审批执行。Create/Replace 接收完整 UTF-8 文件正文；目前没有行级编辑工具。
 - **Undo 安全机制：** SQLite 保存 FileChange 元数据和哈希，变更前快照正文保存在应用数据目录的私有文件中。快照是完整的变更前字节，不是 SQLite diff；当前单项上限为 20 MiB、总量上限为 200 MiB，并支持保留周期设置与手动清理。
 - **更安全的删除：** 删除文件会移动到系统废纸篓；存在私有快照时，对话中还会提供带冲突校验的 Undo。
@@ -59,7 +61,8 @@ asAgent 当前没有接入遥测服务。外部模型服务商、Tavily 和用�
 ### 3. 可见 Browser 助手与隔离的自动化浏览器
 
 - **可见 Browser Conversation：** Electron 独占持久化 `WebContentsView` Session，网页凭据、Cookie、DOM Selector 和 Storage 不进入 Python 或 Renderer。
-- **页面工具：** 绑定标签页的 Browser Run 可使用 `browser.navigate`、`browser.read_current_page`、`browser.take_snapshot`、`browser.click`、`browser.fill`、`browser.select` 和 `browser.wait`。
+- **页面工具：** 绑定标签页的 Browser Run 可使用 `browser.navigate`、`browser.read_current_page`、`browser.read_current_pdf`、`browser.take_snapshot`、`browser.click`、`browser.fill`、`browser.select` 和 `browser.wait`。
+- **在线 PDF 内存阅读：** `browser.read_current_pdf` 直接从可见标签页的内存流中读取在线 PDF 预览正文（支持最高 20 MiB 限制与分页续读），不产生磁盘临时文件即可分析在线论文与手册。
 - **语义快照：** `browser.take_snapshot` 返回有界的 `ref`、名称、角色、标签、禁用状态和原生 Select Options，不暴露完整 HTML 或 CSS Selector。
 - **页面助手：** 右侧面板可以讨论当前网页，并在绑定标签页中执行用户可见的交互。
 - **后台隔离：** Scheduled task 使用独立 Profile 的 Playwright-over-CDP 自动化服务。该能力要求系统安装 Google Chrome、Microsoft Edge 或 Chromium 等受支持浏览器。
@@ -144,13 +147,13 @@ npm --prefix desktop run dev
 ### 3. 测试与质量保证
 
 ```bash
-# Python 测试（当前收集 530 个测试）
+# Python 测试（当前收集 622 个测试）
 uv run pytest
 
 # Python Lint、格式检查、strict mypy、锁文件和 diff 检查
 scripts/check.sh
 
-# Desktop 类型检查、Lint 和测试（当前 133 个测试）
+# Desktop 类型检查、Lint 和测试（当前 176 个测试）
 npm --prefix desktop run typecheck
 npm --prefix desktop run lint
 npm --prefix desktop test
