@@ -506,7 +506,7 @@ function TreeIcon({
 }
 
 const DEFAULT_RAIL_WIDTH = 226
-const COLLAPSED_RAIL_WIDTH = 68
+const COLLAPSED_RAIL_WIDTH = 48
 const DEFAULT_THREAD_WIDTH = 210
 const DEFAULT_ATTENTION_WIDTH = 300
 const MIN_RAIL_WIDTH = 180
@@ -4012,6 +4012,116 @@ export default function App(): React.JSX.Element {
           } as CSSProperties
         }
       >
+        <header aria-label="Window toolbar" className="window-titlebar">
+          {activeView === 'chat' ? (
+            <div className="window-titlebar-content window-chat-header">
+              <div className="chat-thread-header-title">
+                {selectedConversation
+                  ? conversationLabel(selectedConversation.title, appLanguage)
+                  : t(appLanguage, 'noConversationSelected')}
+              </div>
+              {hasAttachedWorkspace ? (
+                <button
+                  aria-label="Toggle workspace files panel"
+                  className={`chat-workspace-toggle-btn${desktopLayout.attentionPanelOpen ? ' is-active' : ''}`}
+                  onClick={() => setAttentionPanelOpen(!desktopLayout.attentionPanelOpen)}
+                  title={
+                    desktopLayout.attentionPanelOpen
+                      ? t(appLanguage, 'hideWorkspaceFiles')
+                      : t(appLanguage, 'showWorkspaceFiles')
+                  }
+                  type="button"
+                >
+                  <svg
+                    className="chat-workspace-toggle-svg"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                  >
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  </svg>
+                  <span>{t(appLanguage, 'workspaceFiles')}</span>
+                  <span className="chat-workspace-toggle-count">
+                    {(workspaceSettings?.additional_roots.length ?? 0) +
+                      (workspaceSettings?.additional_files.length ?? 0)}
+                  </span>
+                  {!desktopLayout.attentionPanelOpen ? (
+                    <svg
+                      aria-hidden="true"
+                      className="chat-workspace-toggle-arrow"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="m13 17 5-5-5-5" />
+                      <path d="m6 17 5-5-5-5" />
+                    </svg>
+                  ) : null}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {activeView === 'browser' ? (
+            <div className="window-titlebar-content window-browser-header">
+              <div aria-label="Browser tabs" className="browser-tabstrip" role="tablist">
+                {browserTabs.map((tab) => {
+                  const selected = tab.id === activeBrowserTabId
+                  return (
+                    <div
+                      aria-selected={selected}
+                      className={`browser-tab${selected ? ' is-active' : ''}`}
+                      key={tab.id}
+                      onAuxClick={(event) => {
+                        if (event.button === 1) {
+                          event.preventDefault()
+                          closeBrowserTab(tab.id)
+                        }
+                      }}
+                      onClick={() => selectBrowserTab(tab.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          selectBrowserTab(tab.id)
+                        }
+                      }}
+                      role="tab"
+                      tabIndex={selected ? 0 : -1}
+                      title={tab.title}
+                    >
+                      <span className="browser-tab-title">{tab.title}</span>
+                      <button
+                        aria-label={`Close ${tab.title}`}
+                        className="browser-tab-close"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          closeBrowserTab(tab.id)
+                        }}
+                        type="button"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )
+                })}
+                <button
+                  aria-label={t(appLanguage, 'newTab')}
+                  className="browser-tab-new"
+                  disabled={browserTabs.length >= MAX_BROWSER_TABS}
+                  onClick={addBrowserTab}
+                  type="button"
+                >
+                  <Icon path="M12 5v14M5 12h14" />
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </header>
+
         <div
           aria-label="Resize navigation panel"
           className="column-resizer column-resizer-left"
@@ -4026,7 +4136,6 @@ export default function App(): React.JSX.Element {
         />
 
         <nav aria-label="Primary" className="rail" id="primary-sidebar">
-          <div aria-hidden="true" className="rail-window-controls" />
           <div className="rail-section rail-actions-section">
             <button
               className="rail-new-btn is-chat"
@@ -4414,57 +4523,6 @@ export default function App(): React.JSX.Element {
               />
 
               <div className="chat-main">
-                <div className="chat-thread-header">
-                  <div className="chat-thread-header-title">
-                    {selectedConversation
-                      ? conversationLabel(selectedConversation.title, appLanguage)
-                      : t(appLanguage, 'noConversationSelected')}
-                  </div>
-                  {hasAttachedWorkspace ? (
-                    <button
-                      aria-label="Toggle workspace files panel"
-                      className={`chat-workspace-toggle-btn${desktopLayout.attentionPanelOpen ? ' is-active' : ''}`}
-                      onClick={() => setAttentionPanelOpen(!desktopLayout.attentionPanelOpen)}
-                      title={
-                        desktopLayout.attentionPanelOpen
-                          ? t(appLanguage, 'hideWorkspaceFiles')
-                          : t(appLanguage, 'showWorkspaceFiles')
-                      }
-                      type="button"
-                    >
-                      <svg
-                        className="chat-workspace-toggle-svg"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        viewBox="0 0 24 24"
-                      >
-                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                      </svg>
-                      <span>{t(appLanguage, 'workspaceFiles')}</span>
-                      <span className="chat-workspace-toggle-count">
-                        {(workspaceSettings?.additional_roots.length ?? 0) +
-                          (workspaceSettings?.additional_files.length ?? 0)}
-                      </span>
-                      {!desktopLayout.attentionPanelOpen ? (
-                        <svg
-                          aria-hidden="true"
-                          className="chat-workspace-toggle-arrow"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          viewBox="0 0 24 24"
-                        >
-                          <path d="m13 17 5-5-5-5" />
-                          <path d="m6 17 5-5-5-5" />
-                        </svg>
-                      ) : null}
-                    </button>
-                  ) : null}
-                </div>
-
                 {errorMessage ? <p className="chat-error">{errorMessage}</p> : null}
 
                 <div
@@ -5104,56 +5162,6 @@ export default function App(): React.JSX.Element {
               }
             >
               <div className="browser-chrome">
-                <div aria-label="Browser tabs" className="browser-tabstrip" role="tablist">
-                  {browserTabs.map((tab) => {
-                    const selected = tab.id === activeBrowserTabId
-                    return (
-                      <div
-                        aria-selected={selected}
-                        className={`browser-tab${selected ? ' is-active' : ''}`}
-                        key={tab.id}
-                        onClick={() => selectBrowserTab(tab.id)}
-                        onAuxClick={(event) => {
-                          if (event.button === 1) {
-                            event.preventDefault()
-                            closeBrowserTab(tab.id)
-                          }
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault()
-                            selectBrowserTab(tab.id)
-                          }
-                        }}
-                        role="tab"
-                        tabIndex={selected ? 0 : -1}
-                        title={tab.title}
-                      >
-                        <span className="browser-tab-title">{tab.title}</span>
-                        <button
-                          aria-label={`Close ${tab.title}`}
-                          className="browser-tab-close"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            closeBrowserTab(tab.id)
-                          }}
-                          type="button"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    )
-                  })}
-                  <button
-                    aria-label={t(appLanguage, 'newTab')}
-                    className="browser-tab-new"
-                    disabled={browserTabs.length >= MAX_BROWSER_TABS}
-                    onClick={addBrowserTab}
-                    type="button"
-                  >
-                    <Icon path="M12 5v14M5 12h14" />
-                  </button>
-                </div>
                 <form
                   className="browser-address-form"
                   onSubmit={(event) => void openBrowserAddress(event)}
@@ -5777,15 +5785,7 @@ export default function App(): React.JSX.Element {
             <div className="automations-view-shell">
               {/* Master Pane: Scheduled Tasks List */}
               <section className="automations-master-pane">
-                <div className="automations-master-header">
-                  <div className="automations-master-header-text">
-                    <div className="automations-master-title">
-                      {t(appLanguage, 'automationsTitle')}
-                    </div>
-                    <div className="automations-master-sub">
-                      {automationPreviews.length} {t(appLanguage, 'automationsTitle').toLowerCase()}
-                    </div>
-                  </div>
+                <div className="automations-master-actions">
                   <button
                     className="automations-new-task-btn"
                     disabled={isAutomationCreating}
