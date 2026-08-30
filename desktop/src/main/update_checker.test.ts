@@ -37,6 +37,9 @@ describe('UpdateChecker', () => {
     expect(result.currentVersion).toBe('0.0.1')
     expect(result.latestVersion).toBe('v0.0.2')
     expect(result.releaseUrl).toBe('https://github.com/yuting-ai/asAgent/releases/tag/v0.0.2')
+    expect(result.downloadUrl).toBe(
+      'https://github.com/yuting-ai/asAgent/releases/latest/download/asAgent-arm64.dmg'
+    )
     expect(result.releaseNotes).toContain('Added auto update')
   })
 

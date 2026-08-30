@@ -222,6 +222,7 @@ interface UpdateCheckResult {
   latestVersion: string
   hasUpdate: boolean
   releaseUrl: string
+  downloadUrl: string
   releaseNotes: string
   publishedAt: string
 }

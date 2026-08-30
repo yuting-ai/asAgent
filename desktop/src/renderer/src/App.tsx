@@ -213,6 +213,7 @@ type UpdateCheckResult = {
   latestVersion: string
   hasUpdate: boolean
   releaseUrl: string
+  downloadUrl: string
   releaseNotes: string
   publishedAt: string
 }
@@ -7102,7 +7103,10 @@ export default function App(): React.JSX.Element {
                         <button
                           className="settings-button settings-button-primary"
                           onClick={() => {
-                            void window.desktop.openExternalLink(updateResult.releaseUrl)
+                            void window.desktop.openExternalLink(
+                              updateResult.downloadUrl ||
+                                'https://github.com/yuting-ai/asAgent/releases/latest/download/asAgent-arm64.dmg'
+                            )
                           }}
                           type="button"
                         >

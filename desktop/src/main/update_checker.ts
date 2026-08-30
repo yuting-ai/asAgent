@@ -3,6 +3,7 @@ export type UpdateCheckResult = {
   latestVersion: string
   hasUpdate: boolean
   releaseUrl: string
+  downloadUrl: string
   releaseNotes: string
   publishedAt: string
 }
@@ -82,6 +83,7 @@ export class UpdateChecker {
       latestVersion,
       hasUpdate,
       releaseUrl: data.html_url,
+      downloadUrl: `https://github.com/${this.repoOwner}/${this.repoName}/releases/latest/download/asAgent-arm64.dmg`,
       releaseNotes: typeof data.body === 'string' ? data.body : '',
       publishedAt: typeof data.published_at === 'string' ? data.published_at : ''
     }
