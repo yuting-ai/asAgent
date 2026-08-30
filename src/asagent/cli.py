@@ -533,6 +533,8 @@ def _normalize_subprocess_path(
 
 def _mcp_subprocess_environment(
     environment: Mapping[str, str],
+    *,
+    platform_name: str | None = None,
 ) -> dict[str, str]:
     """Return the intentionally small environment inherited by MCP children."""
 
@@ -540,7 +542,7 @@ def _mcp_subprocess_environment(
     for name in _MCP_SUBPROCESS_ENVIRONMENT_NAMES:
         value = environment.get(name)
         if name == "PATH":
-            env["PATH"] = _normalize_subprocess_path(value)
+            env["PATH"] = _normalize_subprocess_path(value, platform_name=platform_name)
         elif value is not None:
             env[name] = value
     return env
