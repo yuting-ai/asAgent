@@ -10,9 +10,8 @@ from asagent.core.connection import CredentialStore
 from asagent.core.ids import ConnectionId
 from asagent.core.tool import Tool
 from asagent.core.tool_definition import ToolDefinition
-from asagent.tools.mcp import McpProtocolError
 from asagent.tools.mcp_config import McpServerConfigs
-from asagent.tools.mcp_manager import McpServerCredentialError, McpServerManager
+from asagent.tools.mcp_manager import McpServerManager
 from asagent.tools.registry import ToolRegistry
 
 _SERVER_PATH: Final = Path(__file__).parents[1] / "fixtures" / "mcp_test_server.py"
@@ -145,10 +144,15 @@ async def test_manager_closes_started_sessions_without_importing_partial_tools(
     )
 
     try:
-        with pytest.raises(McpProtocolError, match="closed stdout"):
-            await manager.start()
+        await manager.start()
 
-        assert registry.definitions() == ()
+        assert manager.has_active_servers
+        assert "exiting-server" in manager.failed_servers
+        assert "working-server" not in manager.failed_servers
+        assert len(registry.definitions()) == 1
+        assert registry.definitions()[0].tool_id.startswith(
+            "mcp:working-server:add:",
+        )
     finally:
         await manager.aclose()
 
@@ -268,12 +272,11 @@ async def test_manager_rejects_missing_allowed_tool_without_registry_pollution(
     )
 
     try:
-        with pytest.raises(
-            ValueError,
-            match="MCP allowed tool is not exposed by server .test-server.: .missing-tool.",
-        ):
-            await manager.start()
+        await manager.start()
 
+        assert not manager.has_active_servers
+        assert "test-server" in manager.failed_servers
+        assert "missing-tool" in manager.failed_servers["test-server"]
         assert registry.definitions() == ()
     finally:
         await manager.aclose()
@@ -300,13 +303,45 @@ async def test_manager_rejects_missing_configured_connection_credential(
     )
 
     try:
-        with pytest.raises(
-            McpServerCredentialError,
-            match="credential is unavailable",
-        ):
-            await manager.start()
+        await manager.start()
 
+        assert not manager.has_active_servers
+        assert "credential-server" in manager.failed_servers
+        assert (
+            "credential is unavailable" in manager.failed_servers["credential-server"]
+        )
         assert registry.definitions() == ()
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_manager_isolates_failed_server_and_imports_healthy_server(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    manager = McpServerManager(
+        configs=_configs(
+            working_directory=tmp_path,
+            servers={
+                "healthy-server": _SERVER_COMMAND,
+                "bad-server": ("non_existent_binary_xyz_12345",),
+            },
+        ),
+        registry=registry,
+    )
+
+    try:
+        await manager.start()
+
+        assert manager.has_active_servers
+        assert manager.active_server_count == 1
+        assert "bad-server" in manager.failed_servers
+        assert "healthy-server" not in manager.failed_servers
+        assert len(registry.definitions()) == 1
+        assert registry.definitions()[0].tool_id.startswith(
+            "mcp:healthy-server:add:",
+        )
     finally:
         await manager.aclose()
 
@@ -461,12 +496,15 @@ async def test_manager_rolls_back_base_registry_when_later_server_fails(
     )
 
     try:
-        with pytest.raises(McpProtocolError, match="closed stdout"):
-            await manager.start()
+        await manager.start()
 
-        # Target registry must have rolled back cleanly to base registry without partial MCP tools
-        tool_ids = tuple(d.tool_id for d in registry.definitions())
-        assert tool_ids == ("builtin.echo",)
+        assert manager.has_active_servers
+        assert "failing-server" in manager.failed_servers
+        assert "dynamic-server" not in manager.failed_servers
+
+        tool_ids = {d.tool_id for d in registry.definitions()}
+        assert "builtin.echo" in tool_ids
+        assert any("dynamic-server:add:" in tid for tid in tool_ids)
     finally:
         await manager.aclose()
 

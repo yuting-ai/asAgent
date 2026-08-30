@@ -29,9 +29,22 @@ class McpServerManager:
         self._environment = {} if environment is None else dict(environment)
         self._credential_store = credential_store
         self._sessions: list[McpServerSession] = []
+        self._failed_servers: dict[str, str] = {}
         self._recompose_lock = asyncio.Lock()
         self._started = False
         self._closed = False
+
+    @property
+    def failed_servers(self) -> Mapping[str, str]:
+        return dict(self._failed_servers)
+
+    @property
+    def active_server_count(self) -> int:
+        return len(self._sessions)
+
+    @property
+    def has_active_servers(self) -> bool:
+        return bool(self._sessions)
 
     async def start(self) -> None:
         if self._closed:
@@ -39,20 +52,33 @@ class McpServerManager:
         if self._started:
             raise RuntimeError("MCP server manager is already started")
 
+        self._failed_servers.clear()
+
         try:
             for server_name, config in self._configs.servers.items():
+                try:
+                    server_env = self._environment_for(config)
+                except Exception as error:
+                    self._failed_servers[server_name] = str(error)
+                    continue
+
                 session = McpServerSession(
                     client=McpClient(
                         command=config.command,
                         working_directory=config.working_directory,
-                        environment=self._environment_for(config),
+                        environment=server_env,
                     ),
                     server_name=server_name,
                     allowed_tools=config.allowed_tools,
                     on_registry_updated=self._recompose_registry,
                 )
-                self._sessions.append(session)
-                await session.start()
+                try:
+                    await session.start()
+                    self._sessions.append(session)
+                except Exception as error:
+                    self._failed_servers[server_name] = str(error)
+                    await session.aclose()
+                    continue
 
             self._started = True
             await self._recompose_registry()

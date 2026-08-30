@@ -167,3 +167,30 @@ def test_invalid_json_becomes_configuration_error(tmp_path: Path) -> None:
 
     with pytest.raises(McpConfigurationError, match="invalid JSON"):
         load_mcp_server_configs(config_dir)
+
+
+def test_normalize_subprocess_path_augments_macos_gui_path() -> None:
+    from asagent.cli import _mcp_subprocess_environment, _normalize_subprocess_path
+
+    # Minimal macOS GUI PATH without Homebrew
+    minimal_gui_path = "/usr/bin:/bin:/usr/sbin:/sbin"
+    normalized = _normalize_subprocess_path(minimal_gui_path, platform_name="darwin")
+
+    assert "/opt/homebrew/bin" in normalized
+    assert "/usr/local/bin" in normalized
+    assert "/usr/bin" in normalized
+    # Check no duplicate segments
+    parts = normalized.split(":")
+    assert len(parts) == len(set(parts))
+
+    # Test _mcp_subprocess_environment includes normalized PATH
+    env = _mcp_subprocess_environment({"PATH": minimal_gui_path})
+    assert "/opt/homebrew/bin" in env["PATH"]
+
+
+def test_normalize_subprocess_path_preserves_linux_path() -> None:
+    from asagent.cli import _normalize_subprocess_path
+
+    linux_path = "/custom/bin:/usr/bin"
+    normalized = _normalize_subprocess_path(linux_path, platform_name="linux")
+    assert normalized == linux_path

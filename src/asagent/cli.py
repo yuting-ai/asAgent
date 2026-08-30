@@ -486,16 +486,64 @@ def _filesystem_permissions(
     return permissions
 
 
+_MACOS_STANDARD_TOOL_DIRS: tuple[str, ...] = (
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+)
+_MACOS_SYSTEM_BIN_DIRS: tuple[str, ...] = (
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+)
+
+
+def _normalize_subprocess_path(
+    current_path: str | None,
+    *,
+    platform_name: str | None = None,
+) -> str:
+    current = platform_name if platform_name is not None else sys.platform
+    parts: list[str] = [
+        p.strip() for p in (current_path or "").split(os.pathsep) if p.strip()
+    ]
+    seen = set(parts)
+
+    if current == "darwin":
+        tool_dirs = [d for d in _MACOS_STANDARD_TOOL_DIRS if d not in seen]
+        user_home = Path.home()
+        user_dirs = [
+            str(user_home / sub)
+            for sub in (".cargo/bin", ".local/bin")
+            if str(user_home / sub) not in seen
+        ]
+        prepend_dirs = tool_dirs + user_dirs
+        parts = prepend_dirs + parts
+        seen.update(prepend_dirs)
+
+        for sys_dir in _MACOS_SYSTEM_BIN_DIRS:
+            if sys_dir not in seen:
+                parts.append(sys_dir)
+                seen.add(sys_dir)
+
+    return os.pathsep.join(parts)
+
+
 def _mcp_subprocess_environment(
     environment: Mapping[str, str],
 ) -> dict[str, str]:
     """Return the intentionally small environment inherited by MCP children."""
 
-    return {
-        name: value
-        for name in _MCP_SUBPROCESS_ENVIRONMENT_NAMES
-        if (value := environment.get(name)) is not None
-    }
+    env: dict[str, str] = {}
+    for name in _MCP_SUBPROCESS_ENVIRONMENT_NAMES:
+        value = environment.get(name)
+        if name == "PATH":
+            env["PATH"] = _normalize_subprocess_path(value)
+        elif value is not None:
+            env[name] = value
+    return env
 
 
 async def _start_configured_mcp_servers(
@@ -517,7 +565,7 @@ async def _start_configured_mcp_servers(
         credential_store=credential_store,
     )
     await manager.start()
-    return registry, manager, bool(configs.servers)
+    return registry, manager, manager.has_active_servers
 
 
 def build_agent_loop(

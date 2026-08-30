@@ -34,6 +34,9 @@ import {
 import { listWorkspaceTree, readFilePreview } from './workspace_tree'
 import { parseExternalWebUrl } from './external_url'
 import { UpdateChecker } from './update_checker'
+import { ensureProcessPath } from './path_normalizer'
+
+ensureProcessPath()
 
 let backendLauncher: BackendLauncher | undefined
 let visibleBrowser: VisibleBrowser | undefined
