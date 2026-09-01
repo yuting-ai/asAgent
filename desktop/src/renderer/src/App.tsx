@@ -15,6 +15,7 @@ import {
   isAwaitingAutomationInput,
   plannerNeedsInputAfterRun
 } from './automation_draft'
+import { startAutomationHistoryPolling } from './automation_history'
 import { TOOL_APPROVAL_BANNER_ACTIONS, type ToolApprovalDecision } from './tool_approval'
 import {
   detectProviderPreset,
@@ -1320,6 +1321,7 @@ export default function App(): React.JSX.Element {
   const selectedConversationIdRef = useRef(selectedConversationId)
   const selectedBrowserConversationIdRef = useRef(selectedBrowserConversationId)
   const automationDraftConversationIdRef = useRef(automationDraftConversationId)
+  const selectedExecutionIdRef = useRef(selectedExecutionId)
   const automationDraftRunIdRef = useRef<string | null>(null)
   const automationDraftTargetIdRef = useRef<string | null>(null)
   const editingAutomationIdRef = useRef(editingAutomationId)
@@ -1338,6 +1340,7 @@ export default function App(): React.JSX.Element {
   activeBrowserTabIdRef.current = activeBrowserTabId
   selectedConversationIdRef.current = selectedConversationId
   automationDraftConversationIdRef.current = automationDraftConversationId
+  selectedExecutionIdRef.current = selectedExecutionId
   selectedBrowserConversationIdRef.current = selectedBrowserConversationId
   appLanguageRef.current = appLanguage
   editingAutomationIdRef.current = editingAutomationId
@@ -1436,6 +1439,64 @@ export default function App(): React.JSX.Element {
       })
       .catch(() => setAutomationLoadError('Scheduled task details could not be loaded.'))
   }, [backendStatus, selectedAutomationId])
+
+  useEffect(() => {
+    if (
+      backendStatus !== 'ready' ||
+      activeView !== 'automations' ||
+      selectedAutomationId === null
+    ) {
+      return
+    }
+
+    let active = true
+    const automationId = selectedAutomationId
+    const stopPolling = startAutomationHistoryPolling(async () => {
+      const [triggers, executions] = await Promise.all([
+        window.desktop.listAutomationTriggers(automationId),
+        window.desktop.listAutomationExecutions(automationId)
+      ])
+      if (!active) return
+
+      setAutomationExecutions(executions)
+      const schedule = formatAutomationSchedule(triggers[0])
+      const nextRun = triggers[0]?.next_run_at
+        ? new Date(triggers[0].next_run_at).toLocaleString()
+        : null
+      const lastRun = formatAutomationExecution(executions[0])
+      setAutomationPreviews((values) =>
+        values.map((value) =>
+          value.id === automationId ? { ...value, schedule, nextRun, lastRun } : value
+        )
+      )
+
+      const currentExecutionId = selectedExecutionIdRef.current
+      const selectedStillExists = executions.some(
+        (execution) => execution.automation_execution_id === currentExecutionId
+      )
+      const executionId = selectedStillExists
+        ? currentExecutionId
+        : (executions[0]?.automation_execution_id ?? null)
+      if (executionId === null) return
+      if (executionId !== currentExecutionId) {
+        selectedExecutionIdRef.current = executionId
+        setSelectedExecutionId(executionId)
+      }
+
+      const messages = await window.desktop.getAutomationExecutionMessages(
+        automationId,
+        executionId
+      )
+      if (active && selectedExecutionIdRef.current === executionId) {
+        setExecutionMessages(messages)
+      }
+    })
+
+    return () => {
+      active = false
+      stopPolling()
+    }
+  }, [activeView, backendStatus, selectedAutomationId])
 
   const isAttentionPanelVisible =
     (activeView === 'chat' && hasAttachedWorkspace && desktopLayout.attentionPanelOpen) ||

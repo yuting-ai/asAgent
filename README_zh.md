@@ -16,7 +16,7 @@
 
 asAgent 将对话、浏览器辅助、定时任务和可撤回文件操作集中在一个桌面应用中。会话与应用状态默认保存在你的电脑上；当你选择外部模型或联网工具时，只有完成该次请求所需的数据会发送给已配置的服务。
 
-> asAgent 仍在持续开发中，目前需要从源码运行，尚未成为可正式发布的桌面产品。
+> asAgent 仍在持续开发中。目前已提供经过签名和公证的 Apple Silicon Mac 预览版；其他平台和完整成熟的发布体验尚未支持，开发者也可以继续从源码运行项目。
 
 ## 演示
 
@@ -45,7 +45,6 @@ asAgent 当前没有接入遥测服务。外部模型服务商、Tavily 和用�
 
 - **认证 RunEvent 实时流：** 桌面端通过 Bearer 认证的 SSE 观察持久化 `RunEvent`。当前 Agent Loop 使用非流式模型调用，因此 Assistant 正文会在 Run 完成后显示，而不是逐 Token 输出。
 - **Run Activity：** 可折叠卡片展示安全的步骤、工具、状态、耗时和脱敏错误元数据；不展示模型思维链、工具参数或完整工具结果。
-- **上下文预算：** 确定性的 Token 估算器与 Context Builder 在输入预算内保留最近的完整会话/工具单元。
 - **持久化历史：** Chat 与 Browser Conversation、用户可见 Message、Run 状态和安全事件可在应用重启后恢复。
 
 ### 2. 会话级工作区与可撤回文件变更
@@ -181,7 +180,7 @@ Renderer/Main/Preload 的生产构建可以通过以下命令检查：
 npm --prefix desktop run build
 ```
 
-现有 `build:mac`、`build:win` 和 `build:linux` 仍属于开发脚手架：它们尚未把 PyInstaller Sidecar 组装进可发布的 asAgent 安装包，打包后的 Launcher 也尚未切换到正式可执行文件路径。代码签名、公证、跨平台 Credential Store、更新发布和干净机器安装验证仍未完成。
+macOS ARM64 发布工作流会构建并冒烟测试 Python Sidecar，将其打入 Electron 应用，对 DMG 进行签名和公证，并把版本标签触发的构建上传到 GitHub Releases。这些版本仍是持续开发阶段的预览版。Windows 与 Linux 发布包、非 macOS Credential Store、应用内自动安装更新，以及更广泛的干净机器验证仍未完成。
 
 ---
 
@@ -224,7 +223,7 @@ Settings 当前提供以下 OpenAI-compatible Preset。DeepSeek 是端到端开�
 - [ ] 运行时扫描、选择和加载磁盘上的 `SKILL.md`
 - [ ] 多 Agent/Subagent 编排
 - [ ] MCP 分页、通知、热刷新和 Streamable HTTP Transport
-- [ ] 包含 Sidecar、正式产品元数据、签名/公证、干净机器测试和更新能力的可发布 Electron 安装包
+- [ ] 面向 Intel Mac、Windows 和 Linux 的更广泛桌面发行，以及更完整的干净机器测试矩阵和应用内自动安装更新
 - [ ] 受支持的无头/Docker Server 发行方式
 
 ---

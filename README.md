@@ -16,7 +16,7 @@
 
 asAgent brings chat, browser assistance, scheduled tasks, and reversible file operations into one desktop app. Conversations and application state stay on your computer by default. When you choose an external model or network-enabled tool, only the data required for that request is sent to the configured service.
 
-> asAgent is under active development and currently runs from source. It is not yet a release-ready desktop product.
+> asAgent is under active development. A signed and notarized preview build is available for Apple Silicon Macs; other platforms and a fully mature release experience are not yet supported. Developers can also run the project from source.
 
 ## Demo
 
@@ -45,7 +45,6 @@ asAgent currently has no telemetry integration. External model providers, Tavily
 
 - **Authenticated run-event streaming:** The desktop observes persisted `RunEvent` updates over Bearer-authenticated SSE. The current Agent Loop uses non-streaming model completion, so assistant text is shown after the run completes rather than token by token.
 - **Run activity:** Collapsible activity cards show safe step, tool, status, timing, and sanitized error metadata. They do not expose chain-of-thought, tool arguments, or complete tool results.
-- **Context budgeting:** A deterministic token estimator and Context Builder retain recent complete conversation/tool units within a configured input budget.
 - **Persistent history:** Chat and Browser conversations, user-visible messages, run status, and safe run events survive application restarts.
 
 ### 2. Conversation-scoped workspace and reversible file changes
@@ -181,7 +180,7 @@ The Renderer/Main/Preload production build can be checked with:
 npm --prefix desktop run build
 ```
 
-The existing `build:mac`, `build:win`, and `build:linux` scripts are development scaffolding. They do not yet assemble the PyInstaller Sidecar into a release-ready asAgent package, and the packaged launcher still needs its production executable path. Code signing, notarization, platform credential stores, update publishing, and clean-machine installer verification remain pending.
+The macOS ARM64 release workflow builds and smoke-tests the Python Sidecar, bundles it with the Electron app, signs and notarizes the DMG, and attaches tagged builds to GitHub Releases. These builds are still previews while the product is under active development. Windows and Linux release packages, non-macOS credential stores, automatic in-app update installation, and broader clean-machine verification remain pending.
 
 ---
 
@@ -224,7 +223,7 @@ Local endpoints may omit an API key. External endpoints require a saved key. On 
 - [ ] Runtime loading and selection of on-disk `SKILL.md` files
 - [ ] Multi-agent/subagent orchestration
 - [ ] MCP pagination, notifications, hot refresh, and Streamable HTTP transport
-- [ ] Release-ready Electron packaging with bundled Sidecar, product metadata, signing/notarization, clean-machine testing, and updates
+- [ ] Broader desktop distribution for Intel Macs, Windows, and Linux, plus a wider clean-machine test matrix and automatic in-app update installation
 - [ ] Supported headless/Docker server distribution
 
 ---
