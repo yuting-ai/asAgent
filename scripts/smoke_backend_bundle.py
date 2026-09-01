@@ -15,6 +15,7 @@ _READY_PREFIX = "ASAGENT_READY "
 _TOKEN = "sidecar-smoke-token"
 _START_TIMEOUT_SECONDS = 10.0
 _RUN_TIMEOUT_SECONDS = 10.0
+_KNOWLEDGE_TIMEOUT_SECONDS = 60.0
 
 
 async def main() -> None:
@@ -27,7 +28,14 @@ async def main() -> None:
         temporary_root = Path(directory)
         working_directory = temporary_root / "outside-source"
         app_home = temporary_root / "app-home"
+        knowledge_source = temporary_root / "knowledge-source"
         working_directory.mkdir()
+        knowledge_source.mkdir()
+        (knowledge_source / "bundle-smoke.md").write_text(
+            "# Frozen Knowledge Smoke\n\n"
+            "The cobalt lighthouse verifies bundled local knowledge retrieval.\n",
+            encoding="utf-8",
+        )
 
         process = await asyncio.create_subprocess_exec(
             str(_BUNDLE_EXECUTABLE),
@@ -86,6 +94,33 @@ async def main() -> None:
                     "Tool result: 4",
                 ]
 
+                libraries = await client.get("/api/v1/knowledge/libraries")
+                libraries.raise_for_status()
+                library_id = libraries.json()[0]["library_id"]
+
+                source = await client.post(
+                    f"/api/v1/knowledge/libraries/{library_id}/sources",
+                    json={"path": str(knowledge_source)},
+                )
+                source.raise_for_status()
+                source_id = source.json()["source_id"]
+
+                index = await client.post(
+                    f"/api/v1/knowledge/sources/{source_id}/index",
+                )
+                index.raise_for_status()
+                await _wait_for_knowledge_index(client, index.json()["job_id"])
+
+                search = await client.post(
+                    f"/api/v1/knowledge/libraries/{library_id}/search",
+                    json={"query": "What verifies bundled local knowledge retrieval?"},
+                )
+                search.raise_for_status()
+                hits = search.json()["hits"]
+                assert hits
+                assert hits[0]["document_name"] == "bundle-smoke.md"
+                assert "cobalt lighthouse" in hits[0]["snippet"].lower()
+
             assert (app_home / "data" / "asagent.sqlite3").is_file()
             assert not list(_BUNDLE_DIRECTORY.rglob("*.sqlite3"))
         finally:
@@ -131,6 +166,28 @@ async def _wait_for_completion(
                 await asyncio.sleep(0.05)
     except TimeoutError as error:
         raise RuntimeError("Sidecar Run did not complete in time.") from error
+
+
+async def _wait_for_knowledge_index(
+    client: httpx.AsyncClient,
+    job_id: str,
+) -> None:
+    try:
+        async with asyncio.timeout(_KNOWLEDGE_TIMEOUT_SECONDS):
+            while True:
+                response = await client.get(f"/api/v1/knowledge/jobs/{job_id}")
+                response.raise_for_status()
+                status = response.json()["status"]
+
+                if status == "completed":
+                    assert response.json()["indexed_chunks"] > 0
+                    return
+                if status in {"failed", "cancelled", "interrupted"}:
+                    raise RuntimeError(f"Knowledge index ended as {status}.")
+
+                await asyncio.sleep(0.05)
+    except TimeoutError as error:
+        raise RuntimeError("Knowledge index did not complete in time.") from error
 
 
 async def _stop_process(process: asyncio.subprocess.Process) -> None:

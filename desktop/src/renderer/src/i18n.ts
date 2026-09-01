@@ -256,6 +256,8 @@ export const TRANSLATIONS = {
     knowledgeFolderOnly: 'Select a folder, not an individual file.',
     knowledgeFolderAlreadyAdded: 'That folder is already included.',
     knowledgeAddFolderError: 'The folder could not be selected.',
+    knowledgeIndexStartError:
+      'The folder was added, but indexing could not start. This source needs attention.',
     knowledgeHistory: 'History',
     knowledgeHistoryTitle: 'Conversation history',
     knowledgeCloseHistory: 'Close conversation history',
@@ -615,6 +617,7 @@ export const TRANSLATIONS = {
     knowledgeFolderOnly: '请选择文件夹，而不是单个文件。',
     knowledgeFolderAlreadyAdded: '该文件夹已经添加。',
     knowledgeAddFolderError: '无法选择文件夹。',
+    knowledgeIndexStartError: '文件夹已添加，但索引无法启动。这个资料来源需要处理。',
     knowledgeHistory: '历史对话',
     knowledgeHistoryTitle: '历史对话',
     knowledgeCloseHistory: '关闭历史对话',

@@ -854,11 +854,15 @@ def new_file_change_id() -> FileChangeId:
     return FileChangeId(f"change_{uuid4().hex}")
 
 
-def _alembic_config_path() -> Path:
+def _application_resource_path(*parts: str) -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys._MEIPASS) / "alembic.ini"  # type: ignore[attr-defined]
+        return Path(sys._MEIPASS).joinpath(*parts)  # type: ignore[attr-defined]
 
-    return Path(__file__).resolve().parents[2] / "alembic.ini"
+    return Path(__file__).resolve().parents[2].joinpath(*parts)
+
+
+def _alembic_config_path() -> Path:
+    return _application_resource_path("alembic.ini")
 
 
 def build_persistent_agent_runtime(
@@ -1306,11 +1310,10 @@ async def _run_main(args: argparse.Namespace) -> None:
         knowledge_repository = SqliteKnowledgeRepository(database_path)
         qdrant_dir = paths.data_dir / "qdrant"
         knowledge_vector_store = KnowledgeVectorStore(qdrant_dir)
-        models_dir = (
-            Path(__file__).resolve().parents[2]
-            / "app-assets"
-            / "models"
-            / "paraphrase-multilingual-MiniLM-L12-v2"
+        models_dir = _application_resource_path(
+            "app-assets",
+            "models",
+            "paraphrase-multilingual-MiniLM-L12-v2",
         )
         if not models_dir.exists():
             models_dir = (

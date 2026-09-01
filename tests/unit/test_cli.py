@@ -1,3 +1,4 @@
+import sys
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from asagent.automation.browser.browser_service import AutomationBrowserService
 from asagent.automation.drafts import AutomationDraftContextStore
 from asagent.chat.service import ChatService
 from asagent.cli import (
+    _application_resource_path,
     _delete_stale_automation_drafts,
     _registry_for_conversation,
     _system_prompt_for_conversation,
@@ -55,6 +57,17 @@ class TavilySearchTool:
     async def execute(self, arguments: Mapping[str, object]) -> str:
         del arguments
         return "not used"
+
+
+def test_application_resource_path_uses_pyinstaller_bundle_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+
+    assert _application_resource_path("app-assets", "models") == (
+        tmp_path / "app-assets" / "models"
+    )
 
 
 def make_conversation() -> Conversation:

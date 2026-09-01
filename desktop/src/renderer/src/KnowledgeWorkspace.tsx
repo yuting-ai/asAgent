@@ -457,7 +457,13 @@ export default function KnowledgeWorkspace({ lang }: { lang: AppLanguage }): Rea
       setIsBusy(true)
       for (const folder of nextFolders.slice(selectedLibrary.folders.length)) {
         const source = await window.desktop.addKnowledgeSource(selectedLibrary.id, folder.path)
-        await window.desktop.indexKnowledgeSource(source.source_id)
+        try {
+          await window.desktop.indexKnowledgeSource(source.source_id)
+        } catch {
+          await reloadWorkspace(selectedLibrary.id)
+          setNotice(t(lang, 'knowledgeIndexStartError'))
+          return
+        }
       }
       await reloadWorkspace(selectedLibrary.id)
     } catch {

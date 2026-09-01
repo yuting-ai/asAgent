@@ -17,6 +17,7 @@ from asagent.core.conversation import Conversation
 from asagent.core.ids import (
     MessageId,
     RunId,
+    SourceId,
 )
 from asagent.core.messages import UserMessage
 from asagent.core.run import Run
@@ -283,6 +284,64 @@ async def test_add_and_detach_source(
     # Detach source
     response = await client.delete(f"/api/v1/knowledge/sources/{source_id}")
     assert response.status_code == 204
+
+
+async def test_unavailable_indexer_marks_source_as_error(tmp_path: Path) -> None:
+    db_path = tmp_path / "asagent.sqlite3"
+    _upgrade(db_path)
+    repo = SqliteKnowledgeRepository(db_path)
+    conv_repo = SqliteConversationRepository(db_path)
+    run_repo = SqliteRunRepository(db_path)
+    now = datetime(2026, 9, 1, 13, 0, tzinfo=UTC)
+    service = KnowledgeLibraryService(repository=repo, now=lambda: now)
+    run_submission = RunSubmissionService(
+        conversations=conv_repo,
+        run_starter=_UnusedRunStarter(),
+        now=lambda: now,
+        new_run_id=lambda: RunId("run_unavailable"),
+        new_message_id=lambda: MessageId("msg_unavailable"),
+    )
+    app = create_app(
+        access_token=_TOKEN,
+        conversations=conv_repo,
+        runs=run_repo,
+        run_submission=run_submission,
+        dispatch_submitted_run=_discard_submission,
+        cancel_run=_cancel_nothing,
+        knowledge_repository=repo,
+        knowledge_service=service,
+        knowledge_indexer=None,
+        clock=lambda: now,
+    )
+
+    source_dir = tmp_path / "unavailable-indexer"
+    source_dir.mkdir()
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers={"Authorization": f"Bearer {_TOKEN.value}"},
+        ) as client:
+            libraries = (await client.get("/api/v1/knowledge/libraries")).json()
+            source_response = await client.post(
+                f"/api/v1/knowledge/libraries/{libraries[0]['library_id']}/sources",
+                json={"path": str(source_dir)},
+            )
+            source_id = SourceId(source_response.json()["source_id"])
+
+            index_response = await client.post(
+                f"/api/v1/knowledge/sources/{source_id}/index"
+            )
+
+            assert index_response.status_code == 503
+            stored = await repo.get_source(source_id)
+            assert stored is not None
+            assert stored.scan_status == "error"
+    finally:
+        await run_repo.aclose()
+        await conv_repo.aclose()
+        await repo.aclose()
 
 
 async def test_index_source_and_search(

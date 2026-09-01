@@ -2509,16 +2509,17 @@ def create_app(
         async def index_knowledge_source(
             source_id: str,
         ) -> KnowledgeIndexJobResponse:
-            if knowledge_indexer is None:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="knowledge indexer is unavailable",
-                )
             src = await knowledge_repo.get_source(SourceId(source_id))
             if src is None or src.status != "active":
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="knowledge source not found",
+                )
+            if knowledge_indexer is None:
+                await knowledge_repo.update_source_scan_status(src.source_id, "error")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="knowledge indexer is unavailable",
                 )
             job = await schedule_knowledge_index(src, reject_conflict=True)
             assert job is not None
