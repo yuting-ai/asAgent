@@ -15,6 +15,7 @@ _LEGACY_PROTOCOL_VERSION: Final = "2025-11-25"
 _DEFAULT_REQUEST_TIMEOUT_SECONDS: Final = 5.0
 _CLOSE_TIMEOUT_SECONDS: Final = 2.0
 _MCP_TOOL_TIMEOUT_SECONDS: Final = 10.0
+_TOOL_LIST_CHANGE_COALESCE_SECONDS: Final = 0.05
 _MAX_TOOL_LIST_PAGES: Final = 100
 
 
@@ -249,6 +250,18 @@ class McpClient:
                 except asyncio.CancelledError:
                     break
                 try:
+                    # Give notifications from one server-side burst a small,
+                    # fixed window to collect before refreshing. The bounded
+                    # queue still preserves one follow-up notification that
+                    # arrives while the callback itself is running.
+                    await asyncio.sleep(_TOOL_LIST_CHANGE_COALESCE_SECONDS)
+                    while True:
+                        try:
+                            self._subscription_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        else:
+                            self._subscription_queue.task_done()
                     await on_tools_changed()
                 except Exception:
                     pass

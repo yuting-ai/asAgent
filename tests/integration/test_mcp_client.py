@@ -325,9 +325,9 @@ async def test_client_collapses_burst_list_change_notifications() -> None:
         await client.start()
         await client.start_tool_list_subscription(_on_changed)
         await asyncio.wait_for(changed_event.wait(), timeout=2.0)
-        # Give a small slice to verify collapsed execution
+        # The three consecutive server notifications are one refresh burst.
         await asyncio.sleep(0.05)
-        assert 1 <= call_count <= 2
+        assert call_count == 1
     finally:
         await client.aclose()
 
