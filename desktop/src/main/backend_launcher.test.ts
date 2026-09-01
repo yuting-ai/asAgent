@@ -1120,4 +1120,52 @@ describe('BackendLauncher', () => {
       })
     )
   })
+
+  it('streams validated Knowledge index progress for one library', async () => {
+    const child = createChild()
+    const spawnBackend = vi.fn(() => child) as unknown as typeof import('node:child_process').spawn
+    const progress = {
+      library_id: 'library/1',
+      status: 'indexing',
+      active_jobs: 1,
+      discovered_files: 3,
+      processed_files: 2,
+      failed_files: 0,
+      total_chunks: 24,
+      indexed_chunks: 18,
+      document_count: 2,
+      chunk_count: 18,
+      updated_at: '2026-08-31T17:00:00Z'
+    }
+    const fetchBackend = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        sseResponse(`event: knowledge_index_progress\ndata: ${JSON.stringify(progress)}\n\n`)
+      )
+    const launcher = new BackendLauncher({
+      projectRoot: '/project',
+      appHome: '/project/.local-data',
+      spawnBackend,
+      fetchBackend
+    })
+    const starting = launcher.start()
+    child.stdout.write(
+      'ASAGENT_READY {"host":"127.0.0.1","pid":12345,"port":43123,"protocol_version":1}\n'
+    )
+    await starting
+
+    const received = new Promise<typeof progress>((resolve, reject) => {
+      launcher.watchKnowledgeIndexProgress('library/1', resolve, reject)
+    })
+
+    await expect(received).resolves.toEqual(progress)
+    expect(fetchBackend).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:43123/api/v1/knowledge/libraries/library%2F1/events',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({ Authorization: expect.stringMatching(/^Bearer /) })
+      })
+    )
+  })
 })

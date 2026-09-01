@@ -73,6 +73,12 @@ from asagent.core.repositories import ConversationRepository
 from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
 from asagent.core.tool_call_recorder import ToolCallRecorder
+from asagent.knowledge import (
+    KnowledgeContextAugmenter,
+    KnowledgeIndexer,
+    KnowledgeRetriever,
+    LocalMiniLMEmbedder,
+)
 from asagent.models.config import ProviderProfiles
 from asagent.models.contracts import (
     ModelEvent,
@@ -90,6 +96,7 @@ from asagent.models.tool_names import openai_compatible_tool_name
 from asagent.paths import AppPaths
 from asagent.storage.event_publisher import RepositoryEventPublisher
 from asagent.storage.file_change_snapshots import FileChangeSnapshotStore
+from asagent.storage.qdrant import KnowledgeVectorStore
 from asagent.storage.reversible_files import (
     FileChangeNotFoundError,
     ReversibleFileService,
@@ -105,7 +112,12 @@ from asagent.storage.sqlite.conversation_repository import (
     SqliteConversationRepository,
 )
 from asagent.storage.sqlite.database import upgrade_sqlite_database
-from asagent.storage.sqlite.file_change_repository import SqliteFileChangeRepository
+from asagent.storage.sqlite.file_change_repository import (
+    SqliteFileChangeRepository,
+)
+from asagent.storage.sqlite.knowledge_repository import (
+    SqliteKnowledgeRepository,
+)
 from asagent.storage.sqlite.run_finisher import SqliteRunFinisher
 from asagent.storage.sqlite.run_repository import SqliteRunRepository
 from asagent.storage.sqlite.run_starter import SqliteRunStarter
@@ -294,16 +306,19 @@ async def _registry_for_conversation(
         )
         return registry
 
+    registry = (
+        base_registry.copy()
+        if conversation.kind == "chat"
+        else _register_builtin_tools()
+    )
+    if conversation.kind == "knowledge":
+        return registry
+
     status = await workspace_settings.get_status(conversation_id)
     resolver = WorkspaceResolver(
         workspace_root=status.workspace_root,
         additional_roots=status.additional_roots,
         additional_files=status.additional_files,
-    )
-    registry = (
-        base_registry.copy()
-        if conversation.kind == "chat"
-        else _register_builtin_tools()
     )
     if (
         conversation.kind == "automation_execution"
@@ -431,11 +446,18 @@ async def _system_prompt_for_conversation(
     conversation_id: ConversationId,
     automations: SqliteAutomationRepository | None = None,
     automation_drafts: AutomationDraftContextStore | None = None,
+    knowledge_augmenter: KnowledgeContextAugmenter | None = None,
+    user_query: str = "",
+    run_id: RunId | None = None,
 ) -> str:
-    """Add the visible-browser operating contract only to Browser conversations."""
+    """Add the visible-browser or knowledge operating contract to conversations."""
 
-    workspace_context = await workspace_settings.model_context(conversation_id)
     conversation = await conversations.get(conversation_id)
+    workspace_context = (
+        ""
+        if conversation is not None and conversation.kind == "knowledge"
+        else await workspace_settings.model_context(conversation_id)
+    )
     if conversation is not None and conversation.kind == "automation_draft":
         target = (
             None
@@ -471,20 +493,33 @@ async def _system_prompt_for_conversation(
             "New automations are saved as Draft and must be enabled separately. "
             f"{target_context}"
         )
-    if conversation is None or conversation.kind != "browser":
-        return workspace_context
 
-    browser_context = (
-        "You are operating the user's visible browser tab. Use the browser "
-        "tools listed for this run to perform requested page operations. "
-        "If the current page is a PDF document, use browser.read_current_pdf to extract its text. "
-        "Take a browser.take_snapshot before acting on unfamiliar page elements, "
-        "then use only its returned refs. Do not claim browser capability is "
-        "unavailable without taking a snapshot first. Browser tools act only "
-        "on the visible tab and cannot read credentials; ask the user to enter "
-        "passwords directly."
-    )
-    return "\n\n".join(part for part in (workspace_context, browser_context) if part)
+    base_prompt = workspace_context
+    if conversation is not None and conversation.kind == "browser":
+        browser_context = (
+            "You are operating the user's visible browser tab. Use the browser "
+            "tools listed for this run to perform requested page operations. "
+            "If the current page is a PDF document, use browser.read_current_pdf to extract its text. "
+            "Take a browser.take_snapshot before acting on unfamiliar page elements, "
+            "then use only its returned refs. Do not claim browser capability is "
+            "unavailable without taking a snapshot first. Browser tools act only "
+            "on the visible tab and cannot read credentials; ask the user to enter "
+            "passwords directly."
+        )
+        base_prompt = "\n\n".join(
+            part for part in (workspace_context, browser_context) if part
+        )
+
+    if knowledge_augmenter is not None:
+        augmented = await knowledge_augmenter.augment_system_prompt(
+            conversation_id=conversation_id,
+            base_system_prompt=base_prompt,
+            user_query=user_query,
+            run_id=run_id,
+        )
+        return augmented.system_prompt
+
+    return base_prompt
 
 
 def _filesystem_permissions(
@@ -846,6 +881,7 @@ def build_persistent_agent_runtime(
     automation_execution_contexts: AutomationExecutionContextStore | None = None,
     automation_browser_service: AutomationBrowserService | None = None,
     max_steps: int = 20,
+    knowledge_augmenter: KnowledgeContextAugmenter | None = None,
 ) -> PersistentAgentRuntime:
     base_registry = registry if registry is not None else _register_builtin_tools()
 
@@ -905,13 +941,16 @@ def build_persistent_agent_runtime(
             ),
             run_finisher=finisher,
             loop_for_conversation=loop_for_conversation,
-            system_prompt_for_conversation=lambda conversation_id: (
+            system_prompt_for_conversation=lambda conversation_id, user_query, run_id: (
                 _system_prompt_for_conversation(
                     workspace_settings=workspace_settings,
                     conversations=conversations,
                     conversation_id=conversation_id,
                     automations=automations,
                     automation_drafts=automation_drafts,
+                    knowledge_augmenter=knowledge_augmenter,
+                    user_query=user_query,
+                    run_id=run_id,
                 )
             ),
             now=now,
@@ -961,6 +1000,7 @@ def build_persistent_development_runtime(
     automation_execution_contexts: AutomationExecutionContextStore | None = None,
     automation_browser_service: AutomationBrowserService | None = None,
     max_steps: int = 20,
+    knowledge_augmenter: KnowledgeContextAugmenter | None = None,
 ) -> PersistentAgentRuntime:
     base_registry = registry if registry is not None else _register_builtin_tools()
 
@@ -1019,13 +1059,16 @@ def build_persistent_development_runtime(
             ),
             run_finisher=finisher,
             loop_for_conversation=loop_for_conversation,
-            system_prompt_for_conversation=lambda conversation_id: (
+            system_prompt_for_conversation=lambda conversation_id, user_query, run_id: (
                 _system_prompt_for_conversation(
                     workspace_settings=workspace_settings,
                     conversations=conversations,
                     conversation_id=conversation_id,
                     automations=automations,
                     automation_drafts=automation_drafts,
+                    knowledge_augmenter=knowledge_augmenter,
+                    user_query=user_query,
+                    run_id=run_id,
                 )
             ),
             now=now,
@@ -1260,6 +1303,44 @@ async def _run_main(args: argparse.Namespace) -> None:
             "they help answer the user."
         )
 
+        knowledge_repository = SqliteKnowledgeRepository(database_path)
+        qdrant_dir = paths.data_dir / "qdrant"
+        knowledge_vector_store = KnowledgeVectorStore(qdrant_dir)
+        models_dir = (
+            Path(__file__).resolve().parents[2]
+            / "app-assets"
+            / "models"
+            / "paraphrase-multilingual-MiniLM-L12-v2"
+        )
+        if not models_dir.exists():
+            models_dir = (
+                paths.data_dir / "models" / "paraphrase-multilingual-MiniLM-L12-v2"
+            )
+
+        if models_dir.exists():
+            knowledge_embedder = LocalMiniLMEmbedder(models_dir)
+            knowledge_indexer = KnowledgeIndexer(
+                repository=knowledge_repository,
+                embedder=knowledge_embedder,
+                vector_store=knowledge_vector_store,
+                now=now,
+            )
+            knowledge_retriever = KnowledgeRetriever(
+                repository=knowledge_repository,
+                embedder=knowledge_embedder,
+                vector_store=knowledge_vector_store,
+                now=now,
+            )
+            knowledge_augmenter = KnowledgeContextAugmenter(
+                repository=knowledge_repository,
+                retriever=knowledge_retriever,
+            )
+        else:
+            knowledge_embedder = None
+            knowledge_indexer = None
+            knowledge_retriever = None
+            knowledge_augmenter = None
+
         http_client: httpx.AsyncClient | None = None
         browser_page_client: BrowserPageBridgeClient | None = None
         browser_run_bindings = BrowserRunBindings()
@@ -1314,6 +1395,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     automation_execution_contexts=automation_execution_contexts,
                     automation_browser_service=automation_browser_service,
                     max_steps=agent_settings.max_steps,
+                    knowledge_augmenter=knowledge_augmenter,
                 )
                 model_name = "development-tools"
             else:
@@ -1379,6 +1461,7 @@ async def _run_main(args: argparse.Namespace) -> None:
                     automation_execution_contexts=automation_execution_contexts,
                     automation_browser_service=automation_browser_service,
                     max_steps=agent_settings.max_steps,
+                    knowledge_augmenter=knowledge_augmenter,
                 )
                 model_name = profile.model
 
@@ -1453,6 +1536,9 @@ async def _run_main(args: argparse.Namespace) -> None:
                     automations=automations,
                     automation_drafts=automation_drafts,
                     run_automation_now_action=automation_scheduler.run_now,
+                    knowledge_repository=knowledge_repository,
+                    knowledge_indexer=knowledge_indexer,
+                    knowledge_retriever=knowledge_retriever,
                 ),
                 host=args.host,
                 port=args.port,
@@ -1461,6 +1547,8 @@ async def _run_main(args: argparse.Namespace) -> None:
             print(f"{READY_PREFIX}{ready.to_json()}", flush=True)
             await server.wait_closed()
         finally:
+            knowledge_vector_store.close()
+            await knowledge_repository.aclose()
             await tool_approvals.aclose()
             if automation_scheduler is not None:
                 await automation_scheduler.aclose()

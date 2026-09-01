@@ -35,6 +35,9 @@ def test_upgrade_from_empty_database_creates_initial_schema(tmp_path: Path) -> N
         conversation_columns = {
             column["name"] for column in inspector.get_columns("conversations")
         }
+        knowledge_document_checks = inspector.get_check_constraints(
+            "knowledge_documents"
+        )
     finally:
         engine.dispose()
 
@@ -46,6 +49,15 @@ def test_upgrade_from_empty_database_creates_initial_schema(tmp_path: Path) -> N
         "conversation_file_scopes",
         "conversations",
         "file_changes",
+        "knowledge_chunk_embeddings",
+        "knowledge_chunks",
+        "knowledge_conversations",
+        "knowledge_documents",
+        "knowledge_index_jobs",
+        "knowledge_index_profiles",
+        "knowledge_libraries",
+        "knowledge_retrieval_hits",
+        "knowledge_sources",
         "messages",
         "run_events",
         "runs",
@@ -54,6 +66,106 @@ def test_upgrade_from_empty_database_creates_initial_schema(tmp_path: Path) -> N
         "users",
     }
     assert {"last_page_url", "last_page_title"} <= conversation_columns
+    file_type_check = next(
+        constraint["sqltext"]
+        for constraint in knowledge_document_checks
+        if constraint["name"] == "knowledge_document_file_type_valid"
+    )
+    assert "'docx'" in file_type_check
+    assert "'html'" in file_type_check
+
+
+def test_docx_html_migration_preserves_existing_knowledge_documents(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    config = _alembic_config(database_path)
+    command.upgrade(config, "20260831_12")
+    timestamp = _utc_timestamp()
+    engine = sa.create_engine(f"sqlite+pysqlite:///{database_path}")
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    "INSERT INTO users (user_id, created_at) "
+                    "VALUES ('local-user', :time)"
+                ),
+                {"time": timestamp},
+            )
+            connection.execute(
+                sa.text(
+                    "INSERT INTO knowledge_libraries "
+                    "(library_id, user_id, name, normalized_name, status, "
+                    "created_at, updated_at) VALUES "
+                    "('library-1', 'local-user', 'Research', 'research', 'active', "
+                    ":time, :time)"
+                ),
+                {"time": timestamp},
+            )
+            connection.execute(
+                sa.text(
+                    "INSERT INTO knowledge_sources "
+                    "(source_id, library_id, display_path, canonical_path, status, "
+                    "scan_status, created_at, updated_at) VALUES "
+                    "('source-1', 'library-1', '/Research', '/Research', 'active', "
+                    "'ready', :time, :time)"
+                ),
+                {"time": timestamp},
+            )
+            connection.execute(
+                sa.text(
+                    "INSERT INTO knowledge_documents "
+                    "(document_id, source_id, relative_path, file_type, status, "
+                    "size_bytes, mtime_ns, content_hash, parser_version, "
+                    "current_chunker_version, created_at, updated_at) VALUES "
+                    "('document-text', 'source-1', 'notes.txt', 'text', 'active', "
+                    "10, 1, 'hash-text', 'v1', 'v1', :time, :time)"
+                ),
+                {"time": timestamp},
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "head")
+    engine = sa.create_engine(f"sqlite+pysqlite:///{database_path}")
+    try:
+        with engine.begin() as connection:
+            for document_id, relative_path, file_type in (
+                ("document-docx", "report.docx", "docx"),
+                ("document-html", "article.html", "html"),
+            ):
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO knowledge_documents "
+                        "(document_id, source_id, relative_path, file_type, status, "
+                        "size_bytes, mtime_ns, content_hash, parser_version, "
+                        "current_chunker_version, created_at, updated_at) VALUES "
+                        "(:document_id, 'source-1', :relative_path, :file_type, "
+                        "'active', 10, 1, :content_hash, 'v2', 'v1', :time, :time)"
+                    ),
+                    {
+                        "document_id": document_id,
+                        "relative_path": relative_path,
+                        "file_type": file_type,
+                        "content_hash": f"hash-{file_type}",
+                        "time": timestamp,
+                    },
+                )
+            rows = connection.execute(
+                sa.text(
+                    "SELECT document_id, file_type FROM knowledge_documents "
+                    "ORDER BY document_id"
+                )
+            ).all()
+    finally:
+        engine.dispose()
+
+    assert [(row[0], row[1]) for row in rows] == [
+        ("document-docx", "docx"),
+        ("document-html", "html"),
+        ("document-text", "text"),
+    ]
 
 
 def test_initial_schema_enforces_foreign_keys_and_invariants(tmp_path: Path) -> None:

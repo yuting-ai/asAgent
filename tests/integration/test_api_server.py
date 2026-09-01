@@ -1,6 +1,7 @@
 import json
 import os
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -123,6 +124,30 @@ async def test_local_api_server_binds_loopback_dynamic_port_and_serves_health() 
         assert response.json() == {"status": "ok"}
     finally:
         await server.close()
+
+
+@pytest.mark.asyncio
+async def test_local_api_server_runs_application_lifespan() -> None:
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        del app
+        events.append("startup")
+        try:
+            yield
+        finally:
+            events.append("shutdown")
+
+    app = FastAPI(lifespan=lifespan)
+    server = LocalApiServer(app, port=0)
+    await server.start()
+
+    assert events == ["startup"]
+
+    await server.close()
+
+    assert events == ["startup", "shutdown"]
 
 
 @pytest.mark.asyncio

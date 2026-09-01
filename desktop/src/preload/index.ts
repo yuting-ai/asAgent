@@ -78,6 +78,84 @@ type SubmittedMessage = {
   conversation: ConversationSummary
 }
 
+type KnowledgeSource = {
+  source_id: string
+  library_id: string
+  display_path: string
+  canonical_path: string
+  status: string
+  scan_status: string
+  created_at: string
+  updated_at: string
+  last_scanned_at: string | null
+  document_count: number
+  chunk_count: number
+}
+
+type KnowledgeLibrary = {
+  library_id: string
+  user_id: string
+  name: string
+  normalized_name: string
+  status: string
+  created_at: string
+  updated_at: string
+  sources: KnowledgeSource[]
+  document_count: number
+  chunk_count: number
+}
+
+type KnowledgeIndexJob = {
+  job_id: string
+  library_id: string
+  source_id: string | null
+  kind: string
+  status: string
+  discovered_files: number
+  processed_files: number
+  skipped_files: number
+  failed_files: number
+  total_chunks: number
+  indexed_chunks: number
+  cancel_requested: boolean
+  created_at: string
+  updated_at: string
+  started_at: string | null
+  completed_at: string | null
+  last_error_code: string | null
+}
+
+type KnowledgeIndexProgress = {
+  library_id: string
+  status: 'empty' | 'ready' | 'scanning' | 'indexing' | 'error'
+  active_jobs: number
+  discovered_files: number
+  processed_files: number
+  failed_files: number
+  total_chunks: number
+  indexed_chunks: number
+  document_count: number
+  chunk_count: number
+  updated_at: string
+}
+
+type KnowledgeIndexStreamError = { libraryId: string; message: string }
+
+type KnowledgeCitation = {
+  run_id: string
+  assistant_message_id: string | null
+  rank: number
+  chunk_id: string
+  score: number
+  citation_label: string
+  document_name: string
+  source_path: string
+  snippet: string
+  page_start: number | null
+  page_end: number | null
+  section_title: string | null
+}
+
 type RunUpdate = {
   runId: string
   conversationId: string
@@ -254,6 +332,42 @@ const desktopBridge = {
   restartApp: (): Promise<void> => ipcRenderer.invoke('desktop:restart-app'),
   listConversations: (): Promise<ConversationSummary[]> =>
     ipcRenderer.invoke('desktop:list-conversations'),
+  listKnowledgeLibraries: (): Promise<KnowledgeLibrary[]> =>
+    ipcRenderer.invoke('desktop:list-knowledge-libraries'),
+  createKnowledgeLibrary: (name: string): Promise<KnowledgeLibrary> =>
+    ipcRenderer.invoke('desktop:create-knowledge-library', name),
+  renameKnowledgeLibrary: (libraryId: string, name: string): Promise<KnowledgeLibrary> =>
+    ipcRenderer.invoke('desktop:rename-knowledge-library', libraryId, name),
+  deleteKnowledgeLibrary: (libraryId: string): Promise<void> =>
+    ipcRenderer.invoke('desktop:delete-knowledge-library', libraryId),
+  addKnowledgeSource: (libraryId: string, sourcePath: string): Promise<KnowledgeSource> =>
+    ipcRenderer.invoke('desktop:add-knowledge-source', libraryId, sourcePath),
+  detachKnowledgeSource: (sourceId: string): Promise<void> =>
+    ipcRenderer.invoke('desktop:detach-knowledge-source', sourceId),
+  indexKnowledgeSource: (sourceId: string): Promise<KnowledgeIndexJob> =>
+    ipcRenderer.invoke('desktop:index-knowledge-source', sourceId),
+  getKnowledgeIndexJob: (jobId: string): Promise<KnowledgeIndexJob> =>
+    ipcRenderer.invoke('desktop:get-knowledge-index-job', jobId),
+  watchKnowledgeIndexProgress: (libraryId: string): Promise<void> =>
+    ipcRenderer.invoke('desktop:watch-knowledge-index-progress', libraryId),
+  unwatchKnowledgeIndexProgress: (libraryId: string): Promise<void> =>
+    ipcRenderer.invoke('desktop:unwatch-knowledge-index-progress', libraryId),
+  listKnowledgeConversations: (): Promise<ConversationSummary[]> =>
+    ipcRenderer.invoke('desktop:list-knowledge-conversations'),
+  createKnowledgeConversation: (libraryId: string): Promise<ConversationSummary> =>
+    ipcRenderer.invoke('desktop:create-knowledge-conversation', libraryId),
+  deleteKnowledgeConversation: (conversationId: string): Promise<void> =>
+    ipcRenderer.invoke('desktop:delete-knowledge-conversation', conversationId),
+  listKnowledgeConversationMessages: (conversationId: string): Promise<ConversationMessage[]> =>
+    ipcRenderer.invoke('desktop:list-knowledge-conversation-messages', conversationId),
+  listKnowledgeConversationCitations: (conversationId: string): Promise<KnowledgeCitation[]> =>
+    ipcRenderer.invoke('desktop:list-knowledge-conversation-citations', conversationId),
+  getKnowledgeConversationLibrary: (
+    conversationId: string
+  ): Promise<{ library_id: string | null }> =>
+    ipcRenderer.invoke('desktop:get-knowledge-conversation-library', conversationId),
+  submitKnowledgeMessage: (conversationId: string, content: string): Promise<SubmittedMessage> =>
+    ipcRenderer.invoke('desktop:submit-knowledge-message', conversationId, content),
   listAutomations: (): Promise<AutomationSummary[]> =>
     ipcRenderer.invoke('desktop:list-automations'),
   createAutomation: (input: CreateAutomationInput): Promise<AutomationSummary> =>
@@ -382,6 +496,22 @@ const desktopBridge = {
 
     ipcRenderer.on('desktop:run-stream-error', listener)
     return () => ipcRenderer.removeListener('desktop:run-stream-error', listener)
+  },
+  onKnowledgeIndexProgress: (
+    callback: (progress: KnowledgeIndexProgress) => void
+  ): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, progress: KnowledgeIndexProgress): void =>
+      callback(progress)
+    ipcRenderer.on('desktop:knowledge-index-progress', listener)
+    return () => ipcRenderer.removeListener('desktop:knowledge-index-progress', listener)
+  },
+  onKnowledgeIndexStreamError: (
+    callback: (error: KnowledgeIndexStreamError) => void
+  ): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, error: KnowledgeIndexStreamError): void =>
+      callback(error)
+    ipcRenderer.on('desktop:knowledge-index-stream-error', listener)
+    return () => ipcRenderer.removeListener('desktop:knowledge-index-stream-error', listener)
   },
   onToolApprovalRequested: (callback: (approval: ToolApproval) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, approval: ToolApproval): void => {

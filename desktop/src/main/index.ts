@@ -17,6 +17,7 @@ import icon from '../../resources/icon.png?asset'
 import {
   BackendLauncher,
   isToolApprovalDecision,
+  type KnowledgeIndexProgress,
   type StorageSettingsInput,
   type SubmittedMessage,
   type ToolApproval
@@ -44,6 +45,7 @@ let browserPageBridge: BrowserPageBridge | undefined
 let browserSessionStore: BrowserSessionStore | undefined
 let isQuitting = false
 const runWatchers = new Map<string, () => void>()
+const knowledgeIndexWatchers = new Map<string, () => void>()
 let dataProcessingMode: 'local' | 'external' = 'local'
 
 if (!app.isPackaged) {
@@ -365,6 +367,43 @@ function stopRunWatcher(runId: string): void {
   stop?.()
 }
 
+function knowledgeIndexWatcherKey(sender: WebContents, libraryId: string): string {
+  return `${sender.id}:${libraryId}`
+}
+
+function stopKnowledgeIndexWatcher(sender: WebContents, libraryId: string): void {
+  const key = knowledgeIndexWatcherKey(sender, libraryId)
+  const stop = knowledgeIndexWatchers.get(key)
+  knowledgeIndexWatchers.delete(key)
+  stop?.()
+}
+
+function watchKnowledgeIndexProgress(sender: WebContents, libraryId: string): void {
+  stopKnowledgeIndexWatcher(sender, libraryId)
+  const key = knowledgeIndexWatcherKey(sender, libraryId)
+  const stop = getReadyBackendLauncher().watchKnowledgeIndexProgress(
+    libraryId,
+    (progress: KnowledgeIndexProgress) => {
+      if (sender.isDestroyed()) {
+        stopKnowledgeIndexWatcher(sender, libraryId)
+        return
+      }
+      sender.send('desktop:knowledge-index-progress', progress)
+    },
+    (error) => {
+      if (!sender.isDestroyed()) {
+        sender.send('desktop:knowledge-index-stream-error', {
+          libraryId,
+          message: error.message
+        })
+      }
+      stopKnowledgeIndexWatcher(sender, libraryId)
+    }
+  )
+  knowledgeIndexWatchers.set(key, stop)
+  sender.once('destroyed', () => stopKnowledgeIndexWatcher(sender, libraryId))
+}
+
 async function restartSettingsRuntime(sender: WebContents): Promise<void> {
   if (!is.dev) {
     app.relaunch()
@@ -375,6 +414,8 @@ async function restartSettingsRuntime(sender: WebContents): Promise<void> {
   for (const runId of runWatchers.keys()) {
     stopRunWatcher(runId)
   }
+  for (const stop of knowledgeIndexWatchers.values()) stop()
+  knowledgeIndexWatchers.clear()
 
   const launcher = getReadyBackendLauncher()
   await launcher.stop()
@@ -779,6 +820,173 @@ app.whenReady().then(async () => {
     assertTrustedRenderer(frame.url)
     return getReadyBackendLauncher().listConversations()
   })
+
+  ipcMain.handle('desktop:list-knowledge-libraries', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().listKnowledgeLibraries()
+  })
+
+  ipcMain.handle('desktop:create-knowledge-library', (event, name: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof name !== 'string' || !name.trim()) throw new Error('Library name is invalid.')
+    return getReadyBackendLauncher().createKnowledgeLibrary(name.trim())
+  })
+
+  ipcMain.handle('desktop:rename-knowledge-library', (event, libraryId: unknown, name: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof libraryId !== 'string' || !libraryId.trim())
+      throw new Error('Library ID is invalid.')
+    if (typeof name !== 'string' || !name.trim()) throw new Error('Library name is invalid.')
+    return getReadyBackendLauncher().renameKnowledgeLibrary(libraryId.trim(), name.trim())
+  })
+
+  ipcMain.handle('desktop:delete-knowledge-library', (event, libraryId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof libraryId !== 'string' || !libraryId.trim())
+      throw new Error('Library ID is invalid.')
+    return getReadyBackendLauncher().deleteKnowledgeLibrary(libraryId.trim())
+  })
+
+  ipcMain.handle(
+    'desktop:add-knowledge-source',
+    (event, libraryId: unknown, sourcePath: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) throw new Error('Untrusted renderer IPC request.')
+      assertTrustedRenderer(frame.url)
+      if (typeof libraryId !== 'string' || !libraryId.trim())
+        throw new Error('Library ID is invalid.')
+      if (typeof sourcePath !== 'string' || !sourcePath.trim())
+        throw new Error('Source path is invalid.')
+      return getReadyBackendLauncher().addKnowledgeSource(libraryId.trim(), sourcePath.trim())
+    }
+  )
+
+  ipcMain.handle('desktop:detach-knowledge-source', (event, sourceId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof sourceId !== 'string' || !sourceId.trim()) throw new Error('Source ID is invalid.')
+    return getReadyBackendLauncher().detachKnowledgeSource(sourceId.trim())
+  })
+
+  ipcMain.handle('desktop:index-knowledge-source', (event, sourceId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof sourceId !== 'string' || !sourceId.trim()) throw new Error('Source ID is invalid.')
+    return getReadyBackendLauncher().indexKnowledgeSource(sourceId.trim())
+  })
+
+  ipcMain.handle('desktop:get-knowledge-index-job', (event, jobId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof jobId !== 'string' || !jobId.trim()) throw new Error('Job ID is invalid.')
+    return getReadyBackendLauncher().getKnowledgeIndexJob(jobId.trim())
+  })
+
+  ipcMain.handle('desktop:watch-knowledge-index-progress', (event, libraryId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof libraryId !== 'string' || !libraryId.trim())
+      throw new Error('Library ID is invalid.')
+    watchKnowledgeIndexProgress(event.sender, libraryId.trim())
+  })
+
+  ipcMain.handle('desktop:unwatch-knowledge-index-progress', (event, libraryId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof libraryId !== 'string' || !libraryId.trim())
+      throw new Error('Library ID is invalid.')
+    stopKnowledgeIndexWatcher(event.sender, libraryId.trim())
+  })
+
+  ipcMain.handle('desktop:list-knowledge-conversations', (event) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    return getReadyBackendLauncher().listKnowledgeConversations()
+  })
+
+  ipcMain.handle('desktop:create-knowledge-conversation', (event, libraryId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof libraryId !== 'string' || !libraryId.trim())
+      throw new Error('Library ID is invalid.')
+    return getReadyBackendLauncher().createKnowledgeConversation(libraryId.trim())
+  })
+
+  ipcMain.handle('desktop:delete-knowledge-conversation', (event, conversationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof conversationId !== 'string' || !conversationId.trim())
+      throw new Error('Conversation ID is invalid.')
+    return getReadyBackendLauncher().deleteKnowledgeConversation(conversationId.trim())
+  })
+
+  ipcMain.handle(
+    'desktop:list-knowledge-conversation-messages',
+    (event, conversationId: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) throw new Error('Untrusted renderer IPC request.')
+      assertTrustedRenderer(frame.url)
+      if (typeof conversationId !== 'string' || !conversationId.trim())
+        throw new Error('Conversation ID is invalid.')
+      return getReadyBackendLauncher().listKnowledgeConversationMessages(conversationId.trim())
+    }
+  )
+
+  ipcMain.handle(
+    'desktop:list-knowledge-conversation-citations',
+    (event, conversationId: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) throw new Error('Untrusted renderer IPC request.')
+      assertTrustedRenderer(frame.url)
+      if (typeof conversationId !== 'string' || !conversationId.trim())
+        throw new Error('Conversation ID is invalid.')
+      return getReadyBackendLauncher().listKnowledgeConversationCitations(conversationId.trim())
+    }
+  )
+
+  ipcMain.handle('desktop:get-knowledge-conversation-library', (event, conversationId: unknown) => {
+    const frame = event.senderFrame
+    if (frame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(frame.url)
+    if (typeof conversationId !== 'string' || !conversationId.trim())
+      throw new Error('Conversation ID is invalid.')
+    return getReadyBackendLauncher().getKnowledgeConversationLibrary(conversationId.trim())
+  })
+
+  ipcMain.handle(
+    'desktop:submit-knowledge-message',
+    (event, conversationId: unknown, content: unknown) => {
+      const frame = event.senderFrame
+      if (frame === null) throw new Error('Untrusted renderer IPC request.')
+      assertTrustedRenderer(frame.url)
+      if (typeof conversationId !== 'string' || !conversationId.trim())
+        throw new Error('Conversation ID is invalid.')
+      if (typeof content !== 'string' || !content.trim())
+        throw new Error('Message content is invalid.')
+      return getReadyBackendLauncher()
+        .submitKnowledgeMessage(conversationId.trim(), content.trim())
+        .then((submitted) => {
+          watchRun(event.sender, conversationId.trim(), submitted)
+          return submitted
+        })
+    }
+  )
 
   ipcMain.handle('desktop:list-automations', (event) => {
     const frame = event.senderFrame
@@ -1434,6 +1642,8 @@ app.on('before-quit', (event) => {
   for (const runId of runWatchers.keys()) {
     stopRunWatcher(runId)
   }
+  for (const stop of knowledgeIndexWatchers.values()) stop()
+  knowledgeIndexWatchers.clear()
 
   const browser = visibleBrowser
   const sessionStore = browserSessionStore

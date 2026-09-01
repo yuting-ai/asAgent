@@ -352,10 +352,11 @@ body.is-resizing-columns {
 }
 
 .rail-automation-section {
-  margin-bottom: 16px;
+  margin-bottom: 6px;
 }
 
-.rail-automation-section .rail-item {
+.rail-automation-section .rail-item,
+.rail-knowledge-section .rail-item {
   height: 36px;
   padding: 0 10px;
   border: 1px solid var(--line-soft);
@@ -365,7 +366,9 @@ body.is-resizing-columns {
 }
 
 .rail-automation-section .rail-item:hover,
-.rail-automation-section .rail-item.active {
+.rail-automation-section .rail-item.active,
+.rail-knowledge-section .rail-item:hover,
+.rail-knowledge-section .rail-item.active {
   border-color: var(--line);
   background: var(--bg-raised);
   color: var(--text);
@@ -375,6 +378,10 @@ body.is-resizing-columns {
 .rail-automation-section .rail-item.active .rail-count {
   background: var(--bg-inset);
   color: var(--text-dim);
+}
+
+.rail-knowledge-section {
+  margin-bottom: 16px;
 }
 
 .rail-recents-list {
@@ -715,7 +722,9 @@ body.is-resizing-columns {
 }
 
 .app.rail-collapsed .rail-automation-section .rail-item,
-.app.rail-collapsed .rail-automation-section .rail-item.active {
+.app.rail-collapsed .rail-automation-section .rail-item.active,
+.app.rail-collapsed .rail-knowledge-section .rail-item,
+.app.rail-collapsed .rail-knowledge-section .rail-item.active {
   border: none;
   background: transparent;
   box-shadow: none;

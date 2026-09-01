@@ -23,6 +23,7 @@ import {
   MODEL_PROVIDER_PRESETS
 } from './model_presets'
 import { type AppLanguage, getStoredAppLanguage, LANGUAGE_STORAGE_KEY, t } from './i18n'
+import KnowledgeWorkspace from './KnowledgeWorkspace'
 import { splitLiveAndPersistedRunHistory } from './run_activity_visibility'
 
 type AppInfo = {
@@ -119,6 +120,7 @@ type AppView =
   | 'activity'
   | 'privacy'
   | 'automations'
+  | 'knowledge'
   | 'history'
   | 'files'
   | 'mail'
@@ -1441,6 +1443,7 @@ export default function App(): React.JSX.Element {
       activeView !== 'browser' &&
       activeView !== 'preferences' &&
       activeView !== 'automations' &&
+      activeView !== 'knowledge' &&
       desktopLayout.attentionPanelOpen)
 
   const addBrowserTab = useCallback((): void => {
@@ -4194,6 +4197,28 @@ export default function App(): React.JSX.Element {
             </button>
           </div>
 
+          <div className="rail-section rail-knowledge-section">
+            <button
+              className={railItemClass('knowledge')}
+              onClick={() => setActiveView('knowledge')}
+              title={t(appLanguage, 'knowledgeTitle')}
+              type="button"
+            >
+              <svg
+                className="rail-icon"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H11v17H7.5A3.5 3.5 0 0 0 4 22V5.5zM20 5.5A3.5 3.5 0 0 0 16.5 2H13v17h3.5A3.5 3.5 0 0 1 20 22V5.5z" />
+              </svg>
+              <span className="rail-item-label">{t(appLanguage, 'knowledgeTitle')}</span>
+            </button>
+          </div>
+
           <div className="rail-section rail-recents">
             <div className="rail-recents-header">
               <div className="rail-label">{t(appLanguage, 'recents')}</div>
@@ -6493,6 +6518,9 @@ export default function App(): React.JSX.Element {
               </section>
             </div>
           </section>
+        </div>
+        <div className={`view${activeView === 'knowledge' ? ' active' : ''}`}>
+          <KnowledgeWorkspace lang={appLanguage} />
         </div>
         <div className={`view${activeView === 'history' ? ' active' : ''}`}>
           {renderPlaceholderView('History', 'Longer-term activity and audit trail.')}

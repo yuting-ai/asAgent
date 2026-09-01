@@ -244,9 +244,11 @@ def _required_kind(row: Mapping[str, object], field: str) -> ConversationKind:
         return "automation_draft"
     if value == "automation_execution":
         return "automation_execution"
+    if value == "knowledge":
+        return "knowledge"
     raise RuntimeError(
         f"persisted {field} must be chat, browser, automation_draft, "
-        "or automation_execution"
+        "automation_execution, or knowledge"
     )
 
 
