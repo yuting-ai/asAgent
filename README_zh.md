@@ -14,7 +14,7 @@
 
 ---
 
-asAgent 将对话、浏览器辅助、定时任务和可撤回文件操作集中在一个桌面应用中。会话与应用状态默认保存在你的电脑上；当你选择外部模型或联网工具时，只有完成该次请求所需的数据会发送给已配置的服务。
+asAgent 将对话、浏览器辅助、定时任务、本地知识检索和可撤回文件操作集中在一个桌面应用中。会话、知识索引与应用状态默认保存在你的电脑上；当你选择外部模型或联网工具时，只有完成该次请求所需的数据会发送给已配置的服务。
 
 > asAgent 仍在持续开发中。目前已提供经过签名和公证的 Apple Silicon Mac 预览版；其他平台和完整成熟的发布体验尚未支持，开发者也可以继续从源码运行项目。
 
@@ -33,6 +33,7 @@ asAgent 将对话、浏览器辅助、定时任务和可撤回文件操作集中
 - 让 Agent 在可见浏览器中读取网页并执行交互。
 - 与 PDF 文档对话 —— 直接提取并阅读授权的本地 PDF 文件或浏览器标签页中的在线 PDF 内容，无需落地临时文件。
 - 创建单次、每日和每周自动化任务。
+- 从本地文件夹创建 Knowledge Library，并通过带来源引用的对话检索内容。
 - 在授权范围内读取和修改文件，并通过快照与恢复机制降低风险。
 
 asAgent 当前没有接入遥测服务。外部模型服务商、Tavily 和用户配置的其他 MCP Server 仍可能接收完成相应操作所需的数据。
@@ -74,7 +75,16 @@ asAgent 当前没有接入遥测服务。外部模型服务商、Tavily 和用�
 - **过期任务保护：** 启动恢复时会跳过过期的周期事件，避免休眠恢复后出现集中补跑风暴。
 - **可选计划修正：** Automation Run 中，模型可以调用 `automation.update_plan` 保存已经实际验证成功的修正方案。这是工具引导的行为，不保证每次网页故障都一定能够自动修复。
 
-### 5. MCP 与联网搜索
+### 5. 本地 Knowledge 工作区与可信检索
+
+- **Library 与文件夹：** 可以创建、重命名、切换和删除 Knowledge Library，并为每个 Library 添加一个或多个本地文件夹。Knowledge 文件夹权限独立于普通 Chat Conversation 的文件工作区权限。
+- **支持的文档：** 可索引带文本层的 PDF、Markdown（`.md`、`.markdown`）、纯文本（`.txt`、`.text`、`.rst`）、Word（`.docx`）和 HTML（`.html`、`.htm`）。暂不支持需要 OCR 的扫描 PDF。
+- **自动本地索引：** Source Watcher 会发现已添加文件夹中受支持文件的新增、修改和删除，并调度增量解析、确定性分块与 Embedding；页面顶部和文件夹列表会显示文档数量与索引进度。
+- **离线检索索引：** 随应用打包的 `paraphrase-multilingual-MiniLM-L12-v2` ONNX 模型离线生成 384 维向量，运行时无需下载。SQLite 保存 Chunk 正文、出处、任务、对话与引用；内嵌 Qdrant Local 保存向量以及限定 Library 检索所需的少量过滤字段。
+- **有依据的回答：** Knowledge Conversation 会执行支持文件名线索的检索，并以文件、页码或章节和原文片段展示来源引用；Bearer 认证 SSE 会在回答出现前显示简洁的检索与生成状态。
+- **可恢复的移除：** Knowledge 不会修改磁盘中的原始文件。移除文件夹只会将它从检索范围中软分离并保留派生索引缓存，因此重新添加时无需对未变化文件重复生成 Embedding。
+
+### 6. MCP 与联网搜索
 
 - **MCP stdio Client：** asAgent 支持现代 MCP 发现流程及隔离的旧协议回退；导入工具会被命名空间化，经过 Schema、权限和审批策略，并以原子方式加入 Registry。
 - **启动时固定工具集：** MCP Server 在 Python Sidecar 启动时加载。配置变化需要重启；热刷新、通知和分页工具发现尚未实现。
@@ -101,13 +111,14 @@ asAgent 当前没有接入遥测服务。外部模型服务商、Tavily 和用�
 ├─────────────────────────────────────────────────────────────┤
 │ Agent Runtime · Context Builder · Model · Tool · Scheduler  │
 ├─────────────────────────────────────────────────────────────┤
-│ SQLite · Workspace · 私有快照 · macOS Keychain             │
+│ SQLite · Qdrant Local · Workspace · 快照 · Keychain        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 - Backend 自行绑定随机回环端口，并通过结构化 Ready Record 报告实际端点。
 - Electron Main 每次启动生成新的 Token，经子进程 stdin 发送；Token 不进入命令行参数、URL、Renderer Storage 或普通日志。
 - Main 解析认证 SSE，只向受信任 Renderer 暴露结构化 Run 更新。
+- Knowledge 将 Chunk 正文与出处保存在 SQLite，并把内嵌 Qdrant Local 作为可重建向量索引；随应用打包的 Embedding 模型离线运行并通过 Git LFS 进行版本管理。
 - 模型 API Key 与 Tavily Credential 当前保存在 macOS Keychain。
 - 产品默认使用单个本地用户 `local-user`，但领域与持久化边界仍保留 `user_id`。
 
@@ -121,13 +132,16 @@ asAgent 当前没有接入遥测服务。外部模型服务商、Tavily 和用�
 - [uv](https://docs.astral.sh/uv/)
 - Node.js `>=20.19.0` 或 `>=22.12.0`
 - npm
+- [Git LFS](https://git-lfs.com/)（用于检出随应用打包的本地 Embedding 模型）
 - 后台网页自动化可选依赖：Google Chrome、Microsoft Edge 或 Chromium
 
 ### 1. 克隆并安装依赖
 
 ```bash
+git lfs install
 git clone https://github.com/yuting-ai/asAgent.git
 cd asAgent
+git lfs pull
 
 uv sync --locked
 npm --prefix desktop ci
@@ -146,13 +160,13 @@ npm --prefix desktop run dev
 ### 3. 测试与质量保证
 
 ```bash
-# Python 测试（当前收集 622 个测试）
+# Python 测试（当前收集 689 个测试）
 uv run pytest
 
 # Python Lint、格式检查、strict mypy、锁文件和 diff 检查
 scripts/check.sh
 
-# Desktop 类型检查、Lint 和测试（当前 176 个测试）
+# Desktop 类型检查、Lint 和测试（当前 192 个测试）
 npm --prefix desktop run typecheck
 npm --prefix desktop run lint
 npm --prefix desktop test
@@ -212,14 +226,15 @@ Settings 当前提供以下 OpenAI-compatible Preset。DeepSeek 是端到端开�
 - [x] 会话级只读文件工具，以及可撤回的单文件 Create/Replace/Delete 和带冲突保护的 Undo
 - [x] 可见 Browser Conversation 与隔离的后台浏览器自动化
 - [x] Once/Daily/Weekly Scheduled task、执行历史和可选 `automation.update_plan`
+- [x] 本地 Knowledge Library、文件夹自动监听、离线 Embedding、Qdrant 检索、可信对话与来源引用
 - [x] MCP stdio Client/Manager 与可选 Tavily MCP 配置
-- [x] 包含 Chat、Browser、Scheduled task、Settings、工作区检查器和中英双语 UI 的 Electron 开发外壳
+- [x] 包含 Chat、Browser、Scheduled task、Knowledge、Settings、工作区检查器和中英双语 UI 的 Electron 开发外壳
 - [x] 独立 PyInstaller Sidecar 构建与自动化冒烟测试
 
 ### 待完成
 
 - [ ] 桌面 Agent Loop 的 Assistant 正文逐 Token 实时输出
-- [ ] Conversation Summary、经用户确认的长期 User Memory、Knowledge 索引和跨会话检索
+- [ ] Conversation Summary、经用户确认的长期 User Memory，以及跨会话检索
 - [ ] 运行时扫描、选择和加载磁盘上的 `SKILL.md`
 - [ ] 多 Agent/Subagent 编排
 - [ ] MCP 分页、通知、热刷新和 Streamable HTTP Transport

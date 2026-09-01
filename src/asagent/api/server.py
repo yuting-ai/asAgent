@@ -69,7 +69,7 @@ class LocalApiServer:
                 host=self._host,
                 port=self._port,
                 access_log=False,
-                lifespan="off",
+                lifespan="on",
                 log_config=None,
             ),
         )

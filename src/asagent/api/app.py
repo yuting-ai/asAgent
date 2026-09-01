@@ -1,10 +1,10 @@
 import asyncio
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from dataclasses import replace
 from datetime import UTC, datetime, time
 from pathlib import Path
-from typing import Annotated, Final, Literal
+from typing import Annotated, Any, Final, Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -65,7 +65,10 @@ from asagent.core.ids import (
     AutomationTriggerId,
     ConversationId,
     FileChangeId,
+    IndexJobId,
+    LibraryId,
     RunId,
+    SourceId,
     UserId,
 )
 from asagent.core.messages import AssistantMessage, UserMessage
@@ -78,6 +81,22 @@ from asagent.core.repositories import (
 from asagent.core.run import Run
 from asagent.core.run_event import RunEvent
 from asagent.core.run_status import RunStatus
+from asagent.knowledge import (
+    DuplicateLibraryNameError,
+    DuplicateSourceError,
+    InvalidSourcePathError,
+    KnowledgeIndexer,
+    KnowledgeIndexJob,
+    KnowledgeLibrary,
+    KnowledgeLibraryService,
+    KnowledgeRepository,
+    KnowledgeRetriever,
+    KnowledgeSource,
+    LastLibraryDeletionError,
+    LibraryNotFoundError,
+    SourceNotFoundError,
+)
+from asagent.knowledge.source_watcher import KnowledgeSourceWatcher
 from asagent.models.config import ProviderLocation
 from asagent.storage.file_change_snapshots import FileChangeSnapshotStore
 from asagent.storage.reversible_files import (
@@ -685,6 +704,213 @@ class ClearStorageResponse(BaseModel):
     deleted_count: int
 
 
+class CreateLibraryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def name_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("name must not be blank")
+        return value
+
+
+class UpdateLibraryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def name_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("name must not be blank")
+        return value
+
+
+class AddSourceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+
+    @field_validator("path")
+    @classmethod
+    def path_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("path must not be blank")
+        return value
+
+
+class KnowledgeSourceResponse(BaseModel):
+    source_id: str
+    library_id: str
+    display_path: str
+    canonical_path: str
+    status: str
+    scan_status: str
+    created_at: datetime
+    updated_at: datetime
+    last_scanned_at: datetime | None = None
+    document_count: int = 0
+    chunk_count: int = 0
+
+    @classmethod
+    def from_source(
+        cls,
+        source: KnowledgeSource,
+        document_count: int = 0,
+        chunk_count: int = 0,
+    ) -> "KnowledgeSourceResponse":
+        return cls(
+            source_id=str(source.source_id),
+            library_id=str(source.library_id),
+            display_path=source.display_path,
+            canonical_path=source.canonical_path,
+            status=source.status,
+            scan_status=source.scan_status,
+            created_at=source.created_at,
+            updated_at=source.updated_at,
+            last_scanned_at=source.last_scanned_at,
+            document_count=document_count,
+            chunk_count=chunk_count,
+        )
+
+
+class KnowledgeLibraryResponse(BaseModel):
+    library_id: str
+    user_id: str
+    name: str
+    normalized_name: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    sources: list[KnowledgeSourceResponse] = Field(default_factory=list)
+    document_count: int = 0
+    chunk_count: int = 0
+
+    @classmethod
+    def from_library(
+        cls,
+        library: KnowledgeLibrary,
+        sources: list[KnowledgeSourceResponse] | None = None,
+        document_count: int = 0,
+        chunk_count: int = 0,
+    ) -> "KnowledgeLibraryResponse":
+        return cls(
+            library_id=str(library.library_id),
+            user_id=str(library.user_id),
+            name=library.name,
+            normalized_name=library.normalized_name,
+            status=library.status,
+            created_at=library.created_at,
+            updated_at=library.updated_at,
+            sources=sources or [],
+            document_count=document_count,
+            chunk_count=chunk_count,
+        )
+
+
+class KnowledgeIndexJobResponse(BaseModel):
+    job_id: str
+    library_id: str
+    source_id: str | None
+    kind: str
+    status: str
+    discovered_files: int
+    processed_files: int
+    skipped_files: int
+    failed_files: int
+    total_chunks: int
+    indexed_chunks: int
+    cancel_requested: bool
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    last_error_code: str | None = None
+
+    @classmethod
+    def from_job(cls, job: KnowledgeIndexJob) -> "KnowledgeIndexJobResponse":
+        return cls(
+            job_id=str(job.job_id),
+            library_id=str(job.library_id),
+            source_id=str(job.source_id) if job.source_id else None,
+            kind=job.kind,
+            status=job.status,
+            discovered_files=job.discovered_files,
+            processed_files=job.processed_files,
+            skipped_files=job.skipped_files,
+            failed_files=job.failed_files,
+            total_chunks=job.total_chunks,
+            indexed_chunks=job.indexed_chunks,
+            cancel_requested=job.cancel_requested,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+            started_at=job.started_at,
+            completed_at=job.completed_at,
+            last_error_code=job.last_error_code,
+        )
+
+
+class KnowledgeLibraryIndexProgressResponse(BaseModel):
+    library_id: str
+    status: str
+    active_jobs: int
+    discovered_files: int
+    processed_files: int
+    failed_files: int
+    total_chunks: int
+    indexed_chunks: int
+    document_count: int
+    chunk_count: int
+    updated_at: datetime
+
+
+class BindConversationLibraryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    library_id: str
+
+
+class CreateKnowledgeConversationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    library_id: str
+
+
+class ConversationLibraryResponse(BaseModel):
+    conversation_id: str
+    library_id: str | None
+    library_name: str | None = None
+
+
+class KnowledgeSearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    query: str
+    limit: int = Field(default=5, ge=1, le=50)
+    min_score: float = Field(default=0.35, ge=0.0, le=1.0)
+
+
+class KnowledgeSearchHitResponse(BaseModel):
+    rank: int
+    chunk_id: str
+    score: float
+    citation_label: str
+    document_name: str
+    source_path: str
+    snippet: str
+    page_start: int | None = None
+    page_end: int | None = None
+    section_title: str | None = None
+
+
+class KnowledgeCitationResponse(KnowledgeSearchHitResponse):
+    run_id: str
+    assistant_message_id: str | None = None
+
+
+class KnowledgeSearchResponse(BaseModel):
+    hits: list[KnowledgeSearchHitResponse]
+    formatted_context: str
+
+
 def create_app(
     *,
     access_token: LocalApiToken,
@@ -713,6 +939,10 @@ def create_app(
     automation_trigger_id_factory: Callable[[], AutomationTriggerId] | None = None,
     conversation_id_factory: Callable[[], ConversationId] | None = None,
     clock: Callable[[], datetime] | None = None,
+    knowledge_repository: KnowledgeRepository | None = None,
+    knowledge_service: KnowledgeLibraryService | None = None,
+    knowledge_indexer: KnowledgeIndexer | None = None,
+    knowledge_retriever: KnowledgeRetriever | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="asAgent Local API",
@@ -1269,6 +1499,161 @@ def create_app(
         )
 
     @app.get(
+        "/api/v1/knowledge/conversations",
+        response_model=list[ConversationResponse],
+        dependencies=[Depends(authenticate)],
+    )
+    async def list_knowledge_conversations() -> list[ConversationResponse]:
+        return await list_conversations_of_kind("knowledge")
+
+    @app.post(
+        "/api/v1/knowledge/conversations",
+        response_model=ConversationResponse,
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(authenticate)],
+    )
+    async def create_knowledge_conversation(
+        request: CreateKnowledgeConversationRequest,
+    ) -> ConversationResponse:
+        if knowledge_repository is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="knowledge repository is unavailable",
+            )
+        library = await knowledge_repository.get_library(LibraryId(request.library_id))
+        if library is None or library.user_id != _LOCAL_USER_ID:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="knowledge library not found",
+            )
+        created = await create_conversation_of_kind("knowledge")
+        await knowledge_repository.bind_conversation_library(
+            ConversationId(created.conversation_id), library.library_id
+        )
+        return created
+
+    @app.delete(
+        "/api/v1/knowledge/conversations/{conversation_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(authenticate)],
+    )
+    async def delete_knowledge_conversation(conversation_id: str) -> Response:
+        await get_local_conversation(ConversationId(conversation_id), kind="knowledge")
+        if knowledge_repository is not None:
+            await knowledge_repository.unbind_conversation_library(
+                ConversationId(conversation_id)
+            )
+        deleted = await conversations.delete(ConversationId(conversation_id))
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="conversation not found",
+            )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.get(
+        "/api/v1/knowledge/conversations/{conversation_id}/messages",
+        response_model=list[MessageResponse],
+        dependencies=[Depends(authenticate)],
+    )
+    async def list_knowledge_conversation_messages(
+        conversation_id: str,
+    ) -> list[MessageResponse]:
+        return await list_messages_of_kind(conversation_id, kind="knowledge")
+
+    @app.get(
+        "/api/v1/knowledge/conversations/{conversation_id}/run-history",
+        response_model=list[RunHistoryResponse],
+        dependencies=[Depends(authenticate)],
+    )
+    async def list_knowledge_conversation_run_history(
+        conversation_id: str,
+    ) -> list[RunHistoryResponse]:
+        return await list_run_history_of_kind(conversation_id, kind="knowledge")
+
+    @app.get(
+        "/api/v1/knowledge/conversations/{conversation_id}/citations",
+        response_model=list[KnowledgeCitationResponse],
+        dependencies=[Depends(authenticate)],
+    )
+    async def list_knowledge_conversation_citations(
+        conversation_id: str,
+    ) -> list[KnowledgeCitationResponse]:
+        conversation = await get_local_conversation(
+            ConversationId(conversation_id), kind="knowledge"
+        )
+        conversation_runs = await runs.list_for_conversation(
+            conversation.conversation_id
+        )
+        stored_messages = await conversations.list_messages(
+            conversation.conversation_id
+        )
+        assistant_messages = [
+            message
+            for message in stored_messages
+            if isinstance(message, AssistantMessage)
+        ]
+        if knowledge_repository is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="knowledge repository is unavailable",
+            )
+        responses: list[KnowledgeCitationResponse] = []
+        for index, run in enumerate(conversation_runs):
+            next_run_created_at = (
+                conversation_runs[index + 1].created_at
+                if index + 1 < len(conversation_runs)
+                else None
+            )
+            assistant_message = next(
+                (
+                    message
+                    for message in assistant_messages
+                    if message.created_at >= run.updated_at
+                    and (
+                        next_run_created_at is None
+                        or message.created_at < next_run_created_at
+                    )
+                ),
+                None,
+            )
+            hits = await knowledge_repository.list_retrieval_hits_for_run(run.run_id)
+            responses.extend(
+                KnowledgeCitationResponse(
+                    run_id=str(hit.run_id),
+                    assistant_message_id=(
+                        str(assistant_message.message_id)
+                        if assistant_message is not None
+                        else None
+                    ),
+                    rank=hit.rank,
+                    chunk_id=str(hit.chunk_id),
+                    score=hit.score,
+                    citation_label=hit.citation_label,
+                    document_name=hit.document_name_snapshot,
+                    source_path=hit.source_path_snapshot,
+                    snippet=hit.snippet_snapshot,
+                    page_start=hit.page_start_snapshot,
+                    page_end=hit.page_end_snapshot,
+                    section_title=hit.section_title_snapshot,
+                )
+                for hit in hits
+            )
+        return responses
+
+    @app.post(
+        "/api/v1/knowledge/conversations/{conversation_id}/messages",
+        response_model=SubmitMessageResponse,
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(authenticate)],
+    )
+    async def submit_knowledge_message(
+        conversation_id: str,
+        request: CreateMessageRequest,
+    ) -> SubmitMessageResponse:
+        return await submit_message_of_kind(conversation_id, request, kind="knowledge")
+
+    @app.get(
         "/api/v1/conversations/{conversation_id}/file-changes",
         response_model=list[FileChangeResponse],
         dependencies=[Depends(authenticate)],
@@ -1787,6 +2172,700 @@ def create_app(
             return [
                 MessageResponse.from_message(message) for message in stored_messages
             ]
+
+    # Knowledge Library & Source Endpoints
+    effective_knowledge_service = (
+        knowledge_service
+        if knowledge_service is not None
+        else (
+            KnowledgeLibraryService(repository=knowledge_repository, now=current_time)
+            if knowledge_repository is not None
+            else None
+        )
+    )
+
+    if knowledge_repository is not None and effective_knowledge_service is not None:
+        knowledge_svc = effective_knowledge_service
+        knowledge_repo = knowledge_repository
+        knowledge_background_tasks: set[asyncio.Task[object]] = set()
+        knowledge_job_start_lock = asyncio.Lock()
+
+        def retain_knowledge_task(
+            coroutine: Coroutine[Any, Any, object],
+        ) -> None:
+            task: asyncio.Task[object] = asyncio.create_task(coroutine)
+            knowledge_background_tasks.add(task)
+
+            def finish(completed: asyncio.Task[object]) -> None:
+                knowledge_background_tasks.discard(completed)
+                if not completed.cancelled():
+                    completed.exception()
+
+            task.add_done_callback(finish)
+
+        async def queue_knowledge_index_job(
+            source: KnowledgeSource,
+            *,
+            reject_conflict: bool,
+        ) -> KnowledgeIndexJob | None:
+            async with knowledge_job_start_lock:
+                active_job = await knowledge_repo.get_active_index_job_for_source(
+                    source.source_id
+                )
+                if active_job is not None:
+                    if reject_conflict:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="knowledge source is already being indexed",
+                        )
+                    return None
+                job_id = IndexJobId(f"job_{uuid4().hex[:12]}")
+                now = current_time()
+                job = KnowledgeIndexJob(
+                    job_id=job_id,
+                    library_id=source.library_id,
+                    kind="rescan",
+                    status="queued",
+                    discovered_files=0,
+                    processed_files=0,
+                    skipped_files=0,
+                    failed_files=0,
+                    total_chunks=0,
+                    indexed_chunks=0,
+                    cancel_requested=False,
+                    created_at=now,
+                    updated_at=now,
+                    source_id=source.source_id,
+                )
+                await knowledge_repo.save_index_job(job)
+                return job
+
+        async def schedule_knowledge_index(
+            source: KnowledgeSource,
+            *,
+            reject_conflict: bool,
+        ) -> KnowledgeIndexJob | None:
+            if knowledge_indexer is None:
+                return None
+            job = await queue_knowledge_index_job(
+                source,
+                reject_conflict=reject_conflict,
+            )
+            if job is None:
+                return None
+
+            async def run_index_job() -> object:
+                return await knowledge_indexer.index_source(
+                    source.source_id,
+                    kind="rescan",
+                    job_id=job.job_id,
+                )
+
+            retain_knowledge_task(run_index_job())
+            return job
+
+        async def list_active_knowledge_sources() -> tuple[KnowledgeSource, ...]:
+            sources: list[KnowledgeSource] = []
+            for library in await knowledge_repo.list_libraries_for_user(_LOCAL_USER_ID):
+                sources.extend(
+                    source
+                    for source in await knowledge_repo.list_sources_for_library(
+                        library.library_id
+                    )
+                    if source.status == "active"
+                )
+            return tuple(sources)
+
+        async def schedule_watched_source(source: KnowledgeSource) -> None:
+            await schedule_knowledge_index(source, reject_conflict=False)
+
+        knowledge_source_watcher = KnowledgeSourceWatcher(
+            list_sources=list_active_knowledge_sources,
+            on_source_changed=schedule_watched_source,
+        )
+
+        async def recover_knowledge_jobs() -> None:
+            await knowledge_repo.recover_interrupted_jobs()
+            if knowledge_indexer is not None:
+                retain_knowledge_task(knowledge_source_watcher.run())
+
+        async def stop_knowledge_jobs() -> None:
+            tasks = tuple(knowledge_background_tasks)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        app.router.add_event_handler("startup", recover_knowledge_jobs)
+        app.router.add_event_handler("shutdown", stop_knowledge_jobs)
+
+        @app.get(
+            "/api/v1/knowledge/libraries",
+            response_model=list[KnowledgeLibraryResponse],
+            dependencies=[Depends(authenticate)],
+        )
+        async def list_knowledge_libraries() -> list[KnowledgeLibraryResponse]:
+            await knowledge_svc.ensure_default_library(_LOCAL_USER_ID)
+            libs = await knowledge_svc.list_libraries(_LOCAL_USER_ID)
+            responses: list[KnowledgeLibraryResponse] = []
+            for lib in libs:
+                sources = await knowledge_svc.list_sources(
+                    _LOCAL_USER_ID, lib.library_id
+                )
+                src_responses: list[KnowledgeSourceResponse] = []
+                total_docs = 0
+                total_chunks = 0
+                source_counts = await knowledge_repo.get_source_content_counts(
+                    lib.library_id
+                )
+                for s in sources:
+                    doc_count, chunk_count = source_counts.get(s.source_id, (0, 0))
+                    total_docs += doc_count
+                    total_chunks += chunk_count
+                    src_responses.append(
+                        KnowledgeSourceResponse.from_source(
+                            s, document_count=doc_count, chunk_count=chunk_count
+                        )
+                    )
+                responses.append(
+                    KnowledgeLibraryResponse.from_library(
+                        lib,
+                        sources=src_responses,
+                        document_count=total_docs,
+                        chunk_count=total_chunks,
+                    )
+                )
+            return responses
+
+        @app.post(
+            "/api/v1/knowledge/libraries",
+            response_model=KnowledgeLibraryResponse,
+            status_code=status.HTTP_201_CREATED,
+            dependencies=[Depends(authenticate)],
+        )
+        async def create_knowledge_library(
+            request: CreateLibraryRequest,
+        ) -> KnowledgeLibraryResponse:
+            try:
+                lib = await knowledge_svc.create_library(_LOCAL_USER_ID, request.name)
+                return KnowledgeLibraryResponse.from_library(lib)
+            except DuplicateLibraryNameError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=str(error),
+                ) from error
+
+        @app.get(
+            "/api/v1/knowledge/libraries/{library_id}",
+            response_model=KnowledgeLibraryResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def get_knowledge_library(
+            library_id: str,
+        ) -> KnowledgeLibraryResponse:
+            try:
+                lib = await knowledge_svc.get_library(LibraryId(library_id))
+                if lib is None or lib.user_id != _LOCAL_USER_ID:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="knowledge library not found",
+                    )
+                sources = await knowledge_svc.list_sources(
+                    _LOCAL_USER_ID, LibraryId(library_id)
+                )
+                src_responses = [
+                    KnowledgeSourceResponse.from_source(s) for s in sources
+                ]
+                return KnowledgeLibraryResponse.from_library(lib, sources=src_responses)
+            except LibraryNotFoundError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="knowledge library not found",
+                ) from error
+
+        @app.patch(
+            "/api/v1/knowledge/libraries/{library_id}",
+            response_model=KnowledgeLibraryResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def rename_knowledge_library(
+            library_id: str,
+            request: UpdateLibraryRequest,
+        ) -> KnowledgeLibraryResponse:
+            try:
+                lib = await knowledge_svc.rename_library(
+                    _LOCAL_USER_ID, LibraryId(library_id), request.name
+                )
+                return KnowledgeLibraryResponse.from_library(lib)
+            except LibraryNotFoundError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="knowledge library not found",
+                ) from error
+            except DuplicateLibraryNameError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=str(error),
+                ) from error
+
+        @app.delete(
+            "/api/v1/knowledge/libraries/{library_id}",
+            status_code=status.HTTP_204_NO_CONTENT,
+            dependencies=[Depends(authenticate)],
+        )
+        async def delete_knowledge_library(
+            library_id: str,
+        ) -> Response:
+            try:
+                await knowledge_svc.delete_library(
+                    _LOCAL_USER_ID, LibraryId(library_id)
+                )
+                if knowledge_indexer is not None:
+                    await knowledge_indexer.set_library_active(
+                        LibraryId(library_id), active=False
+                    )
+                return Response(status_code=status.HTTP_204_NO_CONTENT)
+            except LibraryNotFoundError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="knowledge library not found",
+                ) from error
+            except LastLibraryDeletionError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(error),
+                ) from error
+
+        @app.post(
+            "/api/v1/knowledge/libraries/{library_id}/sources",
+            response_model=KnowledgeSourceResponse,
+            status_code=status.HTTP_201_CREATED,
+            dependencies=[Depends(authenticate)],
+        )
+        async def add_knowledge_source(
+            library_id: str,
+            request: AddSourceRequest,
+        ) -> KnowledgeSourceResponse:
+            try:
+                src, is_new = await knowledge_svc.add_source(
+                    _LOCAL_USER_ID, LibraryId(library_id), request.path
+                )
+                if not is_new and knowledge_indexer is not None:
+                    await knowledge_indexer.set_source_active(
+                        src.source_id, active=True
+                    )
+                return KnowledgeSourceResponse.from_source(src)
+            except LibraryNotFoundError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="knowledge library not found",
+                ) from error
+            except DuplicateSourceError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=str(error),
+                ) from error
+            except InvalidSourcePathError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=str(error),
+                ) from error
+
+        @app.delete(
+            "/api/v1/knowledge/sources/{source_id}",
+            status_code=status.HTTP_204_NO_CONTENT,
+            dependencies=[Depends(authenticate)],
+        )
+        async def delete_knowledge_source(
+            source_id: str,
+        ) -> Response:
+            src = await knowledge_repo.get_source(SourceId(source_id))
+            if src is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="knowledge source not found",
+                )
+            try:
+                await knowledge_svc.detach_source(
+                    _LOCAL_USER_ID, src.library_id, src.source_id
+                )
+                if knowledge_indexer is not None:
+                    await knowledge_indexer.set_source_active(
+                        src.source_id, active=False
+                    )
+                return Response(status_code=status.HTTP_204_NO_CONTENT)
+            except (SourceNotFoundError, LibraryNotFoundError) as error:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="knowledge source not found",
+                ) from error
+
+        @app.post(
+            "/api/v1/knowledge/sources/{source_id}/index",
+            response_model=KnowledgeIndexJobResponse,
+            status_code=status.HTTP_202_ACCEPTED,
+            dependencies=[Depends(authenticate)],
+        )
+        async def index_knowledge_source(
+            source_id: str,
+        ) -> KnowledgeIndexJobResponse:
+            if knowledge_indexer is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="knowledge indexer is unavailable",
+                )
+            src = await knowledge_repo.get_source(SourceId(source_id))
+            if src is None or src.status != "active":
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="knowledge source not found",
+                )
+            job = await schedule_knowledge_index(src, reject_conflict=True)
+            assert job is not None
+            return KnowledgeIndexJobResponse.from_job(job)
+
+        async def get_library_index_progress(
+            library: KnowledgeLibrary,
+        ) -> KnowledgeLibraryIndexProgressResponse:
+            sources = tuple(
+                source
+                for source in await knowledge_repo.list_sources_for_library(
+                    library.library_id
+                )
+                if source.status == "active"
+            )
+            active_jobs = tuple(
+                job
+                for job in await asyncio.gather(
+                    *(
+                        knowledge_repo.get_active_index_job_for_source(source.source_id)
+                        for source in sources
+                    )
+                )
+                if job is not None
+            )
+            source_counts = await knowledge_repo.get_source_content_counts(
+                library.library_id
+            )
+            document_count = sum(
+                source_counts.get(source.source_id, (0, 0))[0] for source in sources
+            )
+            chunk_count = sum(
+                source_counts.get(source.source_id, (0, 0))[1] for source in sources
+            )
+            if active_jobs:
+                progress_status = (
+                    "indexing"
+                    if any(job.total_chunks > job.indexed_chunks for job in active_jobs)
+                    else "scanning"
+                )
+            elif any(source.scan_status == "error" for source in sources):
+                progress_status = "error"
+            elif not sources:
+                progress_status = "empty"
+            else:
+                progress_status = "ready"
+            updated_at = max(
+                (
+                    library.updated_at,
+                    *(source.updated_at for source in sources),
+                    *(job.updated_at for job in active_jobs),
+                )
+            )
+            return KnowledgeLibraryIndexProgressResponse(
+                library_id=str(library.library_id),
+                status=progress_status,
+                active_jobs=len(active_jobs),
+                discovered_files=sum(job.discovered_files for job in active_jobs),
+                processed_files=sum(job.processed_files for job in active_jobs),
+                failed_files=sum(job.failed_files for job in active_jobs),
+                total_chunks=sum(job.total_chunks for job in active_jobs),
+                indexed_chunks=sum(job.indexed_chunks for job in active_jobs),
+                document_count=document_count,
+                chunk_count=chunk_count,
+                updated_at=updated_at,
+            )
+
+        async def stream_library_index_events(
+            *,
+            request: Request,
+            library_id: LibraryId,
+        ) -> AsyncIterator[str]:
+            previous_payload: str | None = None
+            while True:
+                library = await knowledge_repo.get_library(library_id)
+                if (
+                    library is None
+                    or library.user_id != _LOCAL_USER_ID
+                    or library.status != "active"
+                ):
+                    return
+                progress = await get_library_index_progress(library)
+                payload = progress.model_dump_json()
+                if payload != previous_payload:
+                    yield f"event: knowledge_index_progress\ndata: {payload}\n\n"
+                    previous_payload = payload
+                if await request.is_disconnected():
+                    return
+                await asyncio.sleep(_EVENT_POLL_INTERVAL_SECONDS)
+
+        @app.get(
+            "/api/v1/knowledge/libraries/{library_id}/events",
+            dependencies=[Depends(authenticate)],
+        )
+        async def stream_knowledge_library_index_events(
+            request: Request,
+            library_id: str,
+        ) -> StreamingResponse:
+            library = await knowledge_repo.get_library(LibraryId(library_id))
+            if (
+                library is None
+                or library.user_id != _LOCAL_USER_ID
+                or library.status != "active"
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="knowledge library not found",
+                )
+            return StreamingResponse(
+                stream_library_index_events(
+                    request=request,
+                    library_id=library.library_id,
+                ),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+
+        @app.get(
+            "/api/v1/knowledge/jobs/{job_id}",
+            response_model=KnowledgeIndexJobResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def get_knowledge_index_job(
+            job_id: str,
+        ) -> KnowledgeIndexJobResponse:
+            job = await knowledge_repo.get_index_job(IndexJobId(job_id))
+            if job is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="knowledge index job not found",
+                )
+            return KnowledgeIndexJobResponse.from_job(job)
+
+        @app.post(
+            "/api/v1/knowledge/jobs/{job_id}/cancel",
+            dependencies=[Depends(authenticate)],
+        )
+        async def cancel_knowledge_index_job(
+            job_id: str,
+        ) -> dict[str, bool]:
+            success = await knowledge_repo.request_index_job_cancel(IndexJobId(job_id))
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="knowledge index job not found or cannot be cancelled",
+                )
+            return {"cancelled": True}
+
+        def job_event_frame(job: KnowledgeIndexJob) -> str:
+            payload = {
+                "job_id": str(job.job_id),
+                "library_id": str(job.library_id),
+                "source_id": str(job.source_id) if job.source_id else None,
+                "kind": job.kind,
+                "status": job.status,
+                "discovered_files": job.discovered_files,
+                "processed_files": job.processed_files,
+                "skipped_files": job.skipped_files,
+                "failed_files": job.failed_files,
+                "total_chunks": job.total_chunks,
+                "indexed_chunks": job.indexed_chunks,
+                "cancel_requested": job.cancel_requested,
+                "created_at": job.created_at.astimezone(UTC)
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "updated_at": job.updated_at.astimezone(UTC)
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "started_at": job.started_at.astimezone(UTC)
+                .isoformat()
+                .replace("+00:00", "Z")
+                if job.started_at
+                else None,
+                "completed_at": job.completed_at.astimezone(UTC)
+                .isoformat()
+                .replace("+00:00", "Z")
+                if job.completed_at
+                else None,
+                "last_error_code": job.last_error_code,
+            }
+            serialized = json.dumps(
+                payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            return f"event: index_job_progress\ndata: {serialized}\n\n"
+
+        async def stream_job_events(
+            *,
+            request: Request,
+            job_id: IndexJobId,
+        ) -> AsyncIterator[str]:
+            while True:
+                job = await knowledge_repo.get_index_job(job_id)
+                if job is None:
+                    return
+                yield job_event_frame(job)
+                if job.status in {"completed", "failed", "cancelled", "interrupted"}:
+                    return
+                if await request.is_disconnected():
+                    return
+                await asyncio.sleep(_EVENT_POLL_INTERVAL_SECONDS)
+
+        @app.get(
+            "/api/v1/knowledge/jobs/{job_id}/events",
+            dependencies=[Depends(authenticate)],
+        )
+        async def stream_knowledge_index_job_events(
+            request: Request,
+            job_id: str,
+        ) -> StreamingResponse:
+            job = await knowledge_repo.get_index_job(IndexJobId(job_id))
+            if job is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="knowledge index job not found",
+                )
+            return StreamingResponse(
+                stream_job_events(request=request, job_id=job.job_id),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+
+        @app.get(
+            "/api/v1/conversations/{conversation_id}/library",
+            response_model=ConversationLibraryResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def get_conversation_library_binding(
+            conversation_id: str,
+        ) -> ConversationLibraryResponse:
+            await get_local_conversation(
+                ConversationId(conversation_id), kind="knowledge"
+            )
+            lib_id = await knowledge_repo.get_conversation_library(
+                ConversationId(conversation_id)
+            )
+            lib_name = None
+            if lib_id is not None:
+                lib = await knowledge_repo.get_library(lib_id)
+                if lib is not None:
+                    lib_name = lib.name
+            return ConversationLibraryResponse(
+                conversation_id=conversation_id,
+                library_id=str(lib_id) if lib_id else None,
+                library_name=lib_name,
+            )
+
+        @app.put(
+            "/api/v1/conversations/{conversation_id}/library",
+            response_model=ConversationLibraryResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def bind_conversation_library(
+            conversation_id: str,
+            request: BindConversationLibraryRequest,
+        ) -> ConversationLibraryResponse:
+            await get_local_conversation(
+                ConversationId(conversation_id), kind="knowledge"
+            )
+            lib = await knowledge_repo.get_library(LibraryId(request.library_id))
+            if lib is None or lib.status != "active":
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="knowledge library not found",
+                )
+            await knowledge_repo.bind_conversation_library(
+                ConversationId(conversation_id),
+                LibraryId(request.library_id),
+            )
+            return ConversationLibraryResponse(
+                conversation_id=conversation_id,
+                library_id=str(lib.library_id),
+                library_name=lib.name,
+            )
+
+        @app.delete(
+            "/api/v1/conversations/{conversation_id}/library",
+            status_code=status.HTTP_204_NO_CONTENT,
+            dependencies=[Depends(authenticate)],
+        )
+        async def unbind_conversation_library(
+            conversation_id: str,
+        ) -> Response:
+            await get_local_conversation(
+                ConversationId(conversation_id), kind="knowledge"
+            )
+            await knowledge_repo.unbind_conversation_library(
+                ConversationId(conversation_id)
+            )
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+        @app.post(
+            "/api/v1/knowledge/libraries/{library_id}/search",
+            response_model=KnowledgeSearchResponse,
+            dependencies=[Depends(authenticate)],
+        )
+        async def search_knowledge_library(
+            library_id: str,
+            request: KnowledgeSearchRequest,
+        ) -> KnowledgeSearchResponse:
+            if knowledge_retriever is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="knowledge retriever is unavailable",
+                )
+            lib = await knowledge_repo.get_library(LibraryId(library_id))
+            if lib is None or lib.status != "active":
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="knowledge library not found",
+                )
+            result = await knowledge_retriever.retrieve(
+                query=request.query,
+                library_id=lib.library_id,
+                limit=request.limit,
+                min_score=request.min_score,
+                save_hits=False,
+            )
+            hit_responses = [
+                KnowledgeSearchHitResponse(
+                    rank=h.rank,
+                    chunk_id=str(h.chunk_id),
+                    score=h.score,
+                    citation_label=h.citation_label,
+                    document_name=h.document_name_snapshot,
+                    source_path=h.source_path_snapshot,
+                    snippet=h.snippet_snapshot,
+                    page_start=h.page_start_snapshot,
+                    page_end=h.page_end_snapshot,
+                    section_title=h.section_title_snapshot,
+                )
+                for h in result.hits
+            ]
+            return KnowledgeSearchResponse(
+                hits=hit_responses,
+                formatted_context=result.formatted_context,
+            )
 
     return app
 

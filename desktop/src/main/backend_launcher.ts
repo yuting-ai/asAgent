@@ -84,6 +84,82 @@ export type SubmittedMessage = {
   conversation: ConversationSummary
 }
 
+export type KnowledgeSource = {
+  source_id: string
+  library_id: string
+  display_path: string
+  canonical_path: string
+  status: string
+  scan_status: string
+  created_at: string
+  updated_at: string
+  last_scanned_at: string | null
+  document_count: number
+  chunk_count: number
+}
+
+export type KnowledgeLibrary = {
+  library_id: string
+  user_id: string
+  name: string
+  normalized_name: string
+  status: string
+  created_at: string
+  updated_at: string
+  sources: KnowledgeSource[]
+  document_count: number
+  chunk_count: number
+}
+
+export type KnowledgeIndexJob = {
+  job_id: string
+  library_id: string
+  source_id: string | null
+  kind: string
+  status: string
+  discovered_files: number
+  processed_files: number
+  skipped_files: number
+  failed_files: number
+  total_chunks: number
+  indexed_chunks: number
+  cancel_requested: boolean
+  created_at: string
+  updated_at: string
+  started_at: string | null
+  completed_at: string | null
+  last_error_code: string | null
+}
+
+export type KnowledgeIndexProgress = {
+  library_id: string
+  status: 'empty' | 'ready' | 'scanning' | 'indexing' | 'error'
+  active_jobs: number
+  discovered_files: number
+  processed_files: number
+  failed_files: number
+  total_chunks: number
+  indexed_chunks: number
+  document_count: number
+  chunk_count: number
+  updated_at: string
+}
+
+export type KnowledgeCitation = {
+  run_id: string
+  assistant_message_id: string | null
+  rank: number
+  chunk_id: string
+  score: number
+  citation_label: string
+  document_name: string
+  source_path: string
+  snippet: string
+  page_start: number | null
+  page_end: number | null
+  section_title: string | null
+}
+
 export type RunEvent = {
   event_id: string
   run_id: string
@@ -323,6 +399,44 @@ function parseSseEvent(frame: string): RunEvent | null {
   }
 }
 
+function parseKnowledgeIndexProgress(frame: string): KnowledgeIndexProgress | null {
+  const dataLine = frame.split('\n').find((line) => line.startsWith('data: '))
+  if (dataLine === undefined) return null
+
+  let payload: unknown
+  try {
+    payload = JSON.parse(dataLine.slice('data: '.length))
+  } catch {
+    throw new Error('Knowledge index SSE event is invalid.')
+  }
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    throw new Error('Knowledge index SSE event is invalid.')
+  }
+
+  const progress = payload as Record<string, unknown>
+  const statuses = new Set(['empty', 'ready', 'scanning', 'indexing', 'error'])
+  const numericFields = [
+    'active_jobs',
+    'discovered_files',
+    'processed_files',
+    'failed_files',
+    'total_chunks',
+    'indexed_chunks',
+    'document_count',
+    'chunk_count'
+  ] as const
+  if (
+    typeof progress.library_id !== 'string' ||
+    typeof progress.status !== 'string' ||
+    !statuses.has(progress.status) ||
+    typeof progress.updated_at !== 'string' ||
+    numericFields.some((field) => typeof progress[field] !== 'number')
+  ) {
+    throw new Error('Knowledge index SSE event is invalid.')
+  }
+  return progress as KnowledgeIndexProgress
+}
+
 export class BackendLauncher {
   private readonly projectRoot: string
   private readonly appHome: string
@@ -380,6 +494,106 @@ export class BackendLauncher {
 
   async listConversations(): Promise<ConversationSummary[]> {
     return this.requestJson('/api/v1/conversations', 'GET')
+  }
+
+  async listKnowledgeLibraries(): Promise<KnowledgeLibrary[]> {
+    return this.requestJson('/api/v1/knowledge/libraries', 'GET')
+  }
+
+  async createKnowledgeLibrary(name: string): Promise<KnowledgeLibrary> {
+    return this.requestJson('/api/v1/knowledge/libraries', 'POST', { name })
+  }
+
+  async renameKnowledgeLibrary(libraryId: string, name: string): Promise<KnowledgeLibrary> {
+    return this.requestJson(
+      `/api/v1/knowledge/libraries/${encodeURIComponent(libraryId)}`,
+      'PATCH',
+      { name }
+    )
+  }
+
+  async deleteKnowledgeLibrary(libraryId: string): Promise<void> {
+    await this.request(`/api/v1/knowledge/libraries/${encodeURIComponent(libraryId)}`, 'DELETE')
+  }
+
+  async addKnowledgeSource(libraryId: string, path: string): Promise<KnowledgeSource> {
+    return this.requestJson(
+      `/api/v1/knowledge/libraries/${encodeURIComponent(libraryId)}/sources`,
+      'POST',
+      { path }
+    )
+  }
+
+  async detachKnowledgeSource(sourceId: string): Promise<void> {
+    await this.request(`/api/v1/knowledge/sources/${encodeURIComponent(sourceId)}`, 'DELETE')
+  }
+
+  async indexKnowledgeSource(sourceId: string): Promise<KnowledgeIndexJob> {
+    return this.requestJson(
+      `/api/v1/knowledge/sources/${encodeURIComponent(sourceId)}/index`,
+      'POST',
+      {}
+    )
+  }
+
+  async getKnowledgeIndexJob(jobId: string): Promise<KnowledgeIndexJob> {
+    return this.requestJson(`/api/v1/knowledge/jobs/${encodeURIComponent(jobId)}`, 'GET')
+  }
+
+  async listKnowledgeConversations(): Promise<ConversationSummary[]> {
+    return this.requestJson('/api/v1/knowledge/conversations', 'GET')
+  }
+
+  async createKnowledgeConversation(libraryId: string): Promise<CreatedConversation> {
+    return this.requestJson('/api/v1/knowledge/conversations', 'POST', {
+      library_id: libraryId
+    })
+  }
+
+  async deleteKnowledgeConversation(conversationId: string): Promise<void> {
+    await this.request(
+      `/api/v1/knowledge/conversations/${encodeURIComponent(conversationId)}`,
+      'DELETE'
+    )
+  }
+
+  async listKnowledgeConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
+    return this.requestJson(
+      `/api/v1/knowledge/conversations/${encodeURIComponent(conversationId)}/messages`,
+      'GET'
+    )
+  }
+
+  async listKnowledgeConversationCitations(conversationId: string): Promise<KnowledgeCitation[]> {
+    return this.requestJson(
+      `/api/v1/knowledge/conversations/${encodeURIComponent(conversationId)}/citations`,
+      'GET'
+    )
+  }
+
+  async bindKnowledgeConversation(conversationId: string, libraryId: string): Promise<void> {
+    await this.request(
+      `/api/v1/conversations/${encodeURIComponent(conversationId)}/library`,
+      'PUT',
+      { library_id: libraryId }
+    )
+  }
+
+  async getKnowledgeConversationLibrary(
+    conversationId: string
+  ): Promise<{ library_id: string | null }> {
+    return this.requestJson(
+      `/api/v1/conversations/${encodeURIComponent(conversationId)}/library`,
+      'GET'
+    )
+  }
+
+  async submitKnowledgeMessage(conversationId: string, content: string): Promise<SubmittedMessage> {
+    return this.requestJson(
+      `/api/v1/knowledge/conversations/${encodeURIComponent(conversationId)}/messages`,
+      'POST',
+      { content }
+    )
   }
 
   async listAutomations(): Promise<AutomationSummary[]> {
@@ -723,6 +937,24 @@ export class BackendLauncher {
     return () => controller.abort()
   }
 
+  watchKnowledgeIndexProgress(
+    libraryId: string,
+    onProgress: (progress: KnowledgeIndexProgress) => void,
+    onError: (error: Error) => void
+  ): () => void {
+    const controller = new AbortController()
+
+    void this.readKnowledgeIndexProgress(libraryId, onProgress, controller.signal).catch(
+      (error) => {
+        if (!controller.signal.aborted) {
+          onError(error instanceof Error ? error : new Error('Knowledge index stream failed.'))
+        }
+      }
+    )
+
+    return () => controller.abort()
+  }
+
   private async requestJson<T>(
     path: string,
     method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
@@ -804,6 +1036,44 @@ export class BackendLauncher {
         if (done) {
           return
         }
+      }
+    } finally {
+      reader.releaseLock()
+    }
+  }
+
+  private async readKnowledgeIndexProgress(
+    libraryId: string,
+    onProgress: (progress: KnowledgeIndexProgress) => void,
+    signal: AbortSignal
+  ): Promise<void> {
+    const response = await this.request(
+      `/api/v1/knowledge/libraries/${encodeURIComponent(libraryId)}/events`,
+      'GET',
+      undefined,
+      signal
+    )
+    if (response.body === null) {
+      throw new Error('Knowledge index SSE response has no body.')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        buffer += decoder.decode(value, { stream: !done }).replaceAll('\r\n', '\n')
+
+        let boundary = buffer.indexOf('\n\n')
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary)
+          buffer = buffer.slice(boundary + 2)
+          const progress = parseKnowledgeIndexProgress(frame)
+          if (progress !== null) onProgress(progress)
+          boundary = buffer.indexOf('\n\n')
+        }
+        if (done) return
       }
     } finally {
       reader.releaseLock()

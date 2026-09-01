@@ -9,6 +9,7 @@ ConversationKind = Literal[
     "browser",
     "automation_draft",
     "automation_execution",
+    "knowledge",
 ]
 
 

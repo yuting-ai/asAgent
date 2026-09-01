@@ -125,11 +125,17 @@ async def test_sidecar_startup_deletes_only_stale_automation_drafts() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("kind", "expects_tavily", "expects_automation_browser"),
     (
-        ("chat", True, False),
-        ("browser", False, False),
-        ("automation_execution", False, True),
+        "kind",
+        "expects_tavily",
+        "expects_automation_browser",
+        "expects_workspace_tools",
+    ),
+    (
+        ("chat", True, False, True),
+        ("browser", False, False, True),
+        ("automation_execution", False, True, True),
+        ("knowledge", False, False, False),
     ),
 )
 async def test_conversation_kind_scopes_specialized_tool_snapshots(
@@ -137,6 +143,7 @@ async def test_conversation_kind_scopes_specialized_tool_snapshots(
     kind: ConversationKind,
     expects_tavily: bool,
     expects_automation_browser: bool,
+    expects_workspace_tools: bool,
 ) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
@@ -170,7 +177,9 @@ async def test_conversation_kind_scopes_specialized_tool_snapshots(
 
     tool_ids = {definition.tool_id for definition in registry.definitions()}
     assert "builtin.echo" in tool_ids
-    assert "document.extract_text" in tool_ids
+    assert ("document.extract_text" in tool_ids) is expects_workspace_tools
+    assert ("filesystem.list" in tool_ids) is expects_workspace_tools
+    assert ("filesystem.search_files" in tool_ids) is expects_workspace_tools
     assert ("mcp:tavily:tavily_search:test" in tool_ids) is expects_tavily
     assert (
         any(tool_id.startswith("automation_browser.") for tool_id in tool_ids)

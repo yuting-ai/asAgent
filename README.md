@@ -14,7 +14,7 @@
 
 ---
 
-asAgent brings chat, browser assistance, scheduled tasks, and reversible file operations into one desktop app. Conversations and application state stay on your computer by default. When you choose an external model or network-enabled tool, only the data required for that request is sent to the configured service.
+asAgent brings chat, browser assistance, scheduled tasks, local knowledge retrieval, and reversible file operations into one desktop app. Conversations, knowledge indexes, and application state stay on your computer by default. When you choose an external model or network-enabled tool, only the data required for that request is sent to the configured service.
 
 > asAgent is under active development. A signed and notarized preview build is available for Apple Silicon Macs; other platforms and a fully mature release experience are not yet supported. Developers can also run the project from source.
 
@@ -33,6 +33,7 @@ asAgent brings chat, browser assistance, scheduled tasks, and reversible file op
 - Ask the agent to read and interact with pages in a visible browser.
 - Chat with PDF documents — extract and read text from authorized local PDFs or online PDFs directly in browser tabs without saving temporary files.
 - Create one-time, daily, and weekly automated tasks.
+- Build local Knowledge libraries from folders and ask grounded questions with source citations.
 - Read and modify authorized files with snapshots and recovery safeguards.
 
 asAgent currently has no telemetry integration. External model providers, Tavily, and other user-configured MCP servers may still receive the data required to perform requested operations.
@@ -74,7 +75,16 @@ asAgent currently has no telemetry integration. External model providers, Tavily
 - **Missed-run protection:** Startup recovery skips stale recurring occurrences instead of launching a catch-up storm.
 - **Optional plan refinement:** During an automation execution, the model can call `automation.update_plan` to save a successfully verified correction for future runs. This is a tool-guided behavior, not a guarantee that every website failure will repair itself.
 
-### 5. MCP and web search
+### 5. Local Knowledge workspace and grounded retrieval
+
+- **Libraries and folders:** Create, rename, switch, and remove Knowledge libraries, then attach one or more local folders as their sources. Knowledge folder access is separate from a Chat conversation's general file workspace permissions.
+- **Supported documents:** Indexes text-layer PDFs, Markdown (`.md`, `.markdown`), plain text (`.txt`, `.text`, `.rst`), Word (`.docx`), and HTML (`.html`, `.htm`). Scanned PDFs that require OCR are not supported yet.
+- **Automatic local indexing:** A source watcher detects supported files added, changed, or removed from attached folders and schedules incremental parsing, deterministic chunking, and embedding. The header and folder list expose document and indexing progress.
+- **Offline retrieval index:** The bundled `paraphrase-multilingual-MiniLM-L12-v2` ONNX model generates 384-dimensional embeddings without a runtime download. SQLite stores chunk text, provenance, jobs, conversations, and citations; embedded Qdrant Local stores vectors and the small filtering payload needed for library-scoped search.
+- **Grounded answers:** Knowledge conversations retrieve filename-aware evidence and present citations with file, page or section, and source snippets. Bearer-authenticated SSE also reports simple searching and answer-generation activity before the response appears.
+- **Recoverable removal:** Original files remain authoritative and are never changed by Knowledge. Removing a folder soft-detaches it from retrieval while retaining its derived index cache, so re-adding it does not unnecessarily embed unchanged files again.
+
+### 6. MCP and web search
 
 - **MCP stdio client:** asAgent supports modern MCP discovery with an isolated legacy fallback, namespaces imported tools, validates schemas, applies permission/approval policy, and imports configured servers atomically.
 - **Startup-time tool set:** MCP servers are loaded when the Python Sidecar starts. Configuration changes require a restart; hot reload, notifications, and paginated tool discovery are not yet implemented.
@@ -101,13 +111,14 @@ asAgent currently has no telemetry integration. External model providers, Tavily
 ├─────────────────────────────────────────────────────────────┤
 │ Agent Runtime · Context Builder · Models · Tools · Scheduler│
 ├─────────────────────────────────────────────────────────────┤
-│ SQLite · Workspace · private snapshots · macOS Keychain     │
+│ SQLite · Qdrant Local · Workspace · snapshots · Keychain    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 - The backend binds its own random loopback port and reports the actual endpoint through a structured ready record.
 - Electron Main creates a fresh launch token and sends it to the child process over stdin. The token is not placed in command-line arguments, URLs, Renderer storage, or normal logs.
 - Main parses authenticated SSE and exposes only structured run updates to the trusted Renderer.
+- Knowledge keeps source text and provenance in SQLite and uses embedded Qdrant Local as a rebuildable vector index. Its bundled embedding model runs offline and is versioned with Git LFS.
 - Model API keys and Tavily credentials are stored in macOS Keychain.
 - The product is single-user by default (`local-user`) but preserves `user_id` at domain and persistence boundaries.
 
@@ -121,13 +132,16 @@ asAgent currently has no telemetry integration. External model providers, Tavily
 - [uv](https://docs.astral.sh/uv/)
 - Node.js `>=20.19.0` or `>=22.12.0`
 - npm
+- [Git LFS](https://git-lfs.com/) for the bundled local embedding model
 - Optional for background web automation: Google Chrome, Microsoft Edge, or Chromium
 
 ### 1. Clone and install
 
 ```bash
+git lfs install
 git clone https://github.com/yuting-ai/asAgent.git
 cd asAgent
+git lfs pull
 
 uv sync --locked
 npm --prefix desktop ci
@@ -146,13 +160,13 @@ The older `dev:deepseek` developer entry also requires a matching non-sensitive 
 ### 3. Testing & quality assurance
 
 ```bash
-# Python tests (currently 622 collected tests)
+# Python tests (currently 689 collected tests)
 uv run pytest
 
 # Python lint, formatting check, strict typing, lock and diff checks
 scripts/check.sh
 
-# Desktop type checking, linting, and tests (currently 176 tests)
+# Desktop type checking, linting, and tests (currently 192 tests)
 npm --prefix desktop run typecheck
 npm --prefix desktop run lint
 npm --prefix desktop test
@@ -212,14 +226,15 @@ Local endpoints may omit an API key. External endpoints require a saved key. On 
 - [x] Conversation-scoped read tools and reversible single-file create/replace/delete with guarded Undo
 - [x] Visible Browser conversations and isolated background browser automation
 - [x] Once/daily/weekly Scheduled tasks with execution history and optional `automation.update_plan`
+- [x] Local Knowledge libraries with watched folders, offline embeddings, Qdrant retrieval, grounded conversations, and citations
 - [x] MCP stdio client/manager and optional Tavily MCP configuration
-- [x] Electron development shell with Chat, Browser, Scheduled tasks, Settings, workspace inspector, and English/Chinese UI
+- [x] Electron development shell with Chat, Browser, Scheduled tasks, Knowledge, Settings, workspace inspector, and English/Chinese UI
 - [x] Independent PyInstaller Sidecar build and automated smoke test
 
 ### Pending
 
 - [ ] True token-by-token assistant response streaming through the desktop Agent Loop
-- [ ] Conversation summaries, confirmed long-term User Memory, Knowledge indexing, and cross-conversation retrieval
+- [ ] Conversation summaries, confirmed long-term User Memory, and cross-conversation retrieval
 - [ ] Runtime loading and selection of on-disk `SKILL.md` files
 - [ ] Multi-agent/subagent orchestration
 - [ ] MCP pagination, notifications, hot refresh, and Streamable HTTP transport

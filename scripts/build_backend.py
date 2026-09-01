@@ -28,6 +28,8 @@ def main() -> None:
             f"{_PROJECT_ROOT / 'alembic.ini'}:.",
             "--add-data",
             f"{_PROJECT_ROOT / 'alembic'}:alembic",
+            "--add-data",
+            f"{_PROJECT_ROOT / 'app-assets' / 'models'}:app-assets/models",
             str(_PROJECT_ROOT / "src" / "asagent" / "cli.py"),
         ],
     )

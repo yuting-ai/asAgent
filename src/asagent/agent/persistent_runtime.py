@@ -32,7 +32,9 @@ class PersistentAgentRuntime:
         loop: AgentLoop | None = None,
         loop_for_conversation: Callable[[RunId, ConversationId], Awaitable[AgentLoop]]
         | None = None,
-        system_prompt_for_conversation: Callable[[ConversationId], Awaitable[str]]
+        system_prompt_for_conversation: Callable[
+            [ConversationId, str, RunId], Awaitable[str]
+        ]
         | None = None,
         now: Callable[[], datetime],
         new_message_id: Callable[[], MessageId],
@@ -88,7 +90,11 @@ class PersistentAgentRuntime:
         try:
             history = await self._conversations.list_messages(conversation_id)
             loop = await self._get_loop(initial_run.run_id, conversation_id)
-            scoped_system_prompt = await self._system_prompt(conversation_id)
+            scoped_system_prompt = await self._system_prompt(
+                conversation_id,
+                submission.user_message.content,
+                initial_run.run_id,
+            )
             loop_result = await loop.run(
                 model_name=model_name,
                 system_prompt=f"{system_prompt}{scoped_system_prompt}",
@@ -148,11 +154,20 @@ class PersistentAgentRuntime:
         assert self._loop is not None
         return self._loop
 
-    async def _system_prompt(self, conversation_id: ConversationId) -> str:
+    async def _system_prompt(
+        self,
+        conversation_id: ConversationId,
+        user_query: str,
+        run_id: RunId,
+    ) -> str:
         if self._system_prompt_for_conversation is None:
             return ""
 
-        context = await self._system_prompt_for_conversation(conversation_id)
+        context = await self._system_prompt_for_conversation(
+            conversation_id,
+            user_query,
+            run_id,
+        )
         return f"\n\n{context}" if context else ""
 
     def _assistant_message(

@@ -522,3 +522,62 @@ async def test_persists_failed_run_when_unexpected_execution_error_escapes_loop(
         await starter.aclose()
         await runs.aclose()
         await conversations.aclose()
+
+
+@pytest.mark.asyncio
+async def test_scoped_prompt_receives_current_query_and_run_id(tmp_path: Path) -> None:
+    database_path = tmp_path / "asagent.sqlite3"
+    _upgrade(database_path)
+    conversation_id = ConversationId("knowledge-conversation")
+    conversations = SqliteConversationRepository(database_path)
+    runs = SqliteRunRepository(database_path)
+    starter = SqliteRunStarter(database_path)
+    finisher = SqliteRunFinisher(database_path)
+    provider = FakeModelProvider(
+        responses=(ModelResponse(text="Grounded answer [S1]", tool_calls=()),)
+    )
+    received: list[tuple[ConversationId, str, RunId]] = []
+
+    async def scoped_prompt(
+        received_conversation_id: ConversationId,
+        query: str,
+        run_id: RunId,
+    ) -> str:
+        received.append((received_conversation_id, query, run_id))
+        return "Retrieved source [S1]"
+
+    message_numbers = count(1)
+    runtime = PersistentAgentRuntime(
+        conversations=conversations,
+        run_submission=RunSubmissionService(
+            conversations=conversations,
+            run_starter=starter,
+            now=_clock,
+            new_run_id=lambda: RunId("knowledge-run"),
+            new_message_id=lambda: MessageId(f"message-{next(message_numbers)}"),
+        ),
+        run_finisher=finisher,
+        loop=_loop(provider=provider, runs=runs),
+        system_prompt_for_conversation=scoped_prompt,
+        now=_clock,
+        new_message_id=lambda: MessageId(f"message-{next(message_numbers)}"),
+    )
+
+    try:
+        await conversations.save(_conversation(conversation_id))
+        await runtime.run(
+            conversation_id=conversation_id,
+            content="What does the paper say?",
+            model_name="fake-model",
+            system_prompt="Be helpful.",
+        )
+
+        assert received == [
+            (conversation_id, "What does the paper say?", RunId("knowledge-run"))
+        ]
+        assert "Retrieved source [S1]" in provider.requests[0].system_prompt
+    finally:
+        await finisher.aclose()
+        await starter.aclose()
+        await runs.aclose()
+        await conversations.aclose()

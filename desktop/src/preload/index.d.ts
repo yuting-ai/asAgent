@@ -82,6 +82,87 @@ interface SubmittedMessage {
   conversation: ConversationSummary
 }
 
+interface KnowledgeSource {
+  source_id: string
+  library_id: string
+  display_path: string
+  canonical_path: string
+  status: string
+  scan_status: string
+  created_at: string
+  updated_at: string
+  last_scanned_at: string | null
+  document_count: number
+  chunk_count: number
+}
+
+interface KnowledgeLibrary {
+  library_id: string
+  user_id: string
+  name: string
+  normalized_name: string
+  status: string
+  created_at: string
+  updated_at: string
+  sources: KnowledgeSource[]
+  document_count: number
+  chunk_count: number
+}
+
+interface KnowledgeIndexJob {
+  job_id: string
+  library_id: string
+  source_id: string | null
+  kind: string
+  status: string
+  discovered_files: number
+  processed_files: number
+  skipped_files: number
+  failed_files: number
+  total_chunks: number
+  indexed_chunks: number
+  cancel_requested: boolean
+  created_at: string
+  updated_at: string
+  started_at: string | null
+  completed_at: string | null
+  last_error_code: string | null
+}
+
+interface KnowledgeIndexProgress {
+  library_id: string
+  status: 'empty' | 'ready' | 'scanning' | 'indexing' | 'error'
+  active_jobs: number
+  discovered_files: number
+  processed_files: number
+  failed_files: number
+  total_chunks: number
+  indexed_chunks: number
+  document_count: number
+  chunk_count: number
+  updated_at: string
+}
+
+interface KnowledgeIndexStreamError {
+  libraryId: string
+  message: string
+}
+
+interface KnowledgeCitation {
+  run_id: string
+  assistant_message_id: string | null
+  rank: number
+  chunk_id: string
+  score: number
+  citation_label: string
+  document_name: string
+  source_path: string
+  snippet: string
+  page_start: number | null
+  page_end: number | null
+  section_title: string | null
+}
+
 interface RunUpdate {
   runId: string
   conversationId: string
@@ -246,6 +327,23 @@ interface DesktopBridge {
   getBackendStatus(): Promise<{ status: 'ready' | 'unavailable' }>
   restartApp(): Promise<void>
   listConversations(): Promise<ConversationSummary[]>
+  listKnowledgeLibraries(): Promise<KnowledgeLibrary[]>
+  createKnowledgeLibrary(name: string): Promise<KnowledgeLibrary>
+  renameKnowledgeLibrary(libraryId: string, name: string): Promise<KnowledgeLibrary>
+  deleteKnowledgeLibrary(libraryId: string): Promise<void>
+  addKnowledgeSource(libraryId: string, sourcePath: string): Promise<KnowledgeSource>
+  detachKnowledgeSource(sourceId: string): Promise<void>
+  indexKnowledgeSource(sourceId: string): Promise<KnowledgeIndexJob>
+  getKnowledgeIndexJob(jobId: string): Promise<KnowledgeIndexJob>
+  watchKnowledgeIndexProgress(libraryId: string): Promise<void>
+  unwatchKnowledgeIndexProgress(libraryId: string): Promise<void>
+  listKnowledgeConversations(): Promise<ConversationSummary[]>
+  createKnowledgeConversation(libraryId: string): Promise<ConversationSummary>
+  deleteKnowledgeConversation(conversationId: string): Promise<void>
+  listKnowledgeConversationMessages(conversationId: string): Promise<ConversationMessage[]>
+  listKnowledgeConversationCitations(conversationId: string): Promise<KnowledgeCitation[]>
+  getKnowledgeConversationLibrary(conversationId: string): Promise<{ library_id: string | null }>
+  submitKnowledgeMessage(conversationId: string, content: string): Promise<SubmittedMessage>
   listAutomations(): Promise<AutomationSummary[]>
   createAutomation(input: CreateAutomationInput): Promise<AutomationSummary>
   updateAutomation(automationId: string, input: UpdateAutomationInput): Promise<AutomationSummary>
@@ -315,6 +413,8 @@ interface DesktopBridge {
   revealInFinder(targetPath: string): Promise<void>
   onRunEvent(callback: (update: RunUpdate) => void): () => void
   onRunStreamError(callback: (error: RunStreamError) => void): () => void
+  onKnowledgeIndexProgress(callback: (progress: KnowledgeIndexProgress) => void): () => void
+  onKnowledgeIndexStreamError(callback: (error: KnowledgeIndexStreamError) => void): () => void
   onToolApprovalRequested(callback: (approval: ToolApproval) => void): () => void
   onToolApprovalError(callback: (error: RunStreamError) => void): () => void
   onBrowserTabState(
