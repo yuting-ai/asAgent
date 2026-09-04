@@ -42,11 +42,6 @@ type ConversationSummary = {
   last_page_title: string | null
 }
 
-type RecentConversation = {
-  kind: 'chat' | 'browser'
-  conversation: ConversationSummary
-}
-
 type ConversationMessage = {
   message_id: string
   role: 'user' | 'assistant'
@@ -135,7 +130,7 @@ type AutomationPreview = {
   id: string
   name: string
   summary: string
-  schedule: string
+  schedule: AutomationTriggerDetail | null | undefined
   nextRun: string | null
   lastRun: string | null
   status: AutomationStatus
@@ -312,7 +307,6 @@ function formatAutomationExecution(
 }
 
 const MODEL_DELETE_CONFIRM = 'Remove the saved model configuration and API key?'
-const CONVERSATION_DELETE_CONFIRM = 'Delete this conversation? This cannot be undone.'
 const BROWSER_ADDRESS_ERROR =
   'This address is not allowed. Enter a web address such as example.com.'
 const BROWSER_LOAD_ERROR = 'This page could not be opened.'
@@ -610,29 +604,6 @@ function saveDesktopLayout(layout: DesktopLayout): void {
 
 function conversationLabel(title: string | null, lang: AppLanguage = 'en'): string {
   return title ?? t(lang, 'newConversation')
-}
-
-function orderRecentConversations(
-  conversations: ConversationSummary[],
-  browserConversations: ConversationSummary[]
-): RecentConversation[] {
-  return [
-    ...conversations.map((conversation) => ({ kind: 'chat' as const, conversation })),
-    ...browserConversations.map((conversation) => ({
-      kind: 'browser' as const,
-      conversation
-    }))
-  ].sort((left, right) => {
-    const updatedAtDifference =
-      new Date(right.conversation.updated_at).getTime() -
-      new Date(left.conversation.updated_at).getTime()
-    if (updatedAtDifference !== 0) {
-      return updatedAtDifference
-    }
-    return `${right.kind}:${right.conversation.conversation_id}`.localeCompare(
-      `${left.kind}:${left.conversation.conversation_id}`
-    )
-  })
 }
 
 function mcpServerNameFromToolId(toolId: string): string | null {
@@ -1306,7 +1277,10 @@ export default function App(): React.JSX.Element {
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null)
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false)
   const [updateCheckError, setUpdateCheckError] = useState<string | null>(null)
-  const [isRailCollapsed, setIsRailCollapsed] = useState(false)
+  const [isRailCollapsed, setIsRailCollapsed] = useState(true)
+  const [isWorkspaceListVisible, setIsWorkspaceListVisible] = useState(true)
+  const [libraryListHost, setLibraryListHost] = useState<HTMLDivElement | null>(null)
+  const hasWorkspaceList = ['chat', 'browser', 'automations', 'knowledge'].includes(activeView)
   const [resizingColumn, setResizingColumn] = useState<ResizableColumn | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
@@ -1389,7 +1363,7 @@ export default function App(): React.JSX.Element {
           id: automation.automation_id,
           name: automation.name,
           summary: automation.plan_summary,
-          schedule: 'Schedule details available after selection',
+          schedule: undefined,
           nextRun: null,
           lastRun: null,
           status: automation.status,
@@ -1416,7 +1390,7 @@ export default function App(): React.JSX.Element {
     ])
       .then(([triggers, executions]) => {
         setAutomationExecutions(executions)
-        const schedule = formatAutomationSchedule(triggers[0])
+        const schedule = triggers[0] ?? null
         const nextRun = triggers[0]?.next_run_at
           ? new Date(triggers[0].next_run_at).toLocaleString()
           : null
@@ -1459,7 +1433,7 @@ export default function App(): React.JSX.Element {
       if (!active) return
 
       setAutomationExecutions(executions)
-      const schedule = formatAutomationSchedule(triggers[0])
+      const schedule = triggers[0] ?? null
       const nextRun = triggers[0]?.next_run_at
         ? new Date(triggers[0].next_run_at).toLocaleString()
         : null
@@ -2127,7 +2101,7 @@ export default function App(): React.JSX.Element {
               id: automation.automation_id,
               name: automation.name,
               summary: automation.plan_summary,
-              schedule: 'Schedule details available after selection',
+              schedule: undefined,
               nextRun: null,
               lastRun: null,
               status: automation.status,
@@ -2426,7 +2400,6 @@ export default function App(): React.JSX.Element {
       : browserApprovalDetails(visibleBrowserApproval, visibleBrowserApprovalServer)
   const isBusy =
     backendStatus !== 'ready' || isCreatingConversation || isSubmittingMessage || activeRun !== null
-  const recentConversations = orderRecentConversations(conversations, browserConversations)
   const chatRunIsActive = activeRun?.conversationId === selectedConversationId
   const browserRunIsActive = activeRun?.conversationId === selectedBrowserConversationId
 
@@ -2729,7 +2702,7 @@ export default function App(): React.JSX.Element {
       return
     }
 
-    if (!window.confirm(CONVERSATION_DELETE_CONFIRM)) {
+    if (!window.confirm(t(appLanguage, 'deleteConversationConfirm'))) {
       return
     }
 
@@ -2775,7 +2748,7 @@ export default function App(): React.JSX.Element {
       return
     }
 
-    if (!window.confirm(CONVERSATION_DELETE_CONFIRM)) {
+    if (!window.confirm(t(appLanguage, 'deleteConversationConfirm'))) {
       return
     }
 
@@ -3509,44 +3482,6 @@ export default function App(): React.JSX.Element {
   }
   createNewChatSessionRef.current = createNewChatSession
 
-  function createNewBrowserSession(): void {
-    if (backendStatus !== 'ready' || isCreatingConversation) {
-      return
-    }
-    setActiveView('browser')
-    const currentTabs = browserTabsRef.current
-    for (const tab of currentTabs) {
-      void window.desktop.closeBrowserTab(tab.id).catch(() => undefined)
-    }
-
-    const created = createBrowserTab()
-    setBrowserTabs([created])
-    setActiveBrowserTabId(created.id)
-    setBrowserConversationByTabId({})
-    setBrowserError(null)
-
-    setIsCreatingConversation(true)
-    setErrorMessage(null)
-    void window.desktop
-      .createBrowserConversation()
-      .then((newConv) => {
-        setBrowserConversations((current) => orderConversations([newConv, ...current]))
-        browserMessageLoadIdRef.current += 1
-        setBrowserMessages([])
-        setBrowserConversationByTabId({ [created.id]: newConv.conversation_id })
-        void window.desktop
-          .setBrowserTabConversation(created.id, newConv.conversation_id)
-          .catch(() => undefined)
-        setBrowserDraft('')
-      })
-      .catch(() => {
-        setErrorMessage('The conversation could not be created.')
-      })
-      .finally(() => {
-        setIsCreatingConversation(false)
-      })
-  }
-
   function toggleAutomationPreview(automationId: string): void {
     const current = automationPreviews.find((automation) => automation.id === automationId)
     if (current === undefined) return
@@ -3769,8 +3704,9 @@ export default function App(): React.JSX.Element {
       return
     }
 
-    for (const tab of currentTabs) {
-      void window.desktop.closeBrowserTab(tab.id).catch(() => undefined)
+    if (currentTabs.length >= MAX_BROWSER_TABS) {
+      setErrorMessage('Close a browser tab before opening another conversation.')
+      return
     }
 
     const created = createBrowserTab()
@@ -3778,10 +3714,8 @@ export default function App(): React.JSX.Element {
       created.address = conversation.last_page_url
       created.title = conversation.last_page_title ?? browserTabTitle(conversation.last_page_url)
     }
-    setBrowserTabs([created])
-    setBrowserConversationByTabId({
-      [created.id]: conversationId
-    })
+    setBrowserTabs([...currentTabs, created])
+    setBrowserConversationByTabId((current) => ({ ...current, [created.id]: conversationId }))
     setActiveBrowserTabId(created.id)
     setBrowserError(null)
     void window.desktop
@@ -3880,10 +3814,10 @@ export default function App(): React.JSX.Element {
 
     return (
       <button
-        aria-label="Expand context panel"
+        aria-label={t(appLanguage, 'expandContextPanel')}
         className="panel-expand-btn"
         onClick={openAttentionPanel}
-        title="Expand context panel"
+        title={t(appLanguage, 'expandContextPanel')}
         type="button"
       >
         <ContextPanelIcon direction="expand" />
@@ -3928,10 +3862,10 @@ export default function App(): React.JSX.Element {
           <div className="attn-top-actions">
             {actions}
             <button
-              aria-label="Collapse context panel"
+              aria-label={t(appLanguage, 'collapseContextPanel')}
               className="attention-panel-close"
               onClick={closeAttentionPanel}
-              title="Collapse context panel"
+              title={t(appLanguage, 'collapseContextPanel')}
               type="button"
             >
               <ContextPanelIcon direction="collapse" />
@@ -4062,7 +3996,7 @@ export default function App(): React.JSX.Element {
       </div>
 
       <div
-        className={`app${isRailCollapsed ? ' rail-collapsed' : ''}${
+        className={`app workspace-navigation${hasWorkspaceList ? ' has-workspace-list' : ''}${isRailCollapsed ? ' rail-collapsed' : ''}${
           isAttentionPanelVisible ? ' attention-open' : ' attention-collapsed'
         }${activeView === 'browser' ? ' browser-active' : ''}${
           resizingColumn === null ? '' : ' is-resizing'
@@ -4070,13 +4004,14 @@ export default function App(): React.JSX.Element {
         style={
           {
             '--rail-width': `${railWidth}px`,
+            '--workspace-list-width': hasWorkspaceList && isWorkspaceListVisible ? '260px' : '0px',
             '--thread-width': `${desktopLayout.threadWidth}px`,
             '--attention-width': `${desktopLayout.attentionWidth}px`,
             '--automations-master-width': `${desktopLayout.automationsMasterWidth}px`
           } as CSSProperties
         }
       >
-        <header aria-label="Window toolbar" className="window-titlebar">
+        <header aria-label={t(appLanguage, 'windowToolbar')} className="window-titlebar">
           {activeView === 'chat' ? (
             <div className="window-titlebar-content window-chat-header">
               <div className="chat-thread-header-title">
@@ -4086,7 +4021,7 @@ export default function App(): React.JSX.Element {
               </div>
               {hasAttachedWorkspace ? (
                 <button
-                  aria-label="Toggle workspace files panel"
+                  aria-label={t(appLanguage, 'toggleWorkspaceFilesPanel')}
                   className={`chat-workspace-toggle-btn${desktopLayout.attentionPanelOpen ? ' is-active' : ''}`}
                   onClick={() => setAttentionPanelOpen(!desktopLayout.attentionPanelOpen)}
                   title={
@@ -4132,7 +4067,11 @@ export default function App(): React.JSX.Element {
 
           {activeView === 'browser' ? (
             <div className="window-titlebar-content window-browser-header">
-              <div aria-label="Browser tabs" className="browser-tabstrip" role="tablist">
+              <div
+                aria-label={t(appLanguage, 'browserTabs')}
+                className="browser-tabstrip"
+                role="tablist"
+              >
                 {browserTabs.map((tab) => {
                   const selected = tab.id === activeBrowserTabId
                   return (
@@ -4187,35 +4126,38 @@ export default function App(): React.JSX.Element {
         </header>
 
         <div
-          aria-label="Resize navigation panel"
+          aria-label={t(appLanguage, 'resizeNavigationPanel')}
           className="column-resizer column-resizer-left"
           onPointerDown={(event) => beginColumnResize('rail', event)}
           role="separator"
         />
         <div
-          aria-label="Resize activity panel"
+          aria-label={t(appLanguage, 'resizeActivityPanel')}
           className="column-resizer column-resizer-right"
           onPointerDown={(event) => beginColumnResize('attention', event)}
           role="separator"
         />
 
-        <nav aria-label="Primary" className="rail" id="primary-sidebar">
+        <nav aria-label={t(appLanguage, 'primaryNavigation')} className="rail" id="primary-sidebar">
           <div className="rail-section rail-actions-section">
             <button
-              className="rail-new-btn is-chat"
-              disabled={backendStatus !== 'ready' || isCreatingConversation}
-              onClick={createNewChatSession}
-              title={t(appLanguage, 'newChat')}
+              aria-current={activeView === 'chat' ? 'page' : undefined}
+              className={railItemClass('chat')}
+              onClick={() => setActiveView('chat')}
+              title={t(appLanguage, 'chatTitle')}
               type="button"
             >
-              <Icon className="rail-icon" path="M12 5v14M5 12h14" />
-              <span className="rail-item-label">{t(appLanguage, 'newChat')}</span>
+              <Icon
+                className="rail-icon"
+                path="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5Z"
+              />
+              <span className="rail-item-label">{t(appLanguage, 'chatTitle')}</span>
             </button>
             <button
-              className="rail-new-btn is-browser"
-              disabled={backendStatus !== 'ready' || isCreatingConversation}
-              onClick={createNewBrowserSession}
-              title={t(appLanguage, 'newBrowser')}
+              aria-current={activeView === 'browser' ? 'page' : undefined}
+              className={railItemClass('browser')}
+              onClick={() => setActiveView('browser')}
+              title={t(appLanguage, 'browserTitle')}
               type="button"
             >
               <svg
@@ -4228,12 +4170,10 @@ export default function App(): React.JSX.Element {
                 <circle cx="12" cy="12" r="9" />
                 <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" />
               </svg>
-              <span className="rail-item-label">{t(appLanguage, 'newBrowser')}</span>
+              <span className="rail-item-label">{t(appLanguage, 'browserTitle')}</span>
             </button>
-          </div>
-
-          <div className="rail-section rail-automation-section">
             <button
+              aria-current={activeView === 'automations' ? 'page' : undefined}
               className={railItemClass('automations')}
               onClick={() => {
                 setActiveView('automations')
@@ -4254,12 +4194,9 @@ export default function App(): React.JSX.Element {
                 <path d="M12 7v5l3 3" />
               </svg>
               <span className="rail-item-label">{t(appLanguage, 'automationsTitle')}</span>
-              <span className="rail-count">{automationPreviews.length}</span>
             </button>
-          </div>
-
-          <div className="rail-section rail-knowledge-section">
             <button
+              aria-current={activeView === 'knowledge' ? 'page' : undefined}
               className={railItemClass('knowledge')}
               onClick={() => setActiveView('knowledge')}
               title={t(appLanguage, 'knowledgeTitle')}
@@ -4278,140 +4215,6 @@ export default function App(): React.JSX.Element {
               </svg>
               <span className="rail-item-label">{t(appLanguage, 'knowledgeTitle')}</span>
             </button>
-          </div>
-
-          <div className="rail-section rail-recents">
-            <div className="rail-recents-header">
-              <div className="rail-label">{t(appLanguage, 'recents')}</div>
-            </div>
-            <div
-              className={`rail-recents-list${
-                visibleScrollbar === 'recents' ? ' scrollbar-visible' : ''
-              }`}
-              onWheel={() => revealScrollbar('recents')}
-            >
-              {recentConversations.length === 0 ? (
-                <p className="rail-recents-empty">{t(appLanguage, 'noRecents')}</p>
-              ) : (
-                recentConversations.map(({ kind, conversation }) => {
-                  const selected =
-                    kind === 'chat'
-                      ? activeView === 'chat' &&
-                        conversation.conversation_id === selectedConversationId
-                      : activeView === 'browser' &&
-                        conversation.conversation_id === selectedBrowserConversationId
-                  const renaming =
-                    kind === 'chat' && renamingConversationId === conversation.conversation_id
-
-                  return (
-                    <div
-                      className={`rail-recent-item${selected ? ' active' : ''}${
-                        renaming ? ' renaming' : ''
-                      }`}
-                      key={`${kind}:${conversation.conversation_id}`}
-                    >
-                      {renaming ? (
-                        <input
-                          ref={renameInputRef}
-                          className="rail-recent-rename"
-                          onBlur={() => void saveRename(conversation.conversation_id)}
-                          onChange={(event) => setRenameDraft(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') {
-                              event.preventDefault()
-                              void saveRename(conversation.conversation_id)
-                            }
-                            if (event.key === 'Escape') {
-                              event.preventDefault()
-                              cancelRename()
-                            }
-                          }}
-                          type="text"
-                          value={renameDraft}
-                        />
-                      ) : (
-                        <>
-                          <button
-                            className="rail-recent-body"
-                            disabled={backendStatus !== 'ready'}
-                            onClick={() => {
-                              if (kind === 'chat') {
-                                setActiveView('chat')
-                                setSelectedConversationId(conversation.conversation_id)
-                              } else {
-                                setActiveView('browser')
-                                openBrowserConversation(conversation.conversation_id)
-                              }
-                            }}
-                            title={
-                              kind === 'browser' && conversation.last_page_url !== null
-                                ? conversation.last_page_url
-                                : conversationLabel(conversation.title, appLanguage)
-                            }
-                            type="button"
-                          >
-                            {kind === 'chat' ? (
-                              <Icon
-                                className="rail-recent-kind is-chat"
-                                path="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5Z"
-                              />
-                            ) : (
-                              <svg
-                                aria-hidden="true"
-                                className="rail-recent-kind is-browser"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                viewBox="0 0 24 24"
-                              >
-                                <circle cx="12" cy="12" r="9" />
-                                <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" />
-                              </svg>
-                            )}
-                            <span className="rail-recent-title">
-                              {conversationLabel(conversation.title, appLanguage)}
-                            </span>
-                            <time className="rail-recent-time" dateTime={conversation.updated_at}>
-                              {formatThreadTime(conversation.updated_at)}
-                            </time>
-                          </button>
-                          <div className="rail-recent-actions">
-                            {kind === 'chat' ? (
-                              <button
-                                aria-label={t(appLanguage, 'rename')}
-                                disabled={backendStatus !== 'ready'}
-                                onClick={() => startRename(conversation)}
-                                title={t(appLanguage, 'rename')}
-                                type="button"
-                              >
-                                <Icon path="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
-                              </button>
-                            ) : null}
-                            <button
-                              aria-label={t(appLanguage, 'delete')}
-                              className="danger"
-                              disabled={
-                                backendStatus !== 'ready' ||
-                                activeRun?.conversationId === conversation.conversation_id
-                              }
-                              onClick={() =>
-                                void (kind === 'chat'
-                                  ? deleteConversation(conversation.conversation_id)
-                                  : deleteBrowserConversation(conversation.conversation_id))
-                              }
-                              title={t(appLanguage, 'delete')}
-                              type="button"
-                            >
-                              <Icon path="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )
-                })
-              )}
-            </div>
           </div>
 
           <div className="rail-footer">
@@ -4471,143 +4274,339 @@ export default function App(): React.JSX.Element {
           </div>
         </nav>
 
+        {hasWorkspaceList && !isWorkspaceListVisible ? (
+          <button
+            type="button"
+            className="workspace-list-button workspace-list-show"
+            aria-label={t(appLanguage, 'showWorkspaceList')}
+            aria-controls="workspace-list"
+            aria-expanded={false}
+            onClick={() => setIsWorkspaceListVisible(true)}
+          >
+            {t(appLanguage, 'showList')}
+          </button>
+        ) : null}
+        <aside
+          id="workspace-list"
+          aria-label={t(appLanguage, 'workspaceList')}
+          className="workspace-list"
+          hidden={!hasWorkspaceList || !isWorkspaceListVisible}
+        >
+          <div className="workspace-list-toolbar">
+            <span>
+              {activeView === 'chat'
+                ? t(appLanguage, 'conversations')
+                : activeView === 'browser'
+                  ? t(appLanguage, 'browserHistory')
+                  : activeView === 'automations'
+                    ? t(appLanguage, 'taskListHeading')
+                    : t(appLanguage, 'knowledgeListHeading')}
+            </span>
+            <button
+              type="button"
+              className="workspace-list-button"
+              aria-label={t(appLanguage, 'hideWorkspaceList')}
+              onClick={() => {
+                setIsWorkspaceListVisible(false)
+              }}
+            >
+              {t(appLanguage, 'hideList')}
+            </button>
+          </div>
+          {(['chat', 'browser'] as const).map((kind) => {
+            const history = kind === 'chat' ? conversations : browserConversations
+            return (
+              <section
+                key={kind}
+                aria-label={
+                  kind === 'chat' ? t(appLanguage, 'chatHistory') : t(appLanguage, 'browserHistory')
+                }
+                className="rail-history"
+                style={activeView === kind ? undefined : { display: 'none' }}
+              >
+                <div className="rail-history-header">
+                  <div className="rail-label">
+                    {kind === 'chat'
+                      ? t(appLanguage, 'chatHistory')
+                      : t(appLanguage, 'browserHistory')}
+                  </div>
+                </div>
+                <button
+                  className="rail-new-btn"
+                  type="button"
+                  disabled={
+                    backendStatus !== 'ready' ||
+                    (kind === 'chat'
+                      ? isCreatingConversation
+                      : browserTabs.length >= MAX_BROWSER_TABS)
+                  }
+                  onClick={() => {
+                    if (kind === 'chat') createNewChatSession()
+                    else addBrowserTab()
+                  }}
+                >
+                  <Icon className="rail-icon" path="M12 5v14M5 12h14" />
+                  <span>
+                    {kind === 'chat' ? t(appLanguage, 'newChat') : t(appLanguage, 'newTab')}
+                  </span>
+                </button>
+                <div
+                  className={`rail-history-list${
+                    visibleScrollbar === 'recents' ? ' scrollbar-visible' : ''
+                  }`}
+                  onWheel={() => revealScrollbar('recents')}
+                >
+                  {history.length === 0 ? (
+                    <p className="rail-history-empty">
+                      {kind === 'chat'
+                        ? t(appLanguage, 'noChatHistory')
+                        : t(appLanguage, 'noBrowserHistory')}
+                    </p>
+                  ) : (
+                    history.map((conversation) => {
+                      const selected =
+                        kind === 'chat'
+                          ? activeView === 'chat' &&
+                            conversation.conversation_id === selectedConversationId
+                          : activeView === 'browser' &&
+                            conversation.conversation_id === selectedBrowserConversationId
+                      const renaming =
+                        kind === 'chat' && renamingConversationId === conversation.conversation_id
+
+                      return (
+                        <div
+                          className={`rail-recent-item${selected ? ' active' : ''}${
+                            renaming ? ' renaming' : ''
+                          }`}
+                          key={`${kind}:${conversation.conversation_id}`}
+                        >
+                          {renaming ? (
+                            <input
+                              ref={renameInputRef}
+                              className="rail-recent-rename"
+                              onBlur={() => void saveRename(conversation.conversation_id)}
+                              onChange={(event) => setRenameDraft(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault()
+                                  void saveRename(conversation.conversation_id)
+                                }
+                                if (event.key === 'Escape') {
+                                  event.preventDefault()
+                                  cancelRename()
+                                }
+                              }}
+                              type="text"
+                              value={renameDraft}
+                            />
+                          ) : (
+                            <>
+                              <button
+                                className="rail-recent-body"
+                                disabled={backendStatus !== 'ready'}
+                                onClick={() => {
+                                  if (kind === 'chat') {
+                                    setActiveView('chat')
+                                    setSelectedConversationId(conversation.conversation_id)
+                                  } else {
+                                    setActiveView('browser')
+                                    openBrowserConversation(conversation.conversation_id)
+                                  }
+                                }}
+                                title={
+                                  kind === 'browser' && conversation.last_page_url !== null
+                                    ? conversation.last_page_url
+                                    : conversationLabel(conversation.title, appLanguage)
+                                }
+                                type="button"
+                              >
+                                {kind === 'chat' ? (
+                                  <Icon
+                                    className="rail-recent-kind is-chat"
+                                    path="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5Z"
+                                  />
+                                ) : (
+                                  <svg
+                                    aria-hidden="true"
+                                    className="rail-recent-kind is-browser"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <circle cx="12" cy="12" r="9" />
+                                    <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" />
+                                  </svg>
+                                )}
+                                <span className="rail-recent-title">
+                                  {conversationLabel(conversation.title, appLanguage)}
+                                </span>
+                                <time
+                                  className="rail-recent-time"
+                                  dateTime={conversation.updated_at}
+                                >
+                                  {formatThreadTime(conversation.updated_at)}
+                                </time>
+                              </button>
+                              <div className="rail-recent-actions">
+                                {kind === 'chat' ? (
+                                  <button
+                                    aria-label={t(appLanguage, 'rename')}
+                                    disabled={backendStatus !== 'ready'}
+                                    onClick={() => startRename(conversation)}
+                                    title={t(appLanguage, 'rename')}
+                                    type="button"
+                                  >
+                                    <Icon path="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                                  </button>
+                                ) : null}
+                                <button
+                                  aria-label={t(appLanguage, 'delete')}
+                                  className="danger"
+                                  disabled={
+                                    backendStatus !== 'ready' ||
+                                    activeRun?.conversationId === conversation.conversation_id
+                                  }
+                                  onClick={() =>
+                                    void (kind === 'chat'
+                                      ? deleteConversation(conversation.conversation_id)
+                                      : deleteBrowserConversation(conversation.conversation_id))
+                                  }
+                                  title={t(appLanguage, 'delete')}
+                                  type="button"
+                                >
+                                  <Icon path="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </section>
+            )
+          })}
+
+          <section
+            className="automations-master-pane"
+            style={activeView === 'automations' ? undefined : { display: 'none' }}
+          >
+            <div className="workspace-list-actions">
+              <button
+                className="workspace-create-button"
+                disabled={isAutomationCreating}
+                onClick={() => {
+                  startCreatingAutomation()
+                }}
+                title={t(appLanguage, 'newTask')}
+                type="button"
+              >
+                <Icon path="M12 5v14M5 12h14" />
+                <span>{t(appLanguage, 'newTask')}</span>
+              </button>
+            </div>
+
+            {/* List of Tasks */}
+            <div className="automations-list" role="list">
+              {isCreatingNewTask && (
+                <div className="automation-card selected is-draft-card" role="listitem">
+                  <span className="workspace-entry-icon">
+                    <Icon path="M4 5h16v16H4zM8 3v4M16 3v4M4 10h16M8 14h3M8 17h6" />
+                  </span>
+                  <div className="automation-card-main">
+                    <div className="automation-card-toprow">
+                      <span className="automation-status draft">
+                        <span aria-hidden="true" className="automation-status-dot" />
+                        {editingAutomationId !== null
+                          ? t(appLanguage, 'editTask')
+                          : t(appLanguage, 'statusDraft')}
+                      </span>
+                    </div>
+                    <h2>
+                      {editingAutomationId !== null
+                        ? (automationPreviews.find((a) => a.id === editingAutomationId)?.name ??
+                          t(appLanguage, 'newScheduledTask'))
+                        : t(appLanguage, 'newScheduledTask')}
+                    </h2>
+                    <p className="automation-card-draft-hint">
+                      {editingAutomationId !== null
+                        ? t(appLanguage, 'editingTaskInCanvas')
+                        : t(appLanguage, 'draftingTaskInCanvas')}
+                    </p>
+                  </div>
+                </div>
+              )}
+              {automationLoadError !== null && (
+                <p className="automation-empty-detail">{automationLoadError}</p>
+              )}
+              {automationLoadError === null &&
+                automationPreviews.length === 0 &&
+                !isCreatingNewTask && (
+                  <p className="automation-empty-detail">{t(appLanguage, 'noAutomationsYet')}</p>
+                )}
+              {automationPreviews.map((automation) => (
+                <button
+                  aria-pressed={!isCreatingNewTask && selectedAutomation?.id === automation.id}
+                  className={`automation-card${
+                    !isCreatingNewTask && selectedAutomation?.id === automation.id
+                      ? ' selected'
+                      : ''
+                  }`}
+                  disabled={isAutomationCreating}
+                  key={automation.id}
+                  onClick={() => {
+                    discardAutomationDraft()
+                    setSelectedAutomationId(automation.id)
+                    setIsCreatingNewTask(false)
+                  }}
+                  role="listitem"
+                  type="button"
+                >
+                  <span className="workspace-entry-icon">
+                    <Icon path="M4 5h16v16H4zM8 3v4M16 3v4M4 10h16M8 14h3M8 17h6" />
+                  </span>
+                  <div className="automation-card-main">
+                    <div className="automation-card-toprow">
+                      <span className={`automation-status ${automation.status}`}>
+                        <span aria-hidden="true" className="automation-status-dot" />
+                        {automation.status === 'active'
+                          ? t(appLanguage, 'statusActive')
+                          : automation.status === 'paused'
+                            ? t(appLanguage, 'statusPaused')
+                            : t(appLanguage, 'statusDraft')}
+                      </span>
+                    </div>
+                    <h2>{automation.name}</h2>
+                  </div>
+                  <div className="automation-card-meta">
+                    <span className="automation-card-schedule">
+                      {automation.schedule === undefined
+                        ? t(appLanguage, 'scheduleDetailsPending')
+                        : formatAutomationSchedule(automation.schedule ?? undefined, appLanguage)}
+                    </span>
+                    <span className="automation-card-next">
+                      {automation.nextRun
+                        ? `${t(appLanguage, 'nextRun')}: ${automation.nextRun}`
+                        : t(appLanguage, 'noUpcomingRun')}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <div
+            ref={setLibraryListHost}
+            className="workspace-library-host"
+            hidden={activeView !== 'knowledge'}
+          />
+        </aside>
+
         <div className={`view${activeView === 'chat' ? ' active' : ''}`}>
           <section className="center">
             <div className="chat-layout">
-              <div
-                className={`chat-threads${visibleScrollbar === 'threads' ? ' scrollbar-visible' : ''}`}
-                onWheel={() => revealScrollbar('threads')}
-              >
-                <div className="chat-threads-header">
-                  <label className="chat-threads-search">
-                    <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                      <circle cx="11" cy="11" r="7" />
-                      <path d="m21 21-4.3-4.3" />
-                    </svg>
-                    <input
-                      disabled
-                      placeholder={t(appLanguage, 'searchPlaceholder')}
-                      type="search"
-                    />
-                    <kbd>⌘K</kbd>
-                  </label>
-                  <button
-                    className="chat-new-btn"
-                    disabled={backendStatus !== 'ready' || isCreatingConversation}
-                    onClick={() => void createConversation()}
-                    title={t(appLanguage, 'newConversation')}
-                    type="button"
-                  >
-                    <Icon path="M12 5v14M5 12h14" />
-                  </button>
-                </div>
-
-                {conversations.length === 0 ? (
-                  <p className="chat-context-sub">{t(appLanguage, 'noConversationsYet')}</p>
-                ) : (
-                  conversations.map((conversation) =>
-                    renamingConversationId === conversation.conversation_id ? (
-                      <div
-                        className={`chat-thread-item chat-thread-item-renaming${
-                          conversation.conversation_id === selectedConversationId ? ' active' : ''
-                        }`}
-                        key={conversation.conversation_id}
-                      >
-                        <input
-                          className="chat-thread-rename-input"
-                          onBlur={() => void saveRename(conversation.conversation_id)}
-                          onChange={(event) => setRenameDraft(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') {
-                              event.preventDefault()
-                              void saveRename(conversation.conversation_id)
-                            }
-
-                            if (event.key === 'Escape') {
-                              event.preventDefault()
-                              cancelRename()
-                            }
-                          }}
-                          type="text"
-                          value={renameDraft}
-                        />
-                      </div>
-                    ) : (
-                      <div
-                        className={`chat-thread-item${
-                          conversation.conversation_id === selectedConversationId ? ' active' : ''
-                        }`}
-                        key={conversation.conversation_id}
-                      >
-                        <button
-                          className="chat-thread-body"
-                          disabled={backendStatus !== 'ready'}
-                          onClick={() => setSelectedConversationId(conversation.conversation_id)}
-                          type="button"
-                        >
-                          <div className="chat-thread-name">
-                            {conversationLabel(conversation.title, appLanguage)}
-                          </div>
-                          <div className="chat-thread-time">
-                            {formatThreadTime(conversation.updated_at)}
-                          </div>
-                        </button>
-                        <div className="chat-thread-actions">
-                          <button
-                            aria-label={t(appLanguage, 'rename')}
-                            className="chat-thread-action-btn"
-                            disabled={backendStatus !== 'ready'}
-                            onClick={() => startRename(conversation)}
-                            title={t(appLanguage, 'rename')}
-                            type="button"
-                          >
-                            <svg
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              viewBox="0 0 24 24"
-                            >
-                              <path d="M12 20h9" />
-                              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                            </svg>
-                          </button>
-                          <button
-                            aria-label={t(appLanguage, 'delete')}
-                            className="chat-thread-action-btn chat-thread-action-btn-danger"
-                            disabled={
-                              backendStatus !== 'ready' ||
-                              activeRun?.conversationId === conversation.conversation_id
-                            }
-                            onClick={() => void deleteConversation(conversation.conversation_id)}
-                            title={t(appLanguage, 'delete')}
-                            type="button"
-                          >
-                            <svg
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              viewBox="0 0 24 24"
-                            >
-                              <path d="M3 6h18" />
-                              <path d="M8 6V4h8v2" />
-                              <path d="M19 6 18 20H6L5 6" />
-                              <path d="M10 11v6" />
-                              <path d="M14 11v6" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  )
-                )}
-              </div>
-              <div
-                aria-label="Resize conversation list"
-                className="chat-column-resizer"
-                onPointerDown={(event) => beginColumnResize('threads', event)}
-                role="separator"
-              />
-
               <div className="chat-main">
                 {errorMessage ? <p className="chat-error">{errorMessage}</p> : null}
 
@@ -4911,7 +4910,7 @@ export default function App(): React.JSX.Element {
                 ) : null}
 
                 <form className="chat-composer" onSubmit={(event) => void submitMessage(event)}>
-                  <div className="chat-composer-box">
+                  <div className="chat-composer-box message-composer">
                     {editingMessageId !== null ? (
                       <div className="composer-editing">
                         <span>{t(appLanguage, 'editingPreviousMessage')}</span>
@@ -5089,11 +5088,11 @@ export default function App(): React.JSX.Element {
               actions={
                 <div className="workspace-header-actions">
                   <button
-                    aria-label="Add folder or file"
+                    aria-label={t(appLanguage, 'addFolderOrFile')}
                     className="workspace-ghost-btn"
                     disabled={isWorkspaceBusy}
                     onClick={() => void handleAddWorkspacePath()}
-                    title="Add folder or file"
+                    title={t(appLanguage, 'addFolderOrFile')}
                     type="button"
                   >
                     <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -5101,11 +5100,11 @@ export default function App(): React.JSX.Element {
                     </svg>
                   </button>
                   <button
-                    aria-label="Refresh files"
+                    aria-label={t(appLanguage, 'refreshFiles')}
                     className="workspace-ghost-btn"
                     disabled={isTreeLoading}
                     onClick={refreshWorkspaceTree}
-                    title="Refresh workspace files"
+                    title={t(appLanguage, 'refreshWorkspaceFiles')}
                     type="button"
                   >
                     <svg
@@ -5122,7 +5121,7 @@ export default function App(): React.JSX.Element {
               }
               header={
                 <div className="workspace-panel-title">
-                  <span className="workspace-panel-label">Workspace</span>
+                  <span className="workspace-panel-label">{t(appLanguage, 'workspaceLabel')}</span>
                   <span className="workspace-panel-count">
                     {(workspaceSettings?.additional_roots.length ?? 0) +
                       (workspaceSettings?.additional_files.length ?? 0)}
@@ -5136,7 +5135,9 @@ export default function App(): React.JSX.Element {
                   onWheel={() => revealScrollbar('workspaceTree')}
                 >
                   {isTreeLoading && Object.keys(workspaceTrees).length === 0 ? (
-                    <div className="workspace-tree-status">Scanning workspace…</div>
+                    <div className="workspace-tree-status">
+                      {t(appLanguage, 'scanningWorkspace')}
+                    </div>
                   ) : attachedFolders.length > 0 || attachedFiles.length > 0 ? (
                     <div className="workspace-tree">
                       {attachedFolders.map((rootPath) => {
@@ -5148,7 +5149,9 @@ export default function App(): React.JSX.Element {
                             <div className="workspace-tree-row" key={rootPath}>
                               <TreeIcon isExpanded={false} kind="directory" />
                               <span className="workspace-tree-name">{folderName}</span>
-                              <span className="workspace-tree-size">Loading…</span>
+                              <span className="workspace-tree-size">
+                                {t(appLanguage, 'loading')}
+                              </span>
                             </div>
                           )
                         }
@@ -5168,7 +5171,7 @@ export default function App(): React.JSX.Element {
                       })}
                     </div>
                   ) : (
-                    <div className="workspace-tree-empty">No files available</div>
+                    <div className="workspace-tree-empty">{t(appLanguage, 'noFilesAvailable')}</div>
                   )}
                 </div>
 
@@ -5182,28 +5185,28 @@ export default function App(): React.JSX.Element {
                         {filePreview && !filePreview.isBinary ? (
                           <span className="workspace-preview-meta">
                             {formatBytes(filePreview.size)}
-                            {filePreview.isTruncated ? ' (previewing 100KB)' : ''}
+                            {filePreview.isTruncated ? t(appLanguage, 'previewTruncated') : ''}
                           </span>
                         ) : null}
                       </div>
                       <div className="workspace-preview-actions">
                         <button
-                          aria-label="Reveal in Finder"
+                          aria-label={t(appLanguage, 'revealInFinder')}
                           className="workspace-preview-action-btn"
                           onClick={() => void window.desktop.revealInFinder(selectedPreviewFile)}
-                          title="Reveal in Finder"
+                          title={t(appLanguage, 'revealInFinder')}
                           type="button"
                         >
                           ↗
                         </button>
                         <button
-                          aria-label="Close preview"
+                          aria-label={t(appLanguage, 'closePreview')}
                           className="workspace-preview-action-btn"
                           onClick={() => {
                             setSelectedPreviewFile(null)
                             setFilePreview(null)
                           }}
-                          title="Close preview"
+                          title={t(appLanguage, 'closePreview')}
                           type="button"
                         >
                           ×
@@ -5215,11 +5218,13 @@ export default function App(): React.JSX.Element {
                       onWheel={() => revealScrollbar('workspacePreview')}
                     >
                       {isPreviewLoading ? (
-                        <div className="workspace-preview-status">Loading preview…</div>
+                        <div className="workspace-preview-status">
+                          {t(appLanguage, 'loadingPreview')}
+                        </div>
                       ) : filePreview?.isBinary ? (
                         <div className="workspace-preview-binary">
                           <span>📦</span>
-                          <strong>Binary file</strong>
+                          <strong>{t(appLanguage, 'binaryFile')}</strong>
                           <small>{formatBytes(filePreview.size)}</small>
                         </div>
                       ) : filePreview ? (
@@ -5227,7 +5232,9 @@ export default function App(): React.JSX.Element {
                           <code>{filePreview.content}</code>
                         </pre>
                       ) : (
-                        <div className="workspace-preview-status">Preview unavailable</div>
+                        <div className="workspace-preview-status">
+                          {t(appLanguage, 'previewUnavailable')}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -5327,7 +5334,12 @@ export default function App(): React.JSX.Element {
                       value={activeBrowserTab?.address ?? ''}
                     />
                   </div>
-                  <button aria-label="Go" className="browser-go" title="Go" type="submit">
+                  <button
+                    aria-label={t(appLanguage, 'go')}
+                    className="browser-go"
+                    title={t(appLanguage, 'go')}
+                    type="submit"
+                  >
                     <Icon path="M5 12h14M13 6l6 6-6 6" />
                   </button>
                   <button
@@ -5362,9 +5374,9 @@ export default function App(): React.JSX.Element {
               <div className="browser-body">
                 <div className="browser-surface" ref={browserSurfaceRef} />
                 {desktopLayout.browserAgentPanelOpen ? (
-                  <aside aria-label="Page assistant" className="browser-agent">
+                  <aside aria-label={t(appLanguage, 'pageAssistant')} className="browser-agent">
                     <div
-                      aria-label="Resize page assistant"
+                      aria-label={t(appLanguage, 'resizePageAssistant')}
                       className="browser-agent-resizer"
                       onPointerDown={(event) => beginColumnResize('browserAgent', event)}
                       role="separator"
@@ -5624,7 +5636,7 @@ export default function App(): React.JSX.Element {
                           </button>
                         </div>
                       ) : null}
-                      <label className="browser-agent-input">
+                      <label className="browser-agent-input message-composer">
                         <textarea
                           ref={browserAgentInputRef}
                           onChange={(event) => setBrowserDraft(event.target.value)}
@@ -5695,7 +5707,7 @@ export default function App(): React.JSX.Element {
                 </div>
                 <div className="entry-body">
                   <div className="entry-title">
-                    No activity feed yet — use <b>Chat</b> for live runs
+                    No activity feed yet — use <b>{t(appLanguage, 'chatTitle')}</b> for live runs
                   </div>
                   <div className="entry-detail">Scheduled-task timelines will appear here.</div>
                   <div className="entry-tag">placeholder</div>
@@ -5869,111 +5881,6 @@ export default function App(): React.JSX.Element {
         <div className={`view${activeView === 'automations' ? ' active' : ''}`}>
           <section className="center automations-center-shell">
             <div className="automations-view-shell">
-              {/* Master Pane: Scheduled Tasks List */}
-              <section className="automations-master-pane">
-                <div className="automations-master-actions">
-                  <button
-                    className="automations-new-task-btn"
-                    disabled={isAutomationCreating}
-                    onClick={startCreatingAutomation}
-                    title={t(appLanguage, 'newTask')}
-                    type="button"
-                  >
-                    <Icon path="M12 5v14M5 12h14" />
-                    <span>{t(appLanguage, 'newTask')}</span>
-                  </button>
-                </div>
-
-                {/* List of Tasks */}
-                <div className="automations-list" role="list">
-                  {isCreatingNewTask && (
-                    <div className="automation-card selected is-draft-card" role="listitem">
-                      <div className="automation-card-main">
-                        <div className="automation-card-toprow">
-                          <span className="automation-status draft">
-                            <span aria-hidden="true" className="automation-status-dot" />
-                            {editingAutomationId !== null
-                              ? t(appLanguage, 'editTask')
-                              : t(appLanguage, 'statusDraft')}
-                          </span>
-                        </div>
-                        <h2>
-                          {editingAutomationId !== null
-                            ? (automationPreviews.find((a) => a.id === editingAutomationId)?.name ??
-                              t(appLanguage, 'newScheduledTask'))
-                            : t(appLanguage, 'newScheduledTask')}
-                        </h2>
-                        <p className="automation-card-draft-hint">
-                          {editingAutomationId !== null
-                            ? t(appLanguage, 'editingTaskInCanvas')
-                            : t(appLanguage, 'draftingTaskInCanvas')}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                  {automationLoadError !== null && (
-                    <p className="automation-empty-detail">{automationLoadError}</p>
-                  )}
-                  {automationLoadError === null &&
-                    automationPreviews.length === 0 &&
-                    !isCreatingNewTask && (
-                      <p className="automation-empty-detail">
-                        {t(appLanguage, 'noAutomationsYet')}
-                      </p>
-                    )}
-                  {automationPreviews.map((automation) => (
-                    <button
-                      aria-pressed={!isCreatingNewTask && selectedAutomation?.id === automation.id}
-                      className={`automation-card${
-                        !isCreatingNewTask && selectedAutomation?.id === automation.id
-                          ? ' selected'
-                          : ''
-                      }`}
-                      disabled={isAutomationCreating}
-                      key={automation.id}
-                      onClick={() => {
-                        discardAutomationDraft()
-                        setSelectedAutomationId(automation.id)
-                        setIsCreatingNewTask(false)
-                      }}
-                      role="listitem"
-                      type="button"
-                    >
-                      <div className="automation-card-main">
-                        <div className="automation-card-toprow">
-                          <span className={`automation-status ${automation.status}`}>
-                            <span aria-hidden="true" className="automation-status-dot" />
-                            {automation.status === 'active'
-                              ? t(appLanguage, 'statusActive')
-                              : automation.status === 'paused'
-                                ? t(appLanguage, 'statusPaused')
-                                : t(appLanguage, 'statusDraft')}
-                          </span>
-                        </div>
-                        <h2>{automation.name}</h2>
-                        <p>{automation.summary}</p>
-                      </div>
-                      <div className="automation-card-meta">
-                        <span className="automation-card-schedule">{automation.schedule}</span>
-                        <span className="automation-card-next">
-                          {automation.nextRun
-                            ? `${t(appLanguage, 'nextRun')}: ${automation.nextRun}`
-                            : t(appLanguage, 'noUpcomingRun')}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              {/* Column Resizer between Master Pane & Canvas */}
-              <div
-                aria-label="Resize scheduled tasks list"
-                className="automations-column-resizer"
-                onPointerDown={(event) => beginColumnResize('automationsMaster', event)}
-                role="separator"
-              />
-
               {/* Detail Canvas: Hero Task Dashboard or Creation Workspace */}
               <section className="automations-detail-canvas">
                 {isCreatingNewTask ? (
@@ -6018,7 +5925,7 @@ export default function App(): React.JSX.Element {
                     </div>
 
                     {/* Big Spacious Composer */}
-                    <div className="automation-canvas-composer-card">
+                    <div className="automation-canvas-composer-card message-composer">
                       {isAutomationAwaitingInput && lastAutomationDraftMessage !== null && (
                         <div
                           aria-live="polite"
@@ -6284,7 +6191,13 @@ export default function App(): React.JSX.Element {
                                 : t(appLanguage, 'statusDraft')}
                           </span>
                           <span className="automation-hero-schedule-badge">
-                            📅 {selectedAutomation.schedule}
+                            📅{' '}
+                            {selectedAutomation.schedule === undefined
+                              ? t(appLanguage, 'scheduleDetailsPending')
+                              : formatAutomationSchedule(
+                                  selectedAutomation.schedule ?? undefined,
+                                  appLanguage
+                                )}
                           </span>
                           {selectedAutomation.nextRun && (
                             <span className="automation-hero-next-badge">
@@ -6581,7 +6494,7 @@ export default function App(): React.JSX.Element {
           </section>
         </div>
         <div className={`view${activeView === 'knowledge' ? ' active' : ''}`}>
-          <KnowledgeWorkspace lang={appLanguage} />
+          <KnowledgeWorkspace lang={appLanguage} listHost={libraryListHost} />
         </div>
         <div className={`view${activeView === 'history' ? ' active' : ''}`}>
           {renderPlaceholderView('History', 'Longer-term activity and audit trail.')}

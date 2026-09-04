@@ -278,7 +278,7 @@ body.is-resizing-columns {
   text-transform: uppercase;
 }
 
-.rail-recents {
+.rail-history {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -286,13 +286,18 @@ body.is-resizing-columns {
   margin-bottom: 12px;
 }
 
-.rail-recents-header {
+.rail-history > .rail-new-btn {
+  flex-shrink: 0;
+  margin-bottom: 8px;
+}
+
+.rail-history-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-.rail-recents-header .rail-label {
+.rail-history-header .rail-label {
   padding-right: 0;
 }
 
@@ -351,40 +356,7 @@ body.is-resizing-columns {
   cursor: default;
 }
 
-.rail-automation-section {
-  margin-bottom: 6px;
-}
-
-.rail-automation-section .rail-item,
-.rail-knowledge-section .rail-item {
-  height: 36px;
-  padding: 0 10px;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: var(--bg-raised);
-  color: var(--text);
-}
-
-.rail-automation-section .rail-item:hover,
-.rail-automation-section .rail-item.active,
-.rail-knowledge-section .rail-item:hover,
-.rail-knowledge-section .rail-item.active {
-  border-color: var(--line);
-  background: var(--bg-raised);
-  color: var(--text);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 4%);
-}
-
-.rail-automation-section .rail-item.active .rail-count {
-  background: var(--bg-inset);
-  color: var(--text-dim);
-}
-
-.rail-knowledge-section {
-  margin-bottom: 16px;
-}
-
-.rail-recents-list {
+.rail-history-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -392,29 +364,29 @@ body.is-resizing-columns {
   overflow-y: auto;
 }
 
-.rail-recents-list::-webkit-scrollbar {
+.rail-history-list::-webkit-scrollbar {
   width: 3px;
 }
 
-.rail-recents-list::-webkit-scrollbar-track {
+.rail-history-list::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.rail-recents-list::-webkit-scrollbar-thumb {
+.rail-history-list::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: transparent;
   transition: background-color 160ms ease-out;
 }
 
-.rail-recents-list.scrollbar-visible::-webkit-scrollbar-thumb {
+.rail-history-list.scrollbar-visible::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--text-faint) 34%, transparent);
 }
 
-.rail-recents-list.scrollbar-visible::-webkit-scrollbar-thumb:hover {
+.rail-history-list.scrollbar-visible::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--text-faint) 50%, transparent);
 }
 
-.rail-recents-empty {
+.rail-history-empty {
   margin: 0;
   padding: 6px 8px;
   color: var(--text-faint);
@@ -694,7 +666,7 @@ body.is-resizing-columns {
   margin-bottom: 6px;
 }
 
-.app.rail-collapsed .rail-recents {
+.app.rail-collapsed .rail-history {
   display: none;
 }
 
@@ -719,15 +691,6 @@ body.is-resizing-columns {
   border: none;
   border-radius: 10px;
   background: transparent;
-}
-
-.app.rail-collapsed .rail-automation-section .rail-item,
-.app.rail-collapsed .rail-automation-section .rail-item.active,
-.app.rail-collapsed .rail-knowledge-section .rail-item,
-.app.rail-collapsed .rail-knowledge-section .rail-item.active {
-  border: none;
-  background: transparent;
-  box-shadow: none;
 }
 
 .app.rail-collapsed .rail-new-btn:hover:not(:disabled) {
@@ -5990,4 +5953,385 @@ select.settings-select {
   line-height: 1.5;
   color: var(--text, #111827);
   white-space: pre-wrap;
+}
+
+/* Workspace lists have a column independent of the navigation rail. */
+.app.workspace-navigation {
+  grid-template-columns: var(--rail-width) var(--workspace-list-width) minmax(0, 1fr) 0px;
+}
+.app.workspace-navigation.attention-open {
+  grid-template-columns: var(--rail-width) var(--workspace-list-width) minmax(0, 1fr) var(
+      --attention-width
+    );
+}
+.workspace-navigation .center {
+  grid-column: 3;
+}
+.workspace-navigation .attn {
+  grid-column: 4;
+}
+.workspace-navigation .browser-center {
+  grid-column: 3 / -1;
+}
+.workspace-list {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--rail-bg);
+  border-right: 1px solid var(--line-soft);
+}
+.workspace-list[hidden],
+.workspace-library-host[hidden] {
+  display: none;
+}
+.workspace-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.workspace-list-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 48px;
+  height: 30px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+  padding: 5px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  color: var(--text);
+  cursor: pointer;
+}
+.workspace-list .rail-history {
+  padding: 0 10px;
+  margin: 0;
+}
+.workspace-list .rail-history-header {
+  display: none;
+}
+.app.rail-collapsed .workspace-list .rail-history {
+  display: flex;
+}
+.app.rail-collapsed .workspace-list .rail-new-btn {
+  width: 100%;
+  justify-content: flex-start;
+}
+.workspace-list .rail-history-list {
+  flex: 1;
+  min-height: 0;
+}
+.workspace-library-host {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.workspace-library-host .knowledge-libraries-pane {
+  width: 100%;
+  border: 0;
+}
+.workspace-list .automations-master-pane {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+}
+.workspace-navigation .automations-view-shell {
+  grid-template-columns: minmax(0, 1fr);
+}
+.workspace-navigation .knowledge-workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (max-width: 1100px) {
+  .app.workspace-navigation.attention-open {
+    grid-template-columns: var(--rail-width) var(--workspace-list-width) minmax(0, 1fr) 0px;
+  }
+}
+
+.app.rail-collapsed .workspace-list .rail-new-btn {
+  display: flex;
+  gap: 9px;
+  padding: 0 10px;
+  border: 1px solid var(--line-soft);
+  background: var(--bg-raised);
+}
+.app.rail-collapsed .workspace-list .rail-new-btn .rail-icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* Shared visual treatment for task and library selectors. */
+.workspace-list .automations-master-pane,
+.workspace-library-host .knowledge-libraries-pane {
+  padding: 0 10px 12px;
+  background: transparent;
+  overflow: hidden;
+}
+.workspace-list-actions {
+  flex-shrink: 0;
+  padding: 0 0 8px;
+}
+.workspace-create-button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+}
+.workspace-create-button svg {
+  width: 15px;
+  height: 15px;
+}
+.workspace-create-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.workspace-create-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.workspace-create-button:focus-visible,
+.workspace-list .automation-card:focus-visible,
+.workspace-list .knowledge-library-select:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: -2px;
+}
+.workspace-list .automations-list,
+.workspace-list .knowledge-library-list {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  gap: 4px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.workspace-list .automation-card {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 4px 9px;
+  padding: 10px 9px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+.workspace-list .automation-card:hover {
+  background: var(--bg-hover);
+}
+.workspace-list .automation-card.selected,
+.workspace-list .knowledge-library-item.active .knowledge-library-select {
+  background: var(--accent-soft);
+  box-shadow: none;
+}
+.workspace-entry-icon,
+.workspace-list .knowledge-library-icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text-faint) 10%, transparent);
+  color: var(--text-faint);
+}
+.workspace-entry-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.workspace-list .automation-card-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 4px;
+}
+.workspace-list .automation-card-main h2 {
+  order: -1;
+}
+.workspace-list .automation-card h2,
+.workspace-list .knowledge-library-info strong {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-list .automation-card-meta {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.workspace-list .automation-card-meta span,
+.workspace-list .knowledge-library-info small {
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.workspace-list .knowledge-library-select {
+  padding: 10px 30px 10px 9px;
+}
+.workspace-list .automation-card .automation-status {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 11px;
+}
+
+/* The restore button floats above the content without adding a grid row. */
+.workspace-list-show {
+  position: absolute;
+  z-index: 5;
+  top: calc(var(--window-titlebar-height) + 12px);
+  left: calc(var(--rail-width) + 12px);
+}
+
+/* Keep browser navigation clear of the floating restore button. */
+.app:has(> .workspace-list-show) .browser-chrome {
+  padding-left: 72px;
+}
+
+/* Electron drag regions can intercept a floating sibling's clicks despite z-index.
+   While Show is present, keep the underlying workspace surfaces out of the
+   native drag hit map. The window titlebar remains draggable. */
+.app:has(> .workspace-list-show) .browser-chrome,
+.app:has(> .workspace-list-show) .automations-detail-canvas,
+.app:has(> .workspace-list-show) .automations-detail-canvas * {
+  -webkit-app-region: no-drag;
+}
+
+/* Reserve a horizontal lane for Show, including while messages scroll. */
+.app:has(> .workspace-list-show) .chat-messages,
+.app:has(> .workspace-list-show) .chat-error,
+.app:has(> .workspace-list-show) .automations-detail-canvas {
+  padding-left: 72px;
+}
+
+/* Only offset the fixed title row; folders and library messages stay aligned. */
+.app:has(> .workspace-list-show) .knowledge-header-top {
+  padding-left: 48px;
+}
+
+/* All workspace channels share the same expanded navigation row. */
+.app:not(.rail-collapsed) .rail-actions-section .rail-item {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.rail-actions-section .rail-item:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+/* Shared appearance only; each channel retains its sizing and submit behavior. */
+.app .message-composer {
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg-raised);
+  box-shadow: 0 4px 16px rgb(25 25 24 / 5%);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.app .message-composer:focus-within {
+  border-color: var(--brass-dim);
+  outline: none;
+  box-shadow:
+    0 0 0 3px var(--brass-glow),
+    0 4px 16px rgb(25 25 24 / 5%);
+}
+
+.app .message-composer textarea {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.app .message-composer textarea::placeholder {
+  color: var(--text-faint);
+  opacity: 1;
+}
+
+.app .message-composer textarea:disabled {
+  color: var(--text-faint);
+}
+
+.app .message-composer :is(.composer-send, .composer-stop, .automation-create-btn),
+.app .knowledge-composer > button {
+  min-width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--brass);
+  color: white;
+  box-shadow: none;
+}
+
+.app .message-composer .composer-send,
+.app .knowledge-composer > button {
+  width: 36px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.app
+  .message-composer
+  :is(.composer-send, .composer-stop, .automation-create-btn):hover:not(:disabled),
+.app .knowledge-composer > button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--brass) 88%, #000);
+}
+
+.app .message-composer :is(.composer-send, .composer-stop, .automation-create-btn):disabled,
+.app .knowledge-composer > button:disabled {
+  background: var(--bg-inset);
+  color: var(--text-faint);
+  opacity: 1;
+  cursor: default;
+}
+
+.app .message-composer .composer-send svg,
+.app .knowledge-composer > button svg {
+  width: 18px;
+  height: 18px;
 }

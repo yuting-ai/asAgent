@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -95,7 +96,13 @@ function WorkspaceIcon({ path }: { path: string }): React.JSX.Element {
   )
 }
 
-export default function KnowledgeWorkspace({ lang }: { lang: AppLanguage }): React.JSX.Element {
+export default function KnowledgeWorkspace({
+  lang,
+  listHost
+}: {
+  lang: AppLanguage
+  listHost: HTMLDivElement | null
+}): React.JSX.Element {
   const [libraries, setLibraries] = useState<KnowledgeLibrary[]>([])
   const [selectedLibraryId, setSelectedLibraryId] = useState('')
   const [isCreatingLibrary, setIsCreatingLibrary] = useState(false)
@@ -549,135 +556,144 @@ export default function KnowledgeWorkspace({ lang }: { lang: AppLanguage }): Rea
   return (
     <section className="center knowledge-center-shell">
       <div className="knowledge-workspace">
-        <aside className="knowledge-libraries-pane">
-          <div className="knowledge-libraries-header">
-            <h2>{t(lang, 'knowledgeLibraries')}</h2>
-            <button
-              aria-label={t(lang, 'knowledgeNewLibrary')}
-              className="knowledge-new-library-button"
-              onClick={() => {
-                setIsCreatingLibrary((creating) => !creating)
-                setNewLibraryName('')
-                setLibraryCreateError(null)
-                setOpenLibraryMenuId(null)
-              }}
-              title={t(lang, 'knowledgeNewLibrary')}
-              type="button"
-            >
-              <WorkspaceIcon path="M12 5v14M5 12h14" />
-            </button>
-          </div>
+        {listHost
+          ? createPortal(
+              <aside className="knowledge-libraries-pane">
+                <div className="workspace-list-actions">
+                  <button
+                    aria-label={t(lang, 'knowledgeNewLibrary')}
+                    className="workspace-create-button"
+                    onClick={() => {
+                      setIsCreatingLibrary((creating) => !creating)
+                      setNewLibraryName('')
+                      setLibraryCreateError(null)
+                      setOpenLibraryMenuId(null)
+                    }}
+                    title={t(lang, 'knowledgeNewLibrary')}
+                    type="button"
+                  >
+                    <WorkspaceIcon path="M12 5v14M5 12h14" />
+                    <span>{t(lang, 'knowledgeNewLibrary')}</span>
+                  </button>
+                </div>
 
-          {isCreatingLibrary ? (
-            <form className="knowledge-library-create" onSubmit={createLibrary}>
-              <input
-                aria-label={t(lang, 'knowledgeLibraryName')}
-                autoFocus
-                onChange={(event) => {
-                  setNewLibraryName(event.target.value)
-                  setLibraryCreateError(null)
-                }}
-                placeholder={t(lang, 'knowledgeLibraryNamePlaceholder')}
-                value={newLibraryName}
-              />
-              {libraryCreateError ? (
-                <div className="knowledge-library-form-error">{libraryCreateError}</div>
-              ) : null}
-              <div>
-                <button
-                  onClick={() => {
-                    setIsCreatingLibrary(false)
-                    setNewLibraryName('')
-                    setLibraryCreateError(null)
-                  }}
-                  type="button"
-                >
-                  {t(lang, 'cancel')}
-                </button>
-                <button className="primary" disabled={!newLibraryName.trim()} type="submit">
-                  {t(lang, 'create')}
-                </button>
-              </div>
-            </form>
-          ) : null}
-
-          <div className="knowledge-library-list" role="list">
-            {libraries.map((library) => (
-              <div
-                className={`knowledge-library-item${
-                  library.id === selectedLibraryId ? ' active' : ''
-                }${openLibraryMenuId === library.id ? ' menu-open' : ''}`}
-                key={library.id}
-                role="listitem"
-              >
-                <button
-                  aria-current={library.id === selectedLibraryId ? 'page' : undefined}
-                  className="knowledge-library-select"
-                  onClick={() => selectLibrary(library.id)}
-                  type="button"
-                >
-                  <span className="knowledge-library-icon">
-                    <WorkspaceIcon path="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                  </span>
-                  <span className="knowledge-library-info">
-                    <strong>{library.name}</strong>
-                    <small>
-                      {library.folders.length}{' '}
-                      {library.folders.length === 1
-                        ? t(lang, 'knowledgeFolderCountSingle')
-                        : t(lang, 'knowledgeFolderCount')}
-                      {library.documentCount > 0
-                        ? ` · ${library.documentCount} ${t(
-                            lang,
-                            library.documentCount === 1
-                              ? 'knowledgeDocumentSingle'
-                              : 'knowledgeDocuments'
-                          )}`
-                        : ''}
-                    </small>
-                  </span>
-                </button>
-                <button
-                  aria-expanded={openLibraryMenuId === library.id}
-                  aria-label={`${t(lang, 'knowledgeLibraryActions')}: ${library.name}`}
-                  className="knowledge-library-menu-button"
-                  onClick={() =>
-                    setOpenLibraryMenuId((openId) => (openId === library.id ? null : library.id))
-                  }
-                  title={t(lang, 'knowledgeLibraryActions')}
-                  type="button"
-                >
-                  <WorkspaceIcon path="M5 12h.01M12 12h.01M19 12h.01" />
-                </button>
-                {openLibraryMenuId === library.id ? (
-                  <div className="knowledge-library-menu">
-                    <button onClick={() => openRenameLibrary(library)} type="button">
-                      <WorkspaceIcon path="M4 20h4l11-11-4-4L4 16v4zM13.5 6.5l4 4" />
-                      {t(lang, 'knowledgeRenameLibrary')}
-                    </button>
-                    <button
-                      className="danger"
-                      disabled={libraries.length === 1}
-                      onClick={() => {
-                        setLibraryToDeleteId(library.id)
-                        setOpenLibraryMenuId(null)
+                {isCreatingLibrary ? (
+                  <form className="knowledge-library-create" onSubmit={createLibrary}>
+                    <input
+                      aria-label={t(lang, 'knowledgeLibraryName')}
+                      autoFocus
+                      onChange={(event) => {
+                        setNewLibraryName(event.target.value)
+                        setLibraryCreateError(null)
                       }}
-                      title={
-                        libraries.length === 1
-                          ? t(lang, 'knowledgeLastLibraryCannotDelete')
-                          : t(lang, 'knowledgeDeleteLibrary')
-                      }
-                      type="button"
-                    >
-                      <WorkspaceIcon path="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
-                      {t(lang, 'knowledgeDeleteLibrary')}
-                    </button>
-                  </div>
+                      placeholder={t(lang, 'knowledgeLibraryNamePlaceholder')}
+                      value={newLibraryName}
+                    />
+                    {libraryCreateError ? (
+                      <div className="knowledge-library-form-error">{libraryCreateError}</div>
+                    ) : null}
+                    <div>
+                      <button
+                        onClick={() => {
+                          setIsCreatingLibrary(false)
+                          setNewLibraryName('')
+                          setLibraryCreateError(null)
+                        }}
+                        type="button"
+                      >
+                        {t(lang, 'cancel')}
+                      </button>
+                      <button className="primary" disabled={!newLibraryName.trim()} type="submit">
+                        {t(lang, 'create')}
+                      </button>
+                    </div>
+                  </form>
                 ) : null}
-              </div>
-            ))}
-          </div>
-        </aside>
+
+                <div className="knowledge-library-list" role="list">
+                  {libraries.map((library) => (
+                    <div
+                      className={`knowledge-library-item${
+                        library.id === selectedLibraryId ? ' active' : ''
+                      }${openLibraryMenuId === library.id ? ' menu-open' : ''}`}
+                      key={library.id}
+                      role="listitem"
+                    >
+                      <button
+                        aria-current={library.id === selectedLibraryId ? 'page' : undefined}
+                        className="knowledge-library-select"
+                        onClick={() => {
+                          selectLibrary(library.id)
+                        }}
+                        type="button"
+                      >
+                        <span className="knowledge-library-icon">
+                          <WorkspaceIcon path="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                        </span>
+                        <span className="knowledge-library-info">
+                          <strong>{library.name}</strong>
+                          <small>
+                            {library.folders.length}{' '}
+                            {library.folders.length === 1
+                              ? t(lang, 'knowledgeFolderCountSingle')
+                              : t(lang, 'knowledgeFolderCount')}
+                            {library.documentCount > 0
+                              ? ` · ${library.documentCount} ${t(
+                                  lang,
+                                  library.documentCount === 1
+                                    ? 'knowledgeDocumentSingle'
+                                    : 'knowledgeDocuments'
+                                )}`
+                              : ''}
+                          </small>
+                        </span>
+                      </button>
+                      <button
+                        aria-expanded={openLibraryMenuId === library.id}
+                        aria-label={`${t(lang, 'knowledgeLibraryActions')}: ${library.name}`}
+                        className="knowledge-library-menu-button"
+                        onClick={() =>
+                          setOpenLibraryMenuId((openId) =>
+                            openId === library.id ? null : library.id
+                          )
+                        }
+                        title={t(lang, 'knowledgeLibraryActions')}
+                        type="button"
+                      >
+                        <WorkspaceIcon path="M5 12h.01M12 12h.01M19 12h.01" />
+                      </button>
+                      {openLibraryMenuId === library.id ? (
+                        <div className="knowledge-library-menu">
+                          <button onClick={() => openRenameLibrary(library)} type="button">
+                            <WorkspaceIcon path="M4 20h4l11-11-4-4L4 16v4zM13.5 6.5l4 4" />
+                            {t(lang, 'knowledgeRenameLibrary')}
+                          </button>
+                          <button
+                            className="danger"
+                            disabled={libraries.length === 1}
+                            onClick={() => {
+                              setLibraryToDeleteId(library.id)
+                              setOpenLibraryMenuId(null)
+                            }}
+                            title={
+                              libraries.length === 1
+                                ? t(lang, 'knowledgeLastLibraryCannotDelete')
+                                : t(lang, 'knowledgeDeleteLibrary')
+                            }
+                            type="button"
+                          >
+                            <WorkspaceIcon path="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
+                            {t(lang, 'knowledgeDeleteLibrary')}
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </aside>,
+              listHost
+            )
+          : null}
 
         <div className="knowledge-library-content">
           <header className="knowledge-header">
@@ -936,7 +952,7 @@ export default function KnowledgeWorkspace({ lang }: { lang: AppLanguage }): Rea
 
             <div className="knowledge-composer-wrap">
               {notice ? <div className="knowledge-notice">{notice}</div> : null}
-              <form className="knowledge-composer" onSubmit={submitQuestion}>
+              <form className="knowledge-composer message-composer" onSubmit={submitQuestion}>
                 <textarea
                   aria-label={t(lang, 'knowledgeAskPlaceholder')}
                   onChange={(event) => setDraft(event.target.value)}

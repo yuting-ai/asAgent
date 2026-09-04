@@ -40,3 +40,6 @@ docs/
 design-system/
 web_site/
 demo_video/
+
+# Local state file with a Git pathspec-sensitive name
+/:memory:.ses
