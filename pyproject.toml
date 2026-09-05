@@ -1,6 +1,6 @@
 [project]
 name = "asagent"
-version = "0.0.8"
+version = "0.0.9"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "aiosqlite>=0.20,<1",
