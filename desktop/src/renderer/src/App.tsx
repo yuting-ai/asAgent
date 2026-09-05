@@ -838,7 +838,7 @@ function runHistoryByAssistantMessage(
   return result
 }
 
-function RunActivityCard({
+export function RunActivityCard({
   activity,
   expanded,
   lang = 'en',
@@ -866,9 +866,19 @@ function RunActivityCard({
       ) : (
         <div className={`activity-details${activity.phase === 'live' ? ' is-live' : ''}`}>
           {activity.phase === 'live' ? (
-            <div aria-live="polite" className="activity-live">
-              <span aria-hidden="true" className="activity-spinner" />
-              <span>{activityCurrentLabel(activity, lang)}</span>
+            <div className="activity-live-row">
+              <div aria-live="polite" className="activity-live" role="status">
+                <span aria-hidden="true" className="activity-spinner" />
+                <span>{activityCurrentLabel(activity, lang)}</span>
+              </div>
+              <button
+                aria-expanded={expanded}
+                className="activity-details-toggle"
+                onClick={() => onExpandedChange(!expanded)}
+                type="button"
+              >
+                {expanded ? 'Hide details' : 'Details'}
+              </button>
             </div>
           ) : (
             <button
@@ -883,34 +893,36 @@ function RunActivityCard({
               </span>
             </button>
           )}
-          <ul className="activity-list">
-            {activity.steps.map((step) => (
-              <li
-                className={`activity-item is-${step.status}`}
-                key={`${activity.runId}-${step.id}`}
-              >
-                <span aria-hidden="true" className="activity-item-dot">
-                  {step.status === 'completed'
-                    ? '✓'
-                    : step.status === 'failed'
-                      ? '×'
-                      : step.status === 'deferred'
-                        ? '↷'
-                        : step.status === 'warning'
-                          ? '!'
-                          : step.status === 'waiting'
-                            ? '…'
-                            : '•'}
-                </span>
-                <span>
-                  {step.label}
-                  {step.detail === null ? null : (
-                    <span className="activity-item-detail"> — {step.detail}</span>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
+          {expanded && (
+            <ul className="activity-list">
+              {activity.steps.map((step) => (
+                <li
+                  className={`activity-item is-${step.status}`}
+                  key={`${activity.runId}-${step.id}`}
+                >
+                  <span aria-hidden="true" className="activity-item-dot">
+                    {step.status === 'completed'
+                      ? '✓'
+                      : step.status === 'failed'
+                        ? '×'
+                        : step.status === 'deferred'
+                          ? '↷'
+                          : step.status === 'warning'
+                            ? '!'
+                            : step.status === 'waiting'
+                              ? '…'
+                              : '•'}
+                  </span>
+                  <span>
+                    {step.label}
+                    {step.detail === null ? null : (
+                      <span className="activity-item-detail"> — {step.detail}</span>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>
@@ -1107,7 +1119,7 @@ function ContextPanelIcon({ direction }: { direction: 'collapse' | 'expand' }): 
   )
 }
 
-function BrowserAgentToggleIcon({ expanded }: { expanded: boolean }): React.JSX.Element {
+function BrowserAgentToggleIcon(): React.JSX.Element {
   return (
     <svg
       aria-hidden="true"
@@ -1115,15 +1127,14 @@ function BrowserAgentToggleIcon({ expanded }: { expanded: boolean }): React.JSX.
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="2"
+      strokeWidth="1.7"
       viewBox="0 0 24 24"
     >
-      <rect height="16" rx="3" width="18" x="3" y="4" />
-      {expanded ? (
-        <path d="M15 4v16H18a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3h-3Z" fill="currentColor" stroke="none" />
-      ) : null}
-      <path d="M15 4v16" />
-      {expanded ? <path d="m8 9 3.5 3L8 15" /> : <path d="m11.5 9-3.5 3 3.5 3" />}
+      <path d="M12 3v4M9 3h6" />
+      <rect height="13" rx="4" width="16" x="4" y="7" />
+      <circle cx="9" cy="13" fill="currentColor" r="1" stroke="none" />
+      <circle cx="15" cy="13" fill="currentColor" r="1" stroke="none" />
+      <path d="M9 17h6" />
     </svg>
   )
 }
@@ -2569,7 +2580,7 @@ export default function App(): React.JSX.Element {
             ...closeLiveSteps(current.steps),
             {
               id: `model:${data.step ?? current.steps.length + 1}`,
-              label: 'Planning next action',
+              label: 'Preparing a response…',
               detail: null,
               status: 'running'
             }
@@ -5401,7 +5412,7 @@ export default function App(): React.JSX.Element {
                         )
                       }
                     >
-                      {currentBookmark ? '★' : '☆'}
+                      <Icon path="m12 3 2.78 5.63 6.22.9-4.5 4.39 1.06 6.2L12 17.27 6.44 20.2 7.5 14 3 9.53l6.22-.9L12 3Z" />
                     </button>
                   </div>
                   <button
@@ -5414,14 +5425,6 @@ export default function App(): React.JSX.Element {
                     onClick={() => setBookmarksOpen(!bookmarksOpen)}
                   >
                     <Icon path="M5 3h14v18l-7-4-7 4V3Z" />
-                  </button>
-                  <button
-                    aria-label={t(appLanguage, 'go')}
-                    className="browser-go"
-                    title={t(appLanguage, 'go')}
-                    type="submit"
-                  >
-                    <Icon path="M5 12h14M13 6l6 6-6 6" />
                   </button>
                   <button
                     aria-expanded={desktopLayout.browserAgentPanelOpen}
@@ -5447,7 +5450,7 @@ export default function App(): React.JSX.Element {
                     }
                     type="button"
                   >
-                    <BrowserAgentToggleIcon expanded={desktopLayout.browserAgentPanelOpen} />
+                    <BrowserAgentToggleIcon />
                   </button>
                 </form>
               </div>
@@ -5600,6 +5603,14 @@ export default function App(): React.JSX.Element {
                       role="separator"
                     />
                     <div className="browser-agent-toolbar">
+                      <div className="browser-agent-heading">
+                        <strong>{t(appLanguage, 'pageAssistant')}</strong>
+                        <small>
+                          {browserTabTitle(
+                            activeBrowserTab?.pageUrl ?? activeBrowserTab?.address ?? ''
+                          )}
+                        </small>
+                      </div>
                       <button
                         aria-label={t(appLanguage, 'newConversation')}
                         className="browser-agent-toolbar-button"
