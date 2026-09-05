@@ -233,13 +233,10 @@ Settings 当前提供以下 OpenAI-compatible Preset。DeepSeek 是端到端开�
 
 ### 待完成
 
-- [ ] 桌面 Agent Loop 的 Assistant 正文逐 Token 实时输出
 - [ ] Conversation Summary、经用户确认的长期 User Memory，以及跨会话检索
 - [ ] 运行时扫描、选择和加载磁盘上的 `SKILL.md`
-- [ ] 多 Agent/Subagent 编排
 - [ ] MCP 分页、通知、热刷新和 Streamable HTTP Transport
 - [ ] 面向 Intel Mac、Windows 和 Linux 的更广泛桌面发行，以及更完整的干净机器测试矩阵和应用内自动安装更新
-- [ ] 受支持的无头/Docker Server 发行方式
 
 ---
 

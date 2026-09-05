@@ -233,13 +233,10 @@ Local endpoints may omit an API key. External endpoints require a saved key. On 
 
 ### Pending
 
-- [ ] True token-by-token assistant response streaming through the desktop Agent Loop
 - [ ] Conversation summaries, confirmed long-term User Memory, and cross-conversation retrieval
 - [ ] Runtime loading and selection of on-disk `SKILL.md` files
-- [ ] Multi-agent/subagent orchestration
 - [ ] MCP pagination, notifications, hot refresh, and Streamable HTTP transport
 - [ ] Broader desktop distribution for Intel Macs, Windows, and Linux, plus a wider clean-machine test matrix and automatic in-app update installation
-- [ ] Supported headless/Docker server distribution
 
 ---
 
