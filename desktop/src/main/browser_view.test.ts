@@ -411,6 +411,39 @@ describe('VisibleBrowser', () => {
     await expect(browser.control('tab-2', 'home')).rejects.toThrow(/could not be opened/)
   })
 
+  it.each([
+    Object.assign(new Error('cancelled'), { code: 'ERR_ABORTED' }),
+    Object.assign(new Error('cancelled'), { errno: -3 }),
+    new Error('ERR_ABORTED (-3) loading page')
+  ])('distinguishes aborted loads without claiming navigation success', async (error) => {
+    const { browser, createView } = createBrowser()
+    await browser.navigate('tab-1', 'https://example.com')
+    const view = createView.mock.results[0]?.value as FakePageView
+    view.webContents.loadURL.mockRejectedValue(error)
+    await expect(browser.navigate('tab-1', 'https://example.com/next')).rejects.toThrow(
+      'Browser navigation was interrupted.'
+    )
+  })
+
+  it('only reports load completion on did-finish-load, not title or URL changes', async () => {
+    const onTabState = vi.fn()
+    const { browser, createView } = createBrowser({ onTabState })
+    await browser.navigate('tab-1', 'https://example.com')
+    const view = createView.mock.results[0]?.value as FakePageView
+    view.webContents.getURL.mockReturnValue('https://example.com/redirected')
+    view.emit('did-navigate', { preventDefault: vi.fn() })
+    view.emit('page-title-updated', { preventDefault: vi.fn() })
+    expect(onTabState.mock.calls.every(([state]) => !state.loadFinished)).toBe(true)
+    view.emit('did-finish-load', { preventDefault: vi.fn() })
+    expect(onTabState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        tabId: 'tab-1',
+        url: 'https://example.com/redirected',
+        loadFinished: true
+      })
+    )
+  })
+
   it('moves back, forward, reloads, and returns home', async () => {
     const { browser, createView } = createBrowser()
     await browser.navigate('tab-1', 'https://example.com')

@@ -10,6 +10,7 @@ export const BROWSER_CONTROL_ACTIONS = ['back', 'forward', 'reload', 'home'] as 
 export type BrowserControlAction = (typeof BROWSER_CONTROL_ACTIONS)[number]
 
 export type BrowserTabState = {
+  loadFinished?: boolean
   tabId: string
   url: string
   title: string
@@ -451,6 +452,7 @@ export type BrowserPageView = {
         | 'will-redirect'
         | 'will-frame-navigate'
         | 'did-frame-navigate'
+        | 'did-finish-load'
         | 'did-navigate'
         | 'did-navigate-in-page'
         | 'did-start-navigation'
@@ -1231,7 +1233,17 @@ function truncateBrowserText(value: string, limit: number): string {
 async function loadTabUrl(view: BrowserPageView, url: string): Promise<void> {
   try {
     await view.webContents.loadURL(url)
-  } catch {
+  } catch (error) {
+    // Aborted navigation is not a network failure, nor proof the target opened.
+    // Preserve a distinct safe error so tools cannot mistake it for success.
+    if (
+      error instanceof Error &&
+      (('code' in error && error.code === 'ERR_ABORTED') ||
+        ('errno' in error && error.errno === -3) ||
+        /^ERR_ABORTED\b/.test(error.message))
+    ) {
+      throw new Error('Browser navigation was interrupted.')
+    }
     throw new Error('Browser page could not be opened.')
   }
 }
@@ -2535,6 +2547,9 @@ export class VisibleBrowser {
     view.webContents.on('did-navigate', onNavigated)
     view.webContents.on('did-navigate-in-page', onNavigated)
     view.webContents.on('page-title-updated', publish)
+    view.webContents.on('did-finish-load', () => {
+      this.onTabState?.({ ...this.snapshot(tabId, view), loadFinished: true })
+    })
     this.tabs.set(tabId, view)
     return view
   }

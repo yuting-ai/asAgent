@@ -8,6 +8,7 @@ import {
   useState
 } from 'react'
 import ReactMarkdown from 'react-markdown'
+import { beginBrowserNavigationRequest } from './browser_navigation'
 import remarkGfm from 'remark-gfm'
 
 import {
@@ -308,16 +309,8 @@ function formatAutomationExecution(
 }
 
 const MODEL_DELETE_CONFIRM = 'Remove the saved model configuration and API key?'
-const BROWSER_ADDRESS_ERROR =
-  'This address is not allowed. Enter a web address such as example.com.'
-const BROWSER_LOAD_ERROR = 'This page could not be opened.'
 const MAX_BROWSER_TABS = 16
 const BROWSER_AGENT_INPUT_MAX_HEIGHT = 132
-
-function browserNavigationError(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error)
-  return text.includes('could not be opened') ? BROWSER_LOAD_ERROR : BROWSER_ADDRESS_ERROR
-}
 
 function createBrowserTab(id?: string): BrowserTab {
   return {
@@ -1241,7 +1234,22 @@ export default function App(): React.JSX.Element {
   const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([])
   const [activeBrowserTabId, setActiveBrowserTabId] = useState('')
   const [browserSessionReady, setBrowserSessionReady] = useState(false)
-  const [browserError, setBrowserError] = useState<string | null>(null)
+  const [browserFailure, setBrowserFailure] = useState<{ tabId: string; message: string } | null>(
+    null
+  )
+  const browserNavigationRequests = useRef(new Map<string, object>())
+  const browserError = browserFailure?.tabId === activeBrowserTabId ? browserFailure.message : null
+  const setBrowserError = useCallback((message: string | null): void => {
+    setBrowserFailure(message === null ? null : { tabId: activeBrowserTabIdRef.current, message })
+  }, [])
+  const beginBrowserNavigation = useCallback((tabId: string): ((error: unknown) => void) => {
+    setBrowserFailure((current) => (current?.tabId === tabId ? null : current))
+    return beginBrowserNavigationRequest(
+      browserNavigationRequests.current,
+      tabId,
+      setBrowserFailure
+    )
+  }, [])
   const [browserConversations, setBrowserConversations] = useState<ConversationSummary[]>([])
   const [browserMessages, setBrowserMessages] = useState<ConversationMessage[]>([])
   const [browserDraft, setBrowserDraft] = useState('')
@@ -1538,47 +1546,52 @@ export default function App(): React.JSX.Element {
     window.setTimeout(() => {
       browserAddressRef.current?.focus()
     }, 0)
-  }, [])
+  }, [setBrowserError])
 
-  const closeBrowserTab = useCallback((tabId: string): void => {
-    void window.desktop.closeBrowserTab(tabId).catch(() => undefined)
-    setBrowserConversationByTabId((current) => {
-      if (!(tabId in current)) {
-        return current
-      }
-      const next = { ...current }
-      delete next[tabId]
-      return next
-    })
-    const current = browserTabsRef.current
-    const index = current.findIndex((tab) => tab.id === tabId)
-    const remaining = current.filter((tab) => tab.id !== tabId)
-    if (remaining.length === 0) {
-      const created = createBrowserTab()
-      setBrowserTabs([created])
-      setActiveBrowserTabId(created.id)
-      setBrowserError(null)
-      void window.desktop.setBrowserTabConversation(created.id, null).catch(() => undefined)
-      return
-    }
-
-    setBrowserTabs(remaining)
-    if (tabId === activeBrowserTabIdRef.current) {
-      const fallback = remaining[Math.max(0, index - 1)] ?? remaining[0]
-      if (fallback !== undefined) {
-        setActiveBrowserTabId(fallback.id)
-      }
-    }
-    setBrowserError(null)
-  }, [])
-
-  const controlBrowser = useCallback((action: 'back' | 'forward' | 'reload' | 'home'): void => {
-    void window.desktop
-      .controlBrowser(activeBrowserTabIdRef.current, action)
-      .catch((error: unknown) => {
-        setBrowserError(browserNavigationError(error))
+  const closeBrowserTab = useCallback(
+    (tabId: string): void => {
+      browserNavigationRequests.current.delete(tabId)
+      void window.desktop.closeBrowserTab(tabId).catch(() => undefined)
+      setBrowserConversationByTabId((current) => {
+        if (!(tabId in current)) {
+          return current
+        }
+        const next = { ...current }
+        delete next[tabId]
+        return next
       })
-  }, [])
+      const current = browserTabsRef.current
+      const index = current.findIndex((tab) => tab.id === tabId)
+      const remaining = current.filter((tab) => tab.id !== tabId)
+      if (remaining.length === 0) {
+        const created = createBrowserTab()
+        setBrowserTabs([created])
+        setActiveBrowserTabId(created.id)
+        setBrowserError(null)
+        void window.desktop.setBrowserTabConversation(created.id, null).catch(() => undefined)
+        return
+      }
+
+      setBrowserTabs(remaining)
+      if (tabId === activeBrowserTabIdRef.current) {
+        const fallback = remaining[Math.max(0, index - 1)] ?? remaining[0]
+        if (fallback !== undefined) {
+          setActiveBrowserTabId(fallback.id)
+        }
+      }
+      setBrowserError(null)
+    },
+    [setBrowserError]
+  )
+
+  const controlBrowser = useCallback(
+    (action: 'back' | 'forward' | 'reload' | 'home'): void => {
+      const tabId = activeBrowserTabIdRef.current
+      const reportError = beginBrowserNavigation(tabId)
+      void window.desktop.controlBrowser(tabId, action).catch(reportError)
+    },
+    [beginBrowserNavigation]
+  )
 
   function revealScrollbar(area: ScrollArea): void {
     setVisibleScrollbar(area)
@@ -2322,6 +2335,10 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     return window.desktop.onBrowserTabState((state) => {
+      if (state.loadFinished) {
+        browserNavigationRequests.current.delete(state.tabId)
+        setBrowserFailure((current) => (current?.tabId === state.tabId ? null : current))
+      }
       setBrowserTabs((current) => {
         const existing = current.find((tab) => tab.id === state.tabId)
         if (existing === undefined) {
@@ -2487,11 +2504,8 @@ export default function App(): React.JSX.Element {
   const canBookmark = /^https?:\/\//.test(bookmarkUrl) && bookmarksReady && !bookmarkBusy
   async function openBookmark(url: string): Promise<void> {
     setBookmarksOpen(false)
-    try {
-      await window.desktop.navigateBrowser(activeBrowserTabId, url)
-    } catch {
-      setBrowserError(t(appLanguage, 'bookmarkOpenError'))
-    }
+    const reportError = beginBrowserNavigation(activeBrowserTabId)
+    await window.desktop.navigateBrowser(activeBrowserTabId, url).catch(reportError)
   }
 
   function selectBrowserTab(tabId: string): void {
@@ -2518,18 +2532,10 @@ export default function App(): React.JSX.Element {
     const targetUrl = isLikelyWebAddress(address)
       ? address
       : resolveSearchQuery(address, browserSearchEngine)
-    try {
-      const opened = await window.desktop.navigateBrowser(activeBrowserTabId, targetUrl)
-      setBrowserTabs((current) =>
-        current.map((tab) =>
-          tab.id === activeBrowserTabId
-            ? { ...tab, address: opened, title: browserTabTitle(opened) }
-            : tab
-        )
-      )
-    } catch (error) {
-      setBrowserError(browserNavigationError(error))
-    }
+    const reportError = beginBrowserNavigation(activeBrowserTabId)
+    // Main publishes the actual URL (including redirects); an old promise must
+    // not overwrite a newer navigation's address or title.
+    await window.desktop.navigateBrowser(activeBrowserTabId, targetUrl).catch(reportError)
   }
 
   function setRunActivityWaiting(runId: string, label: string, detail: string | null): void {
@@ -3781,9 +3787,8 @@ export default function App(): React.JSX.Element {
       .setBrowserTabConversation(created.id, conversationId)
       .catch(() => setErrorMessage('The conversation could not be opened.'))
     if (conversation.last_page_url !== null) {
-      void window.desktop.navigateBrowser(created.id, conversation.last_page_url).catch((error) => {
-        setBrowserError(browserNavigationError(error))
-      })
+      const reportError = beginBrowserNavigation(created.id)
+      void window.desktop.navigateBrowser(created.id, conversation.last_page_url).catch(reportError)
     }
   }
 

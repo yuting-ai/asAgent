@@ -424,6 +424,7 @@ interface DesktopBridge {
   onToolApprovalError(callback: (error: RunStreamError) => void): () => void
   onBrowserTabState(
     callback: (state: {
+      loadFinished?: boolean
       tabId: string
       url: string
       title: string

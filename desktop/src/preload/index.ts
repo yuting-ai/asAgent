@@ -538,6 +538,7 @@ const desktopBridge = {
   },
   onBrowserTabState: (
     callback: (state: {
+      loadFinished?: boolean
       tabId: string
       url: string
       title: string
@@ -548,6 +549,7 @@ const desktopBridge = {
     const listener = (
       _event: Electron.IpcRendererEvent,
       state: {
+        loadFinished?: boolean
         tabId: string
         url: string
         title: string
