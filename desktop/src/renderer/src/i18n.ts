@@ -16,6 +16,19 @@ export function getStoredAppLanguage(): AppLanguage {
 
 export const TRANSLATIONS = {
   en: {
+    retryBookmarks: 'Retry',
+    bookmarkOptions: 'Bookmark options',
+    bookmarks: 'Bookmarks',
+    searchBookmarks: 'Search bookmarks',
+    addBookmark: 'Bookmark this page',
+    removeBookmark: 'Remove bookmark',
+    bookmarkName: 'Bookmark name',
+    editBookmark: 'Rename',
+    noBookmarks: 'No bookmarks yet. Use the star to save a page.',
+    noBookmarksMatch: 'No matching bookmarks.',
+    bookmarkError: 'Bookmarks could not be loaded or saved. Please try again.',
+    bookmarkOpenError: 'The bookmarked page could not be opened.',
+
     // Workspace navigation and file preview
     showList: 'Show',
     hideList: 'Hide',
@@ -419,6 +432,19 @@ export const TRANSLATIONS = {
     activityActionsUnit: 'actions'
   },
   'zh-Hans': {
+    retryBookmarks: '重试',
+    bookmarkOptions: '收藏选项',
+    bookmarks: '收藏夹',
+    searchBookmarks: '搜索收藏',
+    addBookmark: '收藏当前网页',
+    removeBookmark: '取消收藏',
+    bookmarkName: '收藏名称',
+    editBookmark: '重命名',
+    noBookmarks: '暂无收藏，点击星标收藏网页。',
+    noBookmarksMatch: '没有匹配的收藏。',
+    bookmarkError: '收藏加载或保存失败，请重试。',
+    bookmarkOpenError: '无法打开收藏的网页。',
+
     // Workspace navigation and file preview
     showList: '显示',
     hideList: '隐藏',

@@ -171,7 +171,15 @@ describe('BrowserPageBridge', () => {
       }
     }))
 
+    const inputCurrentPage = vi.fn(async () => ({
+      observation: { before: null, after: null, changed: null, status: 'unavailable' as const },
+      action: 'input_sent' as const,
+      url: 'https://example.com/',
+      title: 'Editor',
+      verified: false as const
+    }))
     const bridge = new BrowserPageBridge({
+      inputCurrentPage,
       readCurrentPage,
       readCurrentPdf,
       validateCurrentPdf,
@@ -189,6 +197,39 @@ describe('BrowserPageBridge', () => {
     await expect(bridge.start()).resolves.toEqual({
       baseUrl: 'http://127.0.0.1:43124',
       token: 'bridge-token'
+    })
+
+    for (const [headers, input, status] of [
+      [{}, { url: 'https://example.com/', kind: 'text', value: 'Hello' }, 401],
+      [
+        { authorization: 'Bearer bridge-token' },
+        { url: 'https://example.com/', kind: 'key', value: 'Meta+L' },
+        400
+      ],
+      [
+        { authorization: 'Bearer bridge-token' },
+        { url: 'https://example.com/', kind: 'text', value: 'Hello' },
+        200
+      ]
+    ] as const) {
+      const response = createFakeResponse()
+      requestHandler?.(
+        createFakeRequest(
+          'POST',
+          '/input-current-page',
+          headers,
+          JSON.stringify({ tab_id: 'tab-1', input })
+        ),
+        response
+      )
+      await vi.waitFor(() => expect(response.end).toHaveBeenCalled())
+      expect(response.statusCode).toBe(status)
+    }
+    expect(inputCurrentPage).toHaveBeenCalledTimes(1)
+    expect(inputCurrentPage).toHaveBeenCalledWith('tab-1', {
+      url: 'https://example.com/',
+      kind: 'text',
+      value: 'Hello'
     })
 
     const unauthorized = createFakeResponse()

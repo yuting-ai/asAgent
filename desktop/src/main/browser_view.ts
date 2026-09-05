@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import type { Session, WebContentsViewConstructorOptions } from 'electron'
+import type { Session, WebContentsViewConstructorOptions, KeyboardInputEvent } from 'electron'
 
 import { parseBrowserWebUrl } from './external_url'
 
@@ -27,6 +27,176 @@ export type BrowserPdfDocument = {
   documentId: string
   data: Buffer
 }
+
+export type BrowserInputRequest = {
+  url: string
+  kind: 'text' | 'key'
+  value: string
+}
+export type BrowserInputResult = {
+  action: 'input_sent'
+  url: string
+  title: string
+  verified: false
+  observation: {
+    before: BrowserEditorObservation | null
+    after: BrowserEditorObservation | null
+    changed: boolean | null
+    status: 'observed' | 'page_changed' | 'tab_changed' | 'unavailable'
+  }
+}
+export type BrowserEditorObservation = {
+  frames: Array<{ frameIndex: number; state: unknown }>
+}
+const EDITOR_KEYS = new Set([
+  'Enter',
+  'Tab',
+  'Escape',
+  'Backspace',
+  'Delete',
+  'ArrowLeft',
+  'ArrowRight',
+  'ArrowUp',
+  'ArrowDown',
+  'Home',
+  'End',
+  'SelectAll',
+  'Undo',
+  'Redo',
+  'Shift+Enter',
+  'Shift+Tab'
+])
+export function validBrowserInput(value: unknown): value is BrowserInputRequest {
+  if (typeof value !== 'object' || value === null) return false
+  const input = value as Record<string, unknown>
+  return (
+    Object.keys(input).sort().join(',') === 'kind,url,value' &&
+    typeof input.url === 'string' &&
+    input.url.length <= 8192 &&
+    typeof input.value === 'string' &&
+    ((input.kind === 'text' && input.value.length > 0 && input.value.length <= 10000) ||
+      (input.kind === 'key' && EDITOR_KEYS.has(input.value)))
+  )
+}
+
+// Sheets starts an edit from keyboard events; insertText alone can change its
+// staging contenteditable without updating the spreadsheet model. Keep the
+// established insertion path for other editors, including Google Docs.
+export async function dispatchBrowserEditorInput(
+  contents: Pick<BrowserPageView['webContents'], 'insertText' | 'sendInputEvent'>,
+  input: BrowserInputRequest
+): Promise<void> {
+  const page = new URL(input.url)
+  if (input.kind === 'text') {
+    if (page.hostname === 'docs.google.com' && page.pathname.startsWith('/spreadsheets/')) {
+      for (const character of input.value.replace(/\r\n?/g, '\n')) {
+        if (character === '\n' || character === '\t') {
+          await dispatchBrowserEditorInput(contents, {
+            ...input,
+            kind: 'key',
+            value: character === '\n' ? 'Enter' : 'Tab'
+          })
+        } else {
+          contents.sendInputEvent({ type: 'char', keyCode: character })
+        }
+      }
+    } else {
+      await contents.insertText(input.value)
+    }
+    return
+  }
+  let keyCode = input.value
+  const modifiers: NonNullable<KeyboardInputEvent['modifiers']> = []
+  if (keyCode.startsWith('Shift+')) {
+    modifiers.push('shift')
+    keyCode = keyCode.slice(6)
+  }
+  if (['SelectAll', 'Undo', 'Redo'].includes(keyCode)) {
+    modifiers.push(process.platform === 'darwin' ? 'meta' : 'control')
+    if (keyCode === 'Redo') modifiers.push('shift')
+    keyCode = keyCode === 'SelectAll' ? 'A' : 'Z'
+  }
+  keyCode = keyCode.replace('Arrow', '')
+  contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
+  // Electron does not synthesize keypress from keyDown/keyUp. Rich editors
+  // that commit on keypress need the native carriage-return character too.
+  if (keyCode === 'Enter') contents.sendInputEvent({ type: 'char', keyCode: '\r', modifiers })
+  contents.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
+}
+
+// Extract only editor controls and visible status text, never whole-page HTML/scripts.
+export const BROWSER_EDITOR_OBSERVATION_SCRIPT = `(() => {
+  const clip = (value, limit = 500) => String(value || '').slice(0, limit);
+  const visible = el => el instanceof HTMLElement && el.getClientRects().length > 0 &&
+    getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none';
+  const label = el => clip(el.getAttribute('aria-label') ||
+    (el.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean)
+      .map(id => document.getElementById(id)?.innerText || '').join(' ') ||
+    el.getAttribute('title') || el.getAttribute('placeholder') || '', 160);
+  const describe = el => {
+    if (!(el instanceof HTMLElement)) return null;
+    const type = el instanceof HTMLInputElement ? el.type : '';
+    const sensitive = ['password','hidden','file'].includes(type) ||
+      /password|one-time-code|cc-/.test(el.getAttribute('autocomplete') || '');
+    const field = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+    const editable = !sensitive && !el.disabled && !el.readOnly &&
+      (field || el.isContentEditable);
+    const result = { tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '',
+      name: label(el), id: clip(el.id, 100), editable, redacted: sensitive };
+    if (sensitive) return result;
+    if (field || el.isContentEditable) {
+      const value = field ? el.value : el.innerText;
+      result.text = clip(value);
+      result.textTruncated = String(value || '').length > 500;
+      if (field && typeof el.selectionStart === 'number') {
+        result.selection = { start: el.selectionStart, end: el.selectionEnd };
+      } else if (el.isContentEditable) {
+        const selection = window.getSelection();
+        if (selection?.anchorNode && el.contains(selection.anchorNode)) {
+          result.selection = { collapsed: selection.isCollapsed,
+            anchorOffset: selection.anchorOffset, focusOffset: selection.focusOffset };
+        }
+      }
+    }
+    return result;
+  };
+  let active = document.activeElement;
+  while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+  const controls = [];
+  for (const el of document.querySelectorAll('input,textarea,[contenteditable="true"],[role="textbox"],[role="gridcell"][aria-selected="true"]')) {
+    if (!visible(el)) continue;
+    const info = describe(el);
+    if (!info || info.redacted) continue;
+    const identity = [info.name, info.id, el.className].join(' ');
+    // Keep selection/navigation fields and rich editors, excluding unrelated toolbar inputs.
+    if (el === active || /name.?box|formula|cell-input/i.test(identity) ||
+        el.isContentEditable || el.getAttribute('aria-selected') === 'true') {
+      if (el.getAttribute('aria-selected') === 'true') info.text = clip(el.innerText);
+      controls.push(info);
+    }
+    if (controls.length >= 6) break;
+  }
+  const statuses = [];
+  for (const el of document.querySelectorAll('[role="status"],[aria-live="polite"]')) {
+    if (!visible(el)) continue;
+    const text = clip(el.innerText, 240).trim();
+    if (text && !statuses.includes(text)) statuses.push(text);
+    if (statuses.length >= 3) break;
+  }
+  return { focused: document.hasFocus() ? describe(active) : null, controls, statuses };
+})()`
+
+const FOCUSED_EDITOR_SCRIPT = `(() => {
+  if (!document.hasFocus()) return false;
+  let el = document.activeElement;
+  while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+  if (!(el instanceof HTMLElement) || el.closest('[inert]')) return false;
+  if (el instanceof HTMLInputElement) {
+    return !el.disabled && !el.readOnly && ['text','search','email','url','tel','number'].includes(el.type);
+  }
+  if (el instanceof HTMLTextAreaElement) return !el.disabled && !el.readOnly;
+  return el.isContentEditable;
+})()`
 
 export type BrowserClickResult = {
   action: 'clicked'
@@ -147,56 +317,82 @@ type InteractionTargetRecord = {
   tag: string
 }
 
-const BROWSER_PAGE_EXTRACT_SCRIPT = `(() => {
-  const STRUCTURED_TEXT_LIMIT = 8 * 1024
-  function isVisible(element) {
-    if (!(element instanceof HTMLElement)) {
-      return false
+const PAGE_VISIBILITY_SCRIPT = `
+  function visible(element) {
+    if (!(element instanceof HTMLElement)) return false;
+    if (!element.getClientRects().length && getComputedStyle(element).display !== 'contents') return false;
+    for (let node = element; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (node.hidden || style.display === 'none' || style.visibility === 'hidden' ||
+          style.visibility === 'collapse' || Number(style.opacity) === 0 ||
+          style.contentVisibility === 'hidden') return false;
     }
-    const style = window.getComputedStyle(element)
-    return (
-      style.display !== 'none' &&
-      style.visibility !== 'hidden' &&
-      Number(style.opacity) !== 0
-    )
+    return true;
   }
-  function normalizedText(value) {
-    return String(value || '').replace(/\\s+/g, ' ').trim()
-  }
-  function structuredValue(element) {
-    const label = normalizedText(
-      element.getAttribute('aria-label') || element.getAttribute('aria-valuetext'),
-    )
-    const text = normalizedText(element.innerText || element.textContent)
-    if (label && text && label !== text) {
-      return label + ': ' + text
+`
+
+export const BROWSER_FRAME_INDEX_SCRIPT = `(() => {
+  try {
+    for (let index = 0; index < parent.length; index++) {
+      if (parent[index] === window) return index;
     }
-    return label || text
+  } catch { /* A detached frame has no readable owner. */ }
+  return -1;
+})()`
+
+export function browserFrameVisibilityScript(index: number): string {
+  return `(() => {
+    ${PAGE_VISIBILITY_SCRIPT}
+    const child = window.frames[${index}];
+    if (!child) return false;
+    return [...document.querySelectorAll('iframe, frame')].some(element =>
+      element.contentWindow === child && visible(element) &&
+      element.getBoundingClientRect().width > 0 && element.getBoundingClientRect().height > 0);
+  })()`
+}
+
+export const BROWSER_PAGE_EXTRACT_SCRIPT = `(() => {
+  ${PAGE_VISIBILITY_SCRIPT}
+  const LIMIT = 32 * 1024;
+  const EXCLUDED = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'HEAD']);
+  function visibleText(root, limit = LIMIT) {
+    const parts = [];
+    let length = 0;
+    let visited = 0;
+    function walk(node) {
+      if (length >= limit || ++visited > 25000) return;
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = (node.textContent || '').slice(0, limit - length);
+        parts.push(text); length += text.length;
+        return;
+      }
+      if (!(node instanceof HTMLElement) || EXCLUDED.has(node.tagName) || !visible(node)) return;
+      const block = !['inline', 'contents'].includes(getComputedStyle(node).display);
+      if (block || node.tagName === 'BR') parts.push('\\n');
+      for (const child of node.childNodes) walk(child);
+      if (block) parts.push('\\n');
+    }
+    walk(root);
+    return parts.join('').replace(/[ \\t]+/g, ' ').replace(/ *\\n */g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim().slice(0, limit);
   }
-  const structuredValues = []
-  const seen = new Set()
+  const values = [];
+  const seen = new Set();
+  let length = 0;
   for (const element of document.querySelectorAll(
-    'table th, table td, [role="gridcell"], [role="cell"], [role="columnheader"], [role="rowheader"], [aria-valuetext]',
+    'table th, table td, [role="gridcell"], [role="cell"], [role="columnheader"], [role="rowheader"], [aria-valuetext]'
   )) {
-    if (!isVisible(element)) {
-      continue
-    }
-    const value = structuredValue(element)
-    if (value && !seen.has(value)) {
-      seen.add(value)
-      structuredValues.push(value)
-    }
-    if (structuredValues.join('\\n').length >= STRUCTURED_TEXT_LIMIT) {
-      break
-    }
+    if (!visible(element)) continue;
+    const label = String(element.getAttribute('aria-label') || element.getAttribute('aria-valuetext') || '').slice(0, 8192).trim();
+    const text = visibleText(element, 8192);
+    const value = label && text && label !== text ? label + ': ' + text : label || text;
+    if (value && !seen.has(value)) { seen.add(value); values.push(value); length += value.length; }
+    if (length >= 8192) break;
   }
-  const title = String(document.title || '')
-  const text = String(document.body && document.body.innerText ? document.body.innerText : '')
   return {
-    title,
-    text,
-    structured_text: structuredValues.join('\\n').slice(0, STRUCTURED_TEXT_LIMIT),
-  }
+    title: String(document.title || ''),
+    text: visibleText(document.body),
+    structured_text: values.join('\\n').slice(0, 8192)
+  };
 })()`
 
 const BROWSER_REMOVE_POINTER_SCRIPT = `(() => {
@@ -235,13 +431,19 @@ export type BrowserPageView = {
     reload(): void
     executeJavaScript(code: string): Promise<unknown>
     mainFrame: BrowserFrame
-    sendInputEvent(event: {
-      type: 'mouseMove' | 'mouseDown' | 'mouseUp'
-      x: number
-      y: number
-      button?: 'left'
-      clickCount?: number
-    }): void
+    focus(): void
+    insertText(text: string): Promise<void>
+    sendInputEvent(
+      event:
+        | KeyboardInputEvent
+        | {
+            type: 'mouseMove' | 'mouseDown' | 'mouseUp'
+            x: number
+            y: number
+            button?: 'left'
+            clickCount?: number
+          }
+    ): void
     setWindowOpenHandler(handler: (details?: { url?: string }) => { action: 'deny' }): void
     on(
       event:
@@ -265,6 +467,7 @@ export type BrowserPageView = {
 }
 
 export type BrowserHostWindow = {
+  isFocused(): boolean
   isDestroyed(): boolean
   contentView: {
     children: readonly unknown[]
@@ -1296,7 +1499,7 @@ export class VisibleBrowser {
       throw new Error('current browser tab is not visible')
     }
 
-    const frames = this.framesFor(view)
+    const frames = await this.readableFrames(view.webContents.mainFrame)
     const textParts: string[] = []
     let title = ''
 
@@ -1747,6 +1950,89 @@ export class VisibleBrowser {
     }
   }
 
+  async inputCurrentPage(tabId: string, input: BrowserInputRequest): Promise<BrowserInputResult> {
+    this.assertNotDisposed()
+    const id = parseBrowserTabId(tabId)
+    this.assertVisibleTab(id)
+    if (!validBrowserInput(input)) throw new Error('target is not editable')
+    const view = this.tabs.get(id)!
+    const url = view.webContents.getURL()
+    if (url !== input.url) throw new Error('page changed; inspect interactive elements again')
+    if (!this.hostWindow?.isFocused()) throw new Error('current browser tab is not visible')
+    // Focus the page WebContents, preserving its current editor and selection.
+    view.webContents.focus()
+    let editor: BrowserFrame | undefined
+    for (const frame of this.framesFor(view)) {
+      if (frame.isDestroyed()) continue
+      if ((await frame.executeJavaScript(FOCUSED_EDITOR_SCRIPT)) === true) {
+        editor = frame
+        break
+      }
+    }
+    this.assertVisibleTab(id)
+    if (view.webContents.getURL() !== url || editor?.isDestroyed()) {
+      throw new Error('page changed; inspect interactive elements again')
+    }
+    if (!this.hostWindow?.isFocused()) throw new Error('current browser tab is not visible')
+    if (!editor) throw new Error('target is not editable')
+    const before = await this.observeEditor(view)
+    this.assertVisibleTab(id)
+    if (view.webContents.getURL() !== url)
+      throw new Error('page changed; inspect interactive elements again')
+    if (
+      !this.hostWindow?.isFocused() ||
+      (await editor.executeJavaScript(FOCUSED_EDITOR_SCRIPT)) !== true
+    ) {
+      throw new Error('target is not editable')
+    }
+    await dispatchBrowserEditorInput(view.webContents, input)
+    this.interactionSnapshots.delete(id)
+    // Observation failure must not turn a dispatched edit into a retryable input failure.
+    await delay(120)
+    let status: BrowserInputResult['observation']['status'] = 'observed'
+    let after: BrowserEditorObservation | null = null
+    if (this.visibleTabId !== id) status = 'tab_changed'
+    else if (view.webContents.getURL() !== url) status = 'page_changed'
+    else {
+      after = await this.observeEditor(view)
+      if (this.visibleTabId !== id) {
+        status = 'tab_changed'
+        after = null
+      } else if (view.webContents.getURL() !== url) {
+        status = 'page_changed'
+        after = null
+      } else if (!after) status = 'unavailable'
+    }
+    return {
+      action: 'input_sent',
+      url,
+      title: view.webContents.getTitle(),
+      verified: false,
+      observation: {
+        before,
+        after,
+        status,
+        changed: before && after ? JSON.stringify(before) !== JSON.stringify(after) : null
+      }
+    }
+  }
+
+  private async observeEditor(view: BrowserPageView): Promise<BrowserEditorObservation | null> {
+    const frames: BrowserEditorObservation['frames'] = []
+    try {
+      for (const [frameIndex, frame] of this.framesFor(view).entries()) {
+        if (frame.isDestroyed()) continue
+        const state = await frame.executeJavaScript(BROWSER_EDITOR_OBSERVATION_SCRIPT)
+        if (state && typeof state === 'object' && 'controls' in state)
+          frames.push({ frameIndex, state })
+      }
+    } catch {
+      // Navigation can destroy frames; unavailable observations are explicit, not input failures.
+      return null
+    }
+    return frames.length ? { frames } : null
+  }
+
   async fillCurrentPage(
     tabId: string,
     targetId: string,
@@ -2115,6 +2401,30 @@ export class VisibleBrowser {
     if (this.hostWindow !== undefined && !this.hostWindow.isDestroyed()) {
       this.hostWindow.contentView.removeChildView(view)
     }
+  }
+
+  private async readableFrames(root: BrowserFrame): Promise<BrowserFrame[]> {
+    const frames: BrowserFrame[] = []
+    const visit = async (frame: BrowserFrame): Promise<void> => {
+      if (frame.isDestroyed()) return
+      frames.push(frame)
+      for (const child of frame.frames) {
+        if (child.isDestroyed()) continue
+        try {
+          // WindowProxy identity is available across origins; inspect its owner
+          // in the parent document, without accessing cross-origin DOM or URLs.
+          const index = await child.executeJavaScript(BROWSER_FRAME_INDEX_SCRIPT)
+          if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) continue
+          if ((await frame.executeJavaScript(browserFrameVisibilityScript(index))) === true) {
+            await visit(child)
+          }
+        } catch {
+          /* Navigation/detachment makes this subtree unavailable. */
+        }
+      }
+    }
+    await visit(root)
+    return frames
   }
 
   private framesFor(view: BrowserPageView): BrowserFrame[] {

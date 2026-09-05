@@ -318,6 +318,11 @@ interface DesktopBridge {
   navigateBrowser(tabId: string, url: string): Promise<string>
   closeBrowserTab(tabId: string): Promise<void>
   controlBrowser(tabId: string, action: 'back' | 'forward' | 'reload' | 'home'): Promise<void>
+  listBrowserBookmarks(): Promise<Array<{ url: string; title: string }>>
+  updateBrowserBookmark(
+    action: 'save' | 'remove',
+    bookmark: { url: string; title: string }
+  ): Promise<Array<{ url: string; title: string }>>
   getBrowserSession(): Promise<BrowserSessionSnapshot>
   setBrowserTabConversation(tabId: string, conversationId: string | null): Promise<void>
   getAppVersion(): Promise<string>

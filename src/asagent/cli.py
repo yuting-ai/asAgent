@@ -126,6 +126,7 @@ from asagent.tools.approval import PendingToolApprovalPolicy, ToolApprovalPolicy
 from asagent.tools.automation_save import AutomationPlanUpdateTool, AutomationSaveTool
 from asagent.tools.browser_click import BrowserClickTool
 from asagent.tools.browser_fill import BrowserFillTool
+from asagent.tools.browser_input import BrowserInputTool
 from asagent.tools.browser_inspect_interactive import BrowserInspectInteractiveTool
 from asagent.tools.browser_navigate import BrowserNavigateTool
 from asagent.tools.browser_read_current_page import BrowserReadCurrentPageTool
@@ -408,6 +409,7 @@ async def _register_browser_tools(
             tab_id=tab_id,
         ),
     )
+    registry.register(BrowserInputTool(client=browser_page_client, tab_id=tab_id))
     registry.register(
         BrowserFillTool(
             client=browser_page_client,

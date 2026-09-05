@@ -3,6 +3,9 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 
 import {
   BROWSER_OPERATION_ERRORS,
+  validBrowserInput,
+  type BrowserInputRequest,
+  type BrowserInputResult,
   BROWSER_SELECT_VALUE_LIMIT,
   BROWSER_TARGET_ID_LIMIT,
   normalizeBrowserOperationError,
@@ -19,6 +22,7 @@ import {
 } from './browser_view'
 
 export type BrowserPageBridgeOptions = {
+  inputCurrentPage?: (tabId: string, input: BrowserInputRequest) => Promise<BrowserInputResult>
   readCurrentPage: (tabId: string) => Promise<BrowserPageContent>
   readCurrentPdf: (tabId: string, signal: AbortSignal) => Promise<BrowserPdfDocument>
   validateCurrentPdf: (tabId: string, documentId: string) => void
@@ -88,6 +92,7 @@ function isKnownOperationError(detail: string): boolean {
 }
 
 export class BrowserPageBridge {
+  private readonly inputCurrentPage: BrowserPageBridgeOptions['inputCurrentPage']
   private readonly readCurrentPage: (tabId: string) => Promise<BrowserPageContent>
   private readonly readCurrentPdf: BrowserPageBridgeOptions['readCurrentPdf']
   private readonly validateCurrentPdf: BrowserPageBridgeOptions['validateCurrentPdf']
@@ -125,6 +130,7 @@ export class BrowserPageBridge {
   private info: BrowserPageBridgeInfo | undefined
 
   constructor(options: BrowserPageBridgeOptions) {
+    this.inputCurrentPage = options.inputCurrentPage
     this.readCurrentPage = options.readCurrentPage
     this.readCurrentPdf = options.readCurrentPdf
     this.validateCurrentPdf = options.validateCurrentPdf
@@ -207,6 +213,7 @@ export class BrowserPageBridge {
           request.url !== '/inspect-interactive' &&
           request.url !== '/navigate-current-page' &&
           request.url !== '/click-current-page' &&
+          request.url !== '/input-current-page' &&
           request.url !== '/fill-current-page' &&
           request.url !== '/select-current-page' &&
           request.url !== '/submit-current-page' &&
@@ -315,6 +322,17 @@ export class BrowserPageBridge {
           return
         }
         const result = await this.waitForCurrentPage(tabId.trim(), seconds)
+        writeJson(response, 200, result)
+        return
+      }
+
+      if (request.url === '/input-current-page') {
+        const input = record['input']
+        if (!validBrowserInput(input) || !this.inputCurrentPage) {
+          writeJson(response, 400, { detail: 'invalid request' })
+          return
+        }
+        const result = await this.inputCurrentPage(tabId.trim(), input)
         writeJson(response, 200, result)
         return
       }

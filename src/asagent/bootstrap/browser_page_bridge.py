@@ -184,6 +184,24 @@ class BrowserPageBridgeClient:
         )
         return _wait_result_from_payload(payload)
 
+    async def input_current_page(
+        self, tab_id: str, *, url: str, kind: str, value: str
+    ) -> dict[str, object]:
+        payload = await self._post_json(
+            "/input-current-page",
+            {"tab_id": tab_id, "input": {"url": url, "kind": kind, "value": value}},
+            failure_message="target is not editable",
+        )
+        if (
+            not isinstance(payload, dict)
+            or payload.get("action") != "input_sent"
+            or payload.get("verified") is not False
+            or not isinstance(payload.get("url"), str)
+            or not isinstance(payload.get("title"), str)
+        ):
+            raise BrowserPageBridgeError("target is not editable")
+        return payload
+
     async def fill_current_page(
         self, tab_id: str, target_id: str, value: str
     ) -> BrowserFillResult:

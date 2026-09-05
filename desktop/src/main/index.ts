@@ -1,3 +1,4 @@
+import { BrowserBookmarkStore } from './browser_bookmarks'
 import {
   app,
   BrowserWindow,
@@ -518,6 +519,9 @@ app.whenReady().then(async () => {
     onTabState: noteBrowserTabState
   })
 
+  const browserBookmarks = new BrowserBookmarkStore(
+    join(desktopAppHome(), 'browser-bookmarks.json')
+  )
   browserSessionStore = new BrowserSessionStore(join(desktopAppHome(), BROWSER_SESSION_FILE_NAME))
   try {
     await browserSessionStore.restore(visibleBrowser)
@@ -561,6 +565,10 @@ app.whenReady().then(async () => {
         throw new Error('current browser tab is not visible')
       }
       return visibleBrowser.clickCurrentPage(tabId, targetId)
+    },
+    inputCurrentPage: (tabId, input) => {
+      if (visibleBrowser === undefined) throw new Error('current browser tab is not visible')
+      return visibleBrowser.inputCurrentPage(tabId, input)
     },
     fillCurrentPage: (tabId, targetId, value) => {
       if (visibleBrowser === undefined) {
@@ -709,6 +717,17 @@ app.whenReady().then(async () => {
       .then(() => {
         scheduleBrowserSessionSave()
       })
+  })
+
+  ipcMain.handle('desktop:list-browser-bookmarks', (event) => {
+    if (event.senderFrame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(event.senderFrame.url)
+    return browserBookmarks.list()
+  })
+  ipcMain.handle('desktop:update-browser-bookmark', (event, action: unknown, value: unknown) => {
+    if (event.senderFrame === null) throw new Error('Untrusted renderer IPC request.')
+    assertTrustedRenderer(event.senderFrame.url)
+    return browserBookmarks.update(action, value)
   })
 
   ipcMain.handle('desktop:get-browser-session', async (event) => {

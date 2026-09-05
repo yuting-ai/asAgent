@@ -226,6 +226,7 @@ type FilePreviewResult = {
 }
 
 type BrowserTab = {
+  pageUrl?: string
   id: string
   title: string
   address: string
@@ -1194,6 +1195,38 @@ export default function App(): React.JSX.Element {
   const [isCreatingNewTask, setIsCreatingNewTask] = useState(false)
   const [showTaskPrompt, setShowTaskPrompt] = useState(false)
   const [hasCopiedOutput, setHasCopiedOutput] = useState(false)
+  const [bookmarks, setBookmarks] = useState<Array<{ url: string; title: string }>>([])
+  const [bookmarksReady, setBookmarksReady] = useState(false)
+  const [bookmarksOpen, setBookmarksOpen] = useState(false)
+  const [bookmarkQuery, setBookmarkQuery] = useState('')
+  const [bookmarkEdit, setBookmarkEdit] = useState<{ url: string; title: string } | null>(null)
+  const [bookmarkBusy, setBookmarkBusy] = useState(false)
+  const [bookmarkError, setBookmarkError] = useState(false)
+  useEffect(() => {
+    void window.desktop
+      .listBrowserBookmarks()
+      .then((items) => {
+        setBookmarks(items)
+        setBookmarksReady(true)
+      })
+      .catch(() => setBookmarkError(true))
+  }, [])
+  async function updateBookmark(
+    action: 'save' | 'remove',
+    bookmark: { url: string; title: string }
+  ): Promise<void> {
+    setBookmarkBusy(true)
+    setBookmarkError(false)
+    try {
+      setBookmarks(await window.desktop.updateBrowserBookmark(action, bookmark))
+      setBookmarkEdit(null)
+    } catch {
+      setBookmarkError(true)
+      setBookmarksOpen(true)
+    } finally {
+      setBookmarkBusy(false)
+    }
+  }
   const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([])
   const [activeBrowserTabId, setActiveBrowserTabId] = useState('')
   const [browserSessionReady, setBrowserSessionReady] = useState(false)
@@ -1733,6 +1766,7 @@ export default function App(): React.JSX.Element {
             id: tab.tabId,
             title: browserTabTitle(tab.url),
             address: tab.url,
+            pageUrl: tab.url,
             canGoBack: false,
             canGoForward: false
           }))
@@ -2287,6 +2321,7 @@ export default function App(): React.JSX.Element {
               id: state.tabId,
               title: state.title,
               address: state.url,
+              pageUrl: state.url,
               canGoBack: state.canGoBack,
               canGoForward: state.canGoForward
             }
@@ -2303,6 +2338,7 @@ export default function App(): React.JSX.Element {
                 canGoBack: state.canGoBack,
                 canGoForward: state.canGoForward,
                 title: state.title,
+                pageUrl: state.url,
                 address: editing ? tab.address : state.url
               }
             : tab
@@ -2434,6 +2470,18 @@ export default function App(): React.JSX.Element {
 
   const activeBrowserTab =
     browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? browserTabs[0]
+
+  const bookmarkUrl = activeBrowserTab?.pageUrl ?? ''
+  const currentBookmark = bookmarks.find((item) => item.url === bookmarkUrl)
+  const canBookmark = /^https?:\/\//.test(bookmarkUrl) && bookmarksReady && !bookmarkBusy
+  async function openBookmark(url: string): Promise<void> {
+    setBookmarksOpen(false)
+    try {
+      await window.desktop.navigateBrowser(activeBrowserTabId, url)
+    } catch {
+      setBrowserError(t(appLanguage, 'bookmarkOpenError'))
+    }
+  }
 
   function selectBrowserTab(tabId: string): void {
     setActiveBrowserTabId(tabId)
@@ -5333,7 +5381,40 @@ export default function App(): React.JSX.Element {
                       type="text"
                       value={activeBrowserTab?.address ?? ''}
                     />
+                    <button
+                      aria-label={t(
+                        appLanguage,
+                        currentBookmark ? 'removeBookmark' : 'addBookmark'
+                      )}
+                      title={t(appLanguage, currentBookmark ? 'removeBookmark' : 'addBookmark')}
+                      aria-pressed={Boolean(currentBookmark)}
+                      className="browser-nav-button browser-bookmark-star"
+                      disabled={!canBookmark}
+                      type="button"
+                      onClick={() =>
+                        void updateBookmark(
+                          currentBookmark ? 'remove' : 'save',
+                          currentBookmark ?? {
+                            url: bookmarkUrl,
+                            title: (activeBrowserTab?.title || bookmarkUrl).slice(0, 500)
+                          }
+                        )
+                      }
+                    >
+                      {currentBookmark ? '★' : '☆'}
+                    </button>
                   </div>
+                  <button
+                    aria-expanded={bookmarksOpen}
+                    aria-controls="browser-bookmarks"
+                    className="browser-nav-button"
+                    type="button"
+                    title={t(appLanguage, 'bookmarks')}
+                    aria-label={t(appLanguage, 'bookmarks')}
+                    onClick={() => setBookmarksOpen(!bookmarksOpen)}
+                  >
+                    <Icon path="M5 3h14v18l-7-4-7 4V3Z" />
+                  </button>
                   <button
                     aria-label={t(appLanguage, 'go')}
                     className="browser-go"
@@ -5373,6 +5454,143 @@ export default function App(): React.JSX.Element {
               {browserError !== null ? <p className="browser-error">{browserError}</p> : null}
               <div className="browser-body">
                 <div className="browser-surface" ref={browserSurfaceRef} />
+                {bookmarksOpen ? (
+                  <section
+                    id="browser-bookmarks"
+                    className="browser-bookmarks"
+                    aria-label={t(appLanguage, 'bookmarks')}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') {
+                        setBookmarksOpen(false)
+                        browserAddressRef.current?.focus()
+                      }
+                    }}
+                  >
+                    <div className="browser-bookmarks-heading">
+                      <strong>{t(appLanguage, 'bookmarks')}</strong>
+                      <input
+                        aria-label={t(appLanguage, 'searchBookmarks')}
+                        placeholder={t(appLanguage, 'searchBookmarks')}
+                        value={bookmarkQuery}
+                        onChange={(event) => setBookmarkQuery(event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        aria-label={t(appLanguage, 'hideList')}
+                        title={t(appLanguage, 'hideList')}
+                        onClick={() => setBookmarksOpen(false)}
+                      >
+                        <Icon path="m6 6 12 12M6 18 18 6" />
+                      </button>
+                    </div>
+                    {bookmarkError ? (
+                      <p role="alert">
+                        {t(appLanguage, 'bookmarkError')}{' '}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void window.desktop
+                              .listBrowserBookmarks()
+                              .then((items) => {
+                                setBookmarks(items)
+                                setBookmarksReady(true)
+                                setBookmarkError(false)
+                              })
+                              .catch(() => setBookmarkError(true))
+                          }}
+                        >
+                          {t(appLanguage, 'retryBookmarks')}
+                        </button>
+                      </p>
+                    ) : null}
+                    <div className="browser-bookmarks-list">
+                      {bookmarks
+                        .filter((item) =>
+                          `${item.title} ${item.url}`
+                            .toLocaleLowerCase()
+                            .includes(bookmarkQuery.toLocaleLowerCase())
+                        )
+                        .map((item) => (
+                          <div className="browser-bookmark-item" key={item.url}>
+                            {bookmarkEdit?.url === item.url ? (
+                              <form
+                                onSubmit={(event) => {
+                                  event.preventDefault()
+                                  void updateBookmark('save', bookmarkEdit)
+                                }}
+                              >
+                                <input
+                                  aria-label={t(appLanguage, 'bookmarkName')}
+                                  maxLength={500}
+                                  value={bookmarkEdit.title}
+                                  onChange={(event) =>
+                                    setBookmarkEdit({ ...bookmarkEdit, title: event.target.value })
+                                  }
+                                />
+                                <button
+                                  disabled={bookmarkBusy || !bookmarkEdit.title.trim()}
+                                  type="submit"
+                                >
+                                  {t(appLanguage, 'save')}
+                                </button>
+                                <button type="button" onClick={() => setBookmarkEdit(null)}>
+                                  {t(appLanguage, 'cancel')}
+                                </button>
+                              </form>
+                            ) : (
+                              <>
+                                <button
+                                  className="browser-bookmark-link"
+                                  title={item.url}
+                                  type="button"
+                                  onClick={() => void openBookmark(item.url)}
+                                >
+                                  <span className="browser-bookmark-site-icon" aria-hidden="true">
+                                    <Icon path="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM3 12h18M12 3c4 5 4 13 0 18-4-5-4-13 0-18Z" />
+                                  </span>
+                                  <span className="browser-bookmark-label">
+                                    <strong>{item.title}</strong>
+                                    <small>{new URL(item.url).hostname}</small>
+                                  </span>
+                                </button>
+                                <details className="browser-bookmark-more">
+                                  <summary
+                                    aria-label={t(appLanguage, 'bookmarkOptions')}
+                                    title={t(appLanguage, 'bookmarkOptions')}
+                                  >
+                                    ⋮
+                                  </summary>
+                                  <div className="browser-bookmark-actions">
+                                    <button
+                                      disabled={bookmarkBusy}
+                                      type="button"
+                                      onClick={() => setBookmarkEdit({ ...item })}
+                                    >
+                                      {t(appLanguage, 'editBookmark')}
+                                    </button>
+                                    <button
+                                      disabled={bookmarkBusy}
+                                      type="button"
+                                      onClick={() => void updateBookmark('remove', item)}
+                                    >
+                                      {t(appLanguage, 'delete')}
+                                    </button>
+                                  </div>
+                                </details>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      {!bookmarks.some((item) =>
+                        `${item.title} ${item.url}`
+                          .toLocaleLowerCase()
+                          .includes(bookmarkQuery.toLocaleLowerCase())
+                      ) ? (
+                        <p>{t(appLanguage, bookmarkQuery ? 'noBookmarksMatch' : 'noBookmarks')}</p>
+                      ) : null}
+                    </div>
+                  </section>
+                ) : null}
                 {desktopLayout.browserAgentPanelOpen ? (
                   <aside aria-label={t(appLanguage, 'pageAssistant')} className="browser-agent">
                     <div

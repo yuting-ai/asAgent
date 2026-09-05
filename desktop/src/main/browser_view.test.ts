@@ -1,8 +1,11 @@
 import { EventEmitter } from 'node:events'
+import { runInNewContext } from 'node:vm'
 import type { Session, WebContentsViewConstructorOptions } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  BROWSER_EDITOR_OBSERVATION_SCRIPT,
+  BROWSER_FRAME_INDEX_SCRIPT,
   MAX_BROWSER_TABS,
   parseBrowserControlAction,
   parseBrowserTabId,
@@ -82,6 +85,8 @@ function createFakeView(options: WebContentsViewConstructorOptions): FakePageVie
     reload: vi.fn(),
     executeJavaScript,
     mainFrame,
+    focus: vi.fn(),
+    insertText: vi.fn(async () => undefined),
     sendInputEvent: vi.fn(),
     setWindowOpenHandler: vi.fn(),
     on: vi.fn((event: string, listener: (event: BrowserNavigationEvent, url?: string) => void) => {
@@ -112,6 +117,7 @@ function createFakeWindow(): BrowserHostWindow & {
 } {
   const children: BrowserPageView[] = []
   return {
+    isFocused: vi.fn(() => true),
     isDestroyed: vi.fn(() => false),
     contentView: {
       get children() {
@@ -581,28 +587,54 @@ describe('VisibleBrowser window.open', () => {
     view.webContents.getURL.mockReturnValue('https://example.com/outer')
     const child = createFakeFrame({
       url: 'https://embedded.example/private',
-      executeJavaScript: vi.fn(async () => ({
-        title: 'Embedded app',
-        text: 'Prediction Results',
-        structured_text: 'UG_at_PS: 13.21 wt.%\nUV_at_PS: 39.09 g H₂/L'
-      }))
+      executeJavaScript: vi.fn(async (script: string) =>
+        script === BROWSER_FRAME_INDEX_SCRIPT
+          ? 0
+          : {
+              title: 'Embedded app',
+              text: 'Prediction Results',
+              structured_text: 'UG_at_PS: 13.21 wt.%\nUV_at_PS: 39.09 g H₂/L'
+            }
+      )
     })
     Object.defineProperty(view.webContents.mainFrame, 'frames', {
       value: [child],
       configurable: true
     })
-    view.webContents.executeJavaScript.mockResolvedValue({
-      title: 'Outer page',
-      text: 'Hugging Face Space'
-    })
+    view.webContents.executeJavaScript.mockImplementation(async (script: string) =>
+      script.includes('const child = window.frames[')
+        ? true
+        : {
+            title: 'Outer page',
+            text: 'Hugging Face Space'
+          }
+    )
 
     await expect(browser.readCurrentPage('tab-1')).resolves.toEqual({
       title: 'Outer page',
       url: 'https://example.com/outer',
       text: 'Hugging Face Space\n\n[Embedded page content]\nPrediction Results\n\n[Structured table content]\nUG_at_PS: 13.21 wt.%\nUV_at_PS: 39.09 g H₂/L'
     })
-    expect(child.executeJavaScript).toHaveBeenCalledTimes(1)
-    expect(String(child.executeJavaScript.mock.calls[0]?.[0])).toContain('aria-valuetext')
+    expect(child.executeJavaScript).toHaveBeenCalledTimes(2)
+    expect(String(child.executeJavaScript.mock.calls[1]?.[0])).toContain('aria-valuetext')
+  })
+
+  it('does not extract hidden frame subtrees or a frame whose owner cannot be resolved', async () => {
+    const { browser, createView } = createBrowser()
+    browser.show(createFakeWindow(), bounds, 'tab-1')
+    const view = createView.mock.results[0].value as ReturnType<typeof createFakeView>
+    const nested = createFakeFrame({ executeJavaScript: vi.fn() })
+    const hidden = createFakeFrame({ executeJavaScript: vi.fn(async () => 0) })
+    Object.assign(hidden, { frames: [nested] })
+    const detached = createFakeFrame({ executeJavaScript: vi.fn(async () => -1) })
+    Object.assign(view.webContents.mainFrame, { frames: [hidden, detached] })
+    view.webContents.executeJavaScript.mockImplementation(async (script: string) =>
+      script.includes('const child = window.frames[') ? false : { title: 'Page', text: 'Visible' }
+    )
+    expect((await browser.readCurrentPage('tab-1')).text).toBe('Visible')
+    expect(hidden.executeJavaScript).toHaveBeenCalledTimes(1)
+    expect(detached.executeJavaScript).toHaveBeenCalledTimes(1)
+    expect(nested.executeJavaScript).not.toHaveBeenCalled()
   })
 
   it('rejects reads after the tab is no longer visible', async () => {
@@ -2223,5 +2255,189 @@ describe('VisibleBrowser window.open', () => {
         )
       })
     })
+  })
+})
+
+describe('native editor input', () => {
+  const bounds = { x: 0, y: 0, width: 800, height: 600 }
+  const url = 'https://docs.google.com/document/d/test/edit'
+  function setup(): { browser: VisibleBrowser; view: FakePageView; host: BrowserHostWindow } {
+    const { browser, createView } = createBrowser()
+    const host = createFakeWindow()
+    browser.show(host, bounds, 'editor')
+    const view = createView.mock.results[0].value as FakePageView
+    view.webContents.getURL.mockReturnValue(url)
+    view.webContents.executeJavaScript.mockResolvedValue(true)
+    return { browser, view, host }
+  }
+  it('inserts unicode through native input without a DOM replacement or save claim', async () => {
+    const { browser, view } = setup()
+    const result = await browser.inputCurrentPage('editor', {
+      url,
+      kind: 'text',
+      value: '你好\nSheet'
+    })
+    expect(view.webContents.insertText).toHaveBeenCalledWith('你好\nSheet')
+    expect(view.webContents.sendInputEvent).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ action: 'input_sent', verified: false })
+  })
+  it('sends Sheets text through native character events, including Unicode', async () => {
+    const { browser, view } = setup()
+    const sheetUrl = 'https://docs.google.com/spreadsheets/d/test/edit'
+    view.webContents.getURL.mockReturnValue(sheetUrl)
+    await browser.inputCurrentPage('editor', { url: sheetUrl, kind: 'text', value: '订单日期😀' })
+    expect(view.webContents.insertText).not.toHaveBeenCalled()
+    expect(view.webContents.sendInputEvent.mock.calls).toEqual(
+      Array.from('订单日期😀', (keyCode) => [{ type: 'char', keyCode }])
+    )
+  })
+  it('finds an editor inside an iframe without changing its selection', async () => {
+    const { browser, view } = setup()
+    view.webContents.executeJavaScript.mockResolvedValue(false)
+    const child = createFakeFrame({ executeJavaScript: vi.fn(async () => true) })
+    Object.assign(view.webContents.mainFrame, { frames: [child] })
+    await browser.inputCurrentPage('editor', { url, kind: 'text', value: 'cell value' })
+    expect(child.executeJavaScript).toHaveBeenCalledWith(BROWSER_EDITOR_OBSERVATION_SCRIPT)
+    expect(view.webContents.insertText).toHaveBeenCalledWith('cell value')
+  })
+
+  it('returns focus changes and unchanged text without claiming persistence', async () => {
+    const { browser, view } = setup()
+    let observed = 0
+    view.webContents.executeJavaScript.mockImplementation(async (script: string) => {
+      if (script !== BROWSER_EDITOR_OBSERVATION_SCRIPT) return true
+      observed += 1
+      return {
+        focused: { name: observed === 1 ? 'Name box' : 'Formula bar', text: 'A1' },
+        controls: [],
+        statuses: []
+      }
+    })
+    const result = await browser.inputCurrentPage('editor', { url, kind: 'key', value: 'Enter' })
+    expect(result.observation).toMatchObject({ changed: true, status: 'observed' })
+    expect(result.observation.after?.frames[0].state).toMatchObject({
+      focused: { name: 'Formula bar' }
+    })
+    expect(result.verified).toBe(false)
+  })
+  it('reports unchanged observations explicitly', async () => {
+    const { browser, view } = setup()
+    view.webContents.executeJavaScript.mockImplementation(async (script: string) =>
+      script === BROWSER_EDITOR_OBSERVATION_SCRIPT
+        ? { focused: { name: 'Name box' }, controls: [], statuses: [] }
+        : true
+    )
+    const result = await browser.inputCurrentPage('editor', { url, kind: 'key', value: 'Enter' })
+    expect(result.observation.changed).toBe(false)
+  })
+  it('keeps dispatched input successful if observation fails afterward', async () => {
+    const { browser, view } = setup()
+    let reads = 0
+    view.webContents.executeJavaScript.mockImplementation(async (script: string) => {
+      if (script !== BROWSER_EDITOR_OBSERVATION_SCRIPT) return true
+      if (++reads > 1) throw new Error('frame destroyed')
+      return { focused: null, controls: [], statuses: [] }
+    })
+    const result = await browser.inputCurrentPage('editor', { url, kind: 'text', value: 'once' })
+    expect(result.observation).toMatchObject({ after: null, status: 'unavailable', changed: null })
+    expect(view.webContents.insertText).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends paired editing keys', async () => {
+    const { browser, view } = setup()
+    await browser.inputCurrentPage('editor', { url, kind: 'key', value: 'Shift+Enter' })
+    expect(view.webContents.sendInputEvent.mock.calls).toEqual([
+      [{ type: 'keyDown', keyCode: 'Enter', modifiers: ['shift'] }],
+      [{ type: 'char', keyCode: '\r', modifiers: ['shift'] }],
+      [{ type: 'keyUp', keyCode: 'Enter', modifiers: ['shift'] }]
+    ])
+  })
+  it('rejects missing editable focus and unsupported shortcuts', async () => {
+    const { browser, view } = setup()
+    view.webContents.executeJavaScript.mockResolvedValue(false)
+    await expect(
+      browser.inputCurrentPage('editor', { url, kind: 'text', value: 'secret' })
+    ).rejects.toThrow('not editable')
+    await expect(
+      browser.inputCurrentPage('editor', { url, kind: 'key', value: 'Meta+L' })
+    ).rejects.toThrow('not editable')
+    expect(view.webContents.insertText).not.toHaveBeenCalled()
+    expect(view.webContents.sendInputEvent).not.toHaveBeenCalled()
+  })
+  it('rejects a switched tab or navigated page during focus inspection', async () => {
+    const { browser, view } = setup()
+    view.webContents.executeJavaScript.mockImplementation(async () => {
+      browser.show(createFakeWindow(), bounds, 'other')
+      return true
+    })
+    await expect(
+      browser.inputCurrentPage('editor', { url, kind: 'text', value: 'no' })
+    ).rejects.toThrow()
+    expect(view.webContents.insertText).not.toHaveBeenCalled()
+  })
+  it('rejects background windows and URL mismatches', async () => {
+    const { browser, view, host } = setup()
+    await expect(
+      browser.inputCurrentPage('editor', { url: url + '?other', kind: 'text', value: 'no' })
+    ).rejects.toThrow('page changed')
+    vi.spyOn(host, 'isFocused').mockReturnValue(false)
+    await expect(
+      browser.inputCurrentPage('editor', { url, kind: 'text', value: 'no' })
+    ).rejects.toThrow('not visible')
+    expect(view.webContents.insertText).not.toHaveBeenCalled()
+  })
+})
+
+describe('editor observation extraction', () => {
+  it('bounds editor text and redacts password values while retaining name-box identity', () => {
+    class Element {
+      tagName = 'INPUT'
+      id = 't-name-box'
+      className = ''
+      type = 'text'
+      value = 'A1:E10'
+      selectionStart = 0
+      selectionEnd = 6
+      disabled = false
+      readOnly = false
+      getAttribute(name: string): string | null {
+        return name === 'aria-label' ? 'Name box' : null
+      }
+      getClientRects(): number[] {
+        return [1]
+      }
+    }
+    class Textarea extends Element {}
+    const el = new Element()
+    const document = {
+      hasFocus: () => true,
+      activeElement: el,
+      getElementById: () => null,
+      querySelectorAll: (selector: string) => (selector.startsWith('input') ? [el] : [])
+    }
+    const context = {
+      document,
+      HTMLElement: Element,
+      HTMLInputElement: Element,
+      HTMLTextAreaElement: Textarea,
+      getComputedStyle: () => ({ visibility: 'visible', display: 'block' })
+    }
+    const observe = (): {
+      focused: { name: string; text?: string; redacted: boolean; textTruncated?: boolean }
+      controls: unknown[]
+    } => runInNewContext(BROWSER_EDITOR_OBSERVATION_SCRIPT, context)
+    expect(observe().focused).toMatchObject({
+      name: 'Name box',
+      text: 'A1:E10',
+      selection: { start: 0, end: 6 }
+    })
+    el.value = 'x'.repeat(700)
+    expect(observe().focused.text).toHaveLength(500)
+    expect(observe().focused.textTruncated).toBe(true)
+    el.type = 'password'
+    const state = observe()
+    expect(state.focused.redacted).toBe(true)
+    expect(state.focused.text).toBeUndefined()
+    expect(state.controls).toEqual([])
   })
 })

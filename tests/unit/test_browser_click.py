@@ -261,6 +261,7 @@ async def test_browser_click_registers_only_for_bound_browser_runs() -> None:
     )
     assert browser_registry.get("browser.wait").definition.tool_id == "browser.wait"
     assert browser_registry.get("browser.fill").definition.tool_id == "browser.fill"
+    assert browser_registry.get("browser.input").definition.tool_id == "browser.input"
     assert browser_registry.get("browser.select").definition.tool_id == "browser.select"
 
     unbound_registry = ToolRegistry()

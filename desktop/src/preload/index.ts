@@ -320,6 +320,13 @@ const desktopBridge = {
     ipcRenderer.invoke('desktop:close-browser-tab', tabId),
   controlBrowser: (tabId: string, action: 'back' | 'forward' | 'reload' | 'home'): Promise<void> =>
     ipcRenderer.invoke('desktop:control-browser', tabId, action),
+  listBrowserBookmarks: (): Promise<Array<{ url: string; title: string }>> =>
+    ipcRenderer.invoke('desktop:list-browser-bookmarks'),
+  updateBrowserBookmark: (
+    action: 'save' | 'remove',
+    bookmark: { url: string; title: string }
+  ): Promise<Array<{ url: string; title: string }>> =>
+    ipcRenderer.invoke('desktop:update-browser-bookmark', action, bookmark),
   getBrowserSession: (): Promise<BrowserSessionSnapshot> =>
     ipcRenderer.invoke('desktop:get-browser-session'),
   setBrowserTabConversation: (tabId: string, conversationId: string | null): Promise<void> =>
