@@ -8,10 +8,10 @@ from asagent.tools.browser_input import BrowserInputTool
 
 
 @pytest.mark.asyncio
-async def test_native_input_binds_tab_and_reports_dispatch_only():
+async def test_native_input_binds_tab_and_reports_dispatch_only() -> None:
     requests = []
 
-    async def handle(request):
+    async def handle(request: httpx.Request) -> httpx.Response:
         requests.append(json.loads(request.content))
         return httpx.Response(
             200,
